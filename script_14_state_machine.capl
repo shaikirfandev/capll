@@ -1,0 +1,304 @@
+/*
+ * Script 14: State Machine Implementation
+ * 
+ * Description:
+ *   Demonstrates a state machine pattern for handling complex
+ *   system state transitions with proper validation and logging.
+ * 
+ * Key Concepts:
+ *   - State definitions (constants)
+ *   - State transitions
+ *   - State-specific actions
+ *   - Entry/exit actions for states
+ *   - Transition validation
+ */
+
+// State definitions
+#define STATE_INIT        0
+#define STATE_IDLE        1
+#define STATE_RUNNING     2
+#define STATE_PAUSED      3
+#define STATE_ERROR       4
+#define STATE_SHUTDOWN    5
+
+// Global variables
+int gCurrentState = STATE_INIT;
+int gPreviousState = STATE_INIT;
+timer gStateTimer;
+int gErrorCount = 0;
+int gRunTime = 0;
+
+// Function to get state name
+void PrintStateName(int state) {
+  switch (state) {
+    case STATE_INIT:
+      Write("INIT");
+      break;
+    case STATE_IDLE:
+      Write("IDLE");
+      break;
+    case STATE_RUNNING:
+      Write("RUNNING");
+      break;
+    case STATE_PAUSED:
+      Write("PAUSED");
+      break;
+    case STATE_ERROR:
+      Write("ERROR");
+      break;
+    case STATE_SHUTDOWN:
+      Write("SHUTDOWN");
+      break;
+    default:
+      Write("UNKNOWN");
+      break;
+  }
+}
+
+// Perform state transition with validation and logging
+void TransitionToState(int newState) {
+  // Check if transition is valid
+  int isValidTransition = 0;
+  
+  switch (gCurrentState) {
+    case STATE_INIT:
+      if (newState == STATE_IDLE || newState == STATE_ERROR) {
+        isValidTransition = 1;
+      }
+      break;
+      
+    case STATE_IDLE:
+      if (newState == STATE_RUNNING || newState == STATE_ERROR || newState == STATE_SHUTDOWN) {
+        isValidTransition = 1;
+      }
+      break;
+      
+    case STATE_RUNNING:
+      if (newState == STATE_PAUSED || newState == STATE_ERROR || newState == STATE_IDLE) {
+        isValidTransition = 1;
+      }
+      break;
+      
+    case STATE_PAUSED:
+      if (newState == STATE_RUNNING || newState == STATE_IDLE || newState == STATE_ERROR) {
+        isValidTransition = 1;
+      }
+      break;
+      
+    case STATE_ERROR:
+      if (newState == STATE_IDLE || newState == STATE_SHUTDOWN) {
+        isValidTransition = 1;
+      }
+      break;
+      
+    case STATE_SHUTDOWN:
+      // No transitions from SHUTDOWN
+      isValidTransition = 0;
+      break;
+  }
+  
+  if (!isValidTransition) {
+    Write("! INVALID TRANSITION: ");
+    PrintStateName(gCurrentState);
+    Write(" → ");
+    PrintStateName(newState);
+    Write("");
+    return;
+  }
+  
+  // Perform state exit actions
+  ExitState(gCurrentState);
+  
+  // Update states
+  gPreviousState = gCurrentState;
+  gCurrentState = newState;
+  
+  // Perform state entry actions
+  EnterState(gCurrentState);
+  
+  // Log transition
+  Write("STATE TRANSITION: ");
+  PrintStateName(gPreviousState);
+  Write(" → ");
+  PrintStateName(gCurrentState);
+  Write("");
+}
+
+// Exit actions for each state
+void ExitState(int state) {
+  switch (state) {
+    case STATE_INIT:
+      Write("  [EXIT INIT] Initialization complete");
+      break;
+      
+    case STATE_IDLE:
+      Write("  [EXIT IDLE] Leaving idle state");
+      break;
+      
+    case STATE_RUNNING:
+      Write("  [EXIT RUNNING] Stopping operations");
+      CancelTimer(gStateTimer);
+      Write("  [EXIT RUNNING] Runtime: %d seconds", gRunTime);
+      gRunTime = 0;
+      break;
+      
+    case STATE_PAUSED:
+      Write("  [EXIT PAUSED] Resuming from pause");
+      break;
+      
+    case STATE_ERROR:
+      Write("  [EXIT ERROR] Attempting recovery");
+      gErrorCount = 0;
+      break;
+  }
+}
+
+// Entry actions for each state
+void EnterState(int state) {
+  switch (state) {
+    case STATE_INIT:
+      Write("  [ENTER INIT] System initializing");
+      break;
+      
+    case STATE_IDLE:
+      Write("  [ENTER IDLE] System ready for commands");
+      Write("  Press 'R' to run, 'E' for error, 'S' to shutdown");
+      break;
+      
+    case STATE_RUNNING:
+      Write("  [ENTER RUNNING] Starting operations");
+      Write("  Press 'P' to pause, 'E' for error, 'I' to idle");
+      SetTimer(gStateTimer, 1000);  // Timer for monitoring
+      gRunTime = 0;
+      break;
+      
+    case STATE_PAUSED:
+      Write("  [ENTER PAUSED] System paused");
+      Write("  Press 'R' to resume, 'I' to return idle");
+      CancelTimer(gStateTimer);
+      break;
+      
+    case STATE_ERROR:
+      Write("  [ENTER ERROR] Error detected!");
+      gErrorCount++;
+      Write("  Error count: %d", gErrorCount);
+      Write("  Press 'I' to return idle, 'S' to shutdown");
+      CancelTimer(gStateTimer);
+      break;
+      
+    case STATE_SHUTDOWN:
+      Write("  [ENTER SHUTDOWN] System shutting down");
+      CancelTimer(gStateTimer);
+      break;
+  }
+}
+
+on start {
+  Write("========== State Machine Demo ==========");
+  Write("");
+  Write("State Machine initialized in ");
+  PrintStateName(gCurrentState);
+  Write(" state");
+  Write("");
+  
+  // Initialize to IDLE
+  TransitionToState(STATE_IDLE);
+}
+
+// Timer for monitoring RUNNING state
+on timer gStateTimer {
+  gRunTime++;
+  
+  if (gRunTime % 2 == 0) {
+    Write("[RUNNING] Time elapsed: %d seconds", gRunTime);
+  }
+  
+  // Auto-error after 5 seconds
+  if (gRunTime >= 5) {
+    Write("[AUTO-ERROR] Automatic error triggered");
+    TransitionToState(STATE_ERROR);
+  }
+}
+
+// Keyboard commands for state transitions
+on key 'R' {
+  Write("");
+  if (gCurrentState == STATE_IDLE) {
+    TransitionToState(STATE_RUNNING);
+  } else if (gCurrentState == STATE_PAUSED) {
+    TransitionToState(STATE_RUNNING);
+  } else {
+    Write("! Cannot transition to RUNNING from current state");
+  }
+  Write("");
+}
+
+on key 'P' {
+  Write("");
+  if (gCurrentState == STATE_RUNNING) {
+    TransitionToState(STATE_PAUSED);
+  } else {
+    Write("! Can only pause from RUNNING state");
+  }
+  Write("");
+}
+
+on key 'I' {
+  Write("");
+  if (gCurrentState == STATE_RUNNING || gCurrentState == STATE_PAUSED || gCurrentState == STATE_ERROR) {
+    TransitionToState(STATE_IDLE);
+  } else {
+    Write("! Cannot return to IDLE from current state");
+  }
+  Write("");
+}
+
+on key 'E' {
+  Write("");
+  Write("[MANUAL ERROR] User triggered error");
+  TransitionToState(STATE_ERROR);
+  Write("");
+}
+
+on key 'S' {
+  Write("");
+  TransitionToState(STATE_SHUTDOWN);
+  Write("");
+}
+
+on key 'H' {
+  Write("");
+  Write("========== Keyboard Controls ==========");
+  Write("R - Run (from IDLE or PAUSED)");
+  Write("P - Pause (from RUNNING)");
+  Write("I - Idle (from RUNNING, PAUSED, or ERROR)");
+  Write("E - Trigger Error");
+  Write("S - Shutdown");
+  Write("H - Show this help");
+  Write("C - Show current state");
+  Write("");
+}
+
+on key 'C' {
+  Write("");
+  Write("Current State: ");
+  PrintStateName(gCurrentState);
+  Write("");
+  Write("Error Count: %d", gErrorCount);
+  if (gCurrentState == STATE_RUNNING) {
+    Write("Running Time: %d seconds", gRunTime);
+  }
+  Write("");
+}
+
+on stop {
+  Write("");
+  Write("========== State Machine Stopped ==========");
+  Write("Final State: ");
+  PrintStateName(gCurrentState);
+  Write("");
+  Write("Statistics:");
+  Write("  Errors encountered: %d", gErrorCount);
+  
+  CancelTimer(gStateTimer);
+}

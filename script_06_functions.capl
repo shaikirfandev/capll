@@ -1,0 +1,120 @@
+/*
+ * Script 06: Functions - Definition, Parameters, Return Values
+ * 
+ * Description:
+ *   Demonstrates function definition, parameters (value and reference),
+ *   return values, and function calls.
+ * 
+ * Key Concepts:
+ *   - Function declaration and definition
+ *   - Parameters: pass by value
+ *   - Parameters: pass by reference (arrays)
+ *   - Return values
+ *   - Function prototypes
+ */
+
+// Function prototypes (optional but recommended)
+int Add(int a, int b);
+int Multiply(int a, int b);
+void PrintArray(int arr[], int size);
+void FillArray(int arr[], int size, int value);
+int FindMax(int arr[], int size);
+int Factorial(int n);
+
+on start {
+  Write("========== Simple Functions ==========");
+  Write("");
+  
+  int result1 = Add(10, 5);
+  Write("Add(10, 5) = %d", result1);
+  
+  int result2 = Multiply(4, 7);
+  Write("Multiply(4, 7) = %d", result2);
+  Write("");
+  
+  Write("========== Function with Array Parameter ==========");
+  int myArray[5] = {10, 20, 30, 40, 50};
+  Write("Original array:");
+  PrintArray(myArray, 5);
+  Write("");
+  
+  Write("========== Function that Modifies Array ==========");
+  FillArray(myArray, 5, 100);
+  Write("After FillArray(myArray, 5, 100):");
+  PrintArray(myArray, 5);
+  Write("");
+  
+  Write("========== Function Returning Array Value ==========");
+  int numbers[10] = {5, 12, 3, 45, 22, 8, 67, 90, 11, 34};
+  int maxValue = FindMax(numbers, 10);
+  Write("Maximum value in array: %d", maxValue);
+  Write("");
+  
+  Write("========== Recursive Function ==========");
+  Write("Factorial calculations:");
+  for (int i = 0; i <= 6; i++) {
+    int fact = Factorial(i);
+    Write("Factorial(%d) = %d", i, fact);
+  }
+  Write("");
+  
+  Write("========== Multiple Return Examples ==========");
+  
+  // Function returning different values
+  int test1 = IsEven(4);
+  Write("IsEven(4) = %d (1 = true)", test1);
+  
+  int test2 = IsEven(7);
+  Write("IsEven(7) = %d (1 = true)", test2);
+}
+
+// ===== Function Implementations =====
+
+int Add(int a, int b) {
+  return a + b;
+}
+
+int Multiply(int a, int b) {
+  return a * b;
+}
+
+void PrintArray(int arr[], int size) {
+  Write("  Array contents:");
+  for (int i = 0; i < size; i++) {
+    Write("    arr[%d] = %d", i, arr[i]);
+  }
+}
+
+void FillArray(int arr[], int size, int value) {
+  for (int i = 0; i < size; i++) {
+    arr[i] = value;
+  }
+}
+
+int FindMax(int arr[], int size) {
+  int max = arr[0];
+  
+  for (int i = 1; i < size; i++) {
+    if (arr[i] > max) {
+      max = arr[i];
+    }
+  }
+  
+  return max;
+}
+
+int Factorial(int n) {
+  if (n <= 1) {
+    return 1;
+  } else {
+    return n * Factorial(n - 1);
+  }
+}
+
+int IsEven(int num) {
+  if (num % 2 == 0) {
+    return 1;  // true
+  } else {
+    return 0;  // false
+  }
+}

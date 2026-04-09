@@ -1,0 +1,119 @@
+/*
+ * Script 04: Control Flow - If/Else and Switch
+ * 
+ * Description:
+ *   Demonstrates conditional statements including if-else chains
+ *   and switch statements for branching logic.
+ * 
+ * Key Concepts:
+ *   - if statement
+ *   - if-else chains
+ *   - switch statement with case and default
+ *   - break statement in switch
+ */
+
+void CheckAge(int age) {
+  Write("Checking age: %d", age);
+  
+  if (age < 13) {
+    Write("  → Child");
+  } else if (age < 18) {
+    Write("  → Teenager");
+  } else if (age < 65) {
+    Write("  → Adult");
+  } else {
+    Write("  → Senior");
+  }
+}
+
+void CheckStatus(int code) {
+  Write("Status code: %d", code);
+  
+  switch (code) {
+    case 0:
+      Write("  → Idle");
+      break;
+    case 1:
+      Write("  → Running");
+      break;
+    case 2:
+      Write("  → Error");
+      break;
+    case 3:
+    case 4:
+      Write("  → Warning (shared handling)");
+      break;
+    default:
+      Write("  → Unknown");
+      break;
+  }
+}
+
+on start {
+  Write("========== If-Else Examples ==========");
+  Write("");
+  
+  CheckAge(10);
+  CheckAge(15);
+  CheckAge(30);
+  CheckAge(70);
+  Write("");
+  
+  Write("========== Switch Examples ==========");
+  Write("");
+  
+  CheckStatus(0);
+  CheckStatus(1);
+  CheckStatus(2);
+  CheckStatus(3);
+  CheckStatus(4);
+  CheckStatus(5);
+  Write("");
+  
+  Write("========== Nested If-Else ==========");
+  int temperature = 25;
+  int humidity = 60;
+  
+  Write("Temperature: %d°C, Humidity: %d%%", temperature, humidity);
+  
+  if (temperature > 30) {
+    if (humidity > 70) {
+      Write("Hot and humid - uncomfortable");
+    } else {
+      Write("Hot and dry - bearable");
+    }
+  } else if (temperature > 15) {
+    if (humidity > 70) {
+      Write("Warm and humid - pleasant");
+    } else {
+      Write("Warm and dry - pleasant");
+    }
+  } else {
+    Write("Cold - wear a jacket");
+  }
+  Write("");
+  
+  Write("========== Complex Switch ==========");
+  int mode = 2;
+  
+  switch (mode) {
+    case 0:
+      Write("Mode 0: Configure system");
+      break;
+    case 1:
+      Write("Mode 1: Start measurement");
+      break;
+    case 2:
+      Write("Mode 2: Monitor sensors");
+      break;
+    case 3:
+      Write("Mode 3: Record data");
+      break;
+    case 4:
+      Write("Mode 4: Analyze results");
+      break;
+    default:
+      Write("Mode %d: Invalid", mode);
+      break;
+  }
+}

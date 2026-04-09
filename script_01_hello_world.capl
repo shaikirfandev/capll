@@ -1,0 +1,23 @@
+/*
+ * Script 01: Hello World - First CAPL Script
+ * 
+ * Description:
+ *   This is the simplest CAPL script demonstrating basic output
+ *   and the on start event handler.
+ * 
+ * Key Concepts:
+ *   - Write() function for output
+ *   - on start event handler
+ *   - on stop event handler
+ */
+
+on start {
+  Write("=== CAPL Script Started ===");
+  Write("Hello, CAPL World!");
+  Write("This script demonstrates basic output functionality");
+}
+
+on stop {
+  Write("=== CAPL Script Stopped ===");
+  Write("Goodbye!");
+}

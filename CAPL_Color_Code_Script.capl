@@ -1,0 +1,608 @@
+// ======================================================================
+// CAPL Script - Color Coded Output for Syntax Highlighting
+// ======================================================================
+// This script demonstrates how to create color-coded output in CANoe
+// Trace window using ANSI escape codes and formatting techniques
+// ======================================================================
+
+// Color definitions using ANSI escape codes
+#define COLOR_RESET      ""
+#define COLOR_BOLD       ""  // For emphasis
+#define COLOR_DIM        ""
+
+// Since CANoe trace doesn't support full ANSI colors, we use:
+// - ALL CAPS for keywords
+// - [keyword] brackets for syntax elements
+// - Indentation for structure
+
+// ======================================================================
+// SCENARIO 1: Color-Coded Message Reception Code
+// ======================================================================
+
+void DisplayScenario1() {
+  Write("");
+  Write("╔══════════════════════════════════════════════════════════════╗");
+  Write("║ SCENARIO 1: MESSAGE RECEPTION & DATA EXTRACTION (Beginner)   ║");
+  Write("╚══════════════════════════════════════════════════════════════╝");
+  Write("");
+  
+  // KEYWORDS - displayed in ALL CAPS with brackets
+  Write("┌─ [GLOBAL VARIABLES] ─────────────────────────────────────────┐");
+  Write("│ INT gValidMessages = 0;");
+  Write("│ INT gInvalidMessages = 0;");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  // CONSTANTS - displayed with # prefix
+  Write("┌─ [CONSTANTS] ────────────────────────────────────────────────┐");
+  Write("│ #DEFINE ENGINE_MSG_ID 0x100");
+  Write("│ #DEFINE ENGINE_MSG_DLC 8");
+  Write("│ #DEFINE TEMP_OFFSET (-40)");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  // FUNCTIONS - displayed with arrow prefix
+  Write("┌─ [FUNCTION] ─────────────────────────────────────────────────┐");
+  Write("│ ➜ INT ExtractRPM(BYTE data[])");
+  Write("│   {");
+  Write("│     RETURN (data[0] << 8) | data[1];");
+  Write("│   }");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  // EVENT HANDLERS - displayed with @ prefix
+  Write("┌─ [EVENT HANDLER] ────────────────────────────────────────────┐");
+  Write("│ @ ON MESSAGE ENGINE_MSG_ID");
+  Write("│   {");
+  Write("│     IF (this.DLC != ENGINE_MSG_DLC)");
+  Write("│     {");
+  Write("│       WRITE(\"Error: Invalid DLC\");");
+  Write("│       RETURN;");
+  Write("│     }");
+  Write("│     ProcessMessage();");
+  Write("│   }");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+}
+
+// ======================================================================
+// SCENARIO 2: Color-Coded Message Transmission
+// ======================================================================
+
+void DisplayScenario2() {
+  Write("");
+  Write("╔══════════════════════════════════════════════════════════════╗");
+  Write("║ SCENARIO 2: MESSAGE TRANSMISSION & VALIDATION (Intermediate)║");
+  Write("╚══════════════════════════════════════════════════════════════╝");
+  Write("");
+  
+  Write("┌─ [DATA TYPES] ────────────────────────────────────────────────┐");
+  Write("│ BYTE - 8-bit unsigned (0-255)");
+  Write("│ WORD - 16-bit unsigned (0-65535)");
+  Write("│ INT  - 32-bit signed");
+  Write("│ DWORD - 32-bit unsigned");
+  Write("│ FLOAT - 32-bit floating point");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [MESSAGE STRUCTURE] ─────────────────────────────────────────┐");
+  Write("│ MESSAGE msg;");
+  Write("│ msg.ID = 0x200;           [Identifier]");
+  Write("│ msg.DLC = 8;              [Data Length Code]");
+  Write("│ msg.Data[0] = 0x42;       [Byte 0]");
+  Write("│ msg.Data[1] = 0x43;       [Byte 1]");
+  Write("│ ... (repeats for all 8 bytes)");
+  Write("│ SEND(msg);                [Transmission]");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [OPERATORS] ─────────────────────────────────────────────────┐");
+  Write("│ Arithmetic:  + - * / %    [Addition, Subtraction, etc]");
+  Write("│ Bitwise:     & | ^ << >>  [AND, OR, XOR, Shift]");
+  Write("│ Logical:     && || !      [AND, OR, NOT]");
+  Write("│ Comparison:  == != < > <= >= [Equality, Relational]");
+  Write("│ Assignment:  = += -= *= /= [Direct, Compound]");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+}
+
+// ======================================================================
+// SCENARIO 3: Color-Coded Timer Operations
+// ======================================================================
+
+void DisplayScenario3() {
+  Write("");
+  Write("╔══════════════════════════════════════════════════════════════╗");
+  Write("║ SCENARIO 3: TIMER-BASED MONITORING (Intermediate)           ║");
+  Write("╚══════════════════════════════════════════════════════════════╝");
+  Write("");
+  
+  Write("┌─ [TIMER DECLARATION] ────────────────────────────────────────┐");
+  Write("│ TIMER gMonitorTimer;     [Name: gMonitorTimer]");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [TIMER MANAGEMENT] ─────────────────────────────────────────┐");
+  Write("│ SetTimer(gMonitorTimer, 1000);  [Start/Restart - 1000ms]");
+  Write("│ CancelTimer(gMonitorTimer);     [Stop]");
+  Write("│ GetTime();                      [Current time in ms]");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [TIMER HANDLER] ────────────────────────────────────────────┐");
+  Write("│ @ ON TIMER gMonitorTimer");
+  Write("│   {");
+  Write("│     DWORD now = GetTime();");
+  Write("│     INT elapsed = now - gStartTime;");
+  Write("│     IF (elapsed > TIMEOUT_MS)");
+  Write("│     {");
+  Write("│       WRITE(\"Timeout detected!\");");
+  Write("│       HandleTimeout();");
+  Write("│     }");
+  Write("│   }");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+}
+
+// ======================================================================
+// SCENARIO 4: Color-Coded State Machine
+// ======================================================================
+
+void DisplayScenario4() {
+  Write("");
+  Write("╔══════════════════════════════════════════════════════════════╗");
+  Write("║ SCENARIO 4: STATE MACHINE PATTERN (Advanced)                 ║");
+  Write("╚══════════════════════════════════════════════════════════════╝");
+  Write("");
+  
+  Write("┌─ [STATE DEFINITIONS] ────────────────────────────────────────┐");
+  Write("│ #DEFINE STATE_IDLE           0  [Waiting state]");
+  Write("│ #DEFINE STATE_WAIT_RESPONSE  1  [Waiting for response]");
+  Write("│ #DEFINE STATE_PROCESS        2  [Processing data]");
+  Write("│ #DEFINE STATE_TIMEOUT_RECOVER 3 [Recovery mode]");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [STATE TRANSITION] ─────────────────────────────────────────┐");
+  Write("│ STATE_IDLE");
+  Write("│   |");
+  Write("│   +---> STATE_WAIT_RESPONSE (SendRequest)");
+  Write("│           |");
+  Write("│           +---> STATE_PROCESS (OnResponse)");
+  Write("│           |       |");
+  Write("│           |       +---> STATE_IDLE (Complete)");
+  Write("│           |");
+  Write("│           +---> STATE_TIMEOUT_RECOVER (OnTimeout)");
+  Write("│                   |");
+  Write("│                   +---> STATE_WAIT_RESPONSE (Retry)");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [TRANSITION FUNCTION] ──────────────────────────────────────┐");
+  Write("│ VOID TransitionToState(INT newState)");
+  Write("│ {");
+  Write("│   IF (ValidTransition(gCurrentState, newState))");
+  Write("│   {");
+  Write("│     gCurrentState = newState;");
+  Write("│     ExecuteStateSetup(newState);");
+  Write("│   }");
+  Write("│ }");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+}
+
+// ======================================================================
+// SCENARIO 5: Color-Coded Data Validation
+// ======================================================================
+
+void DisplayScenario5() {
+  Write("");
+  Write("╔══════════════════════════════════════════════════════════════╗");
+  Write("║ SCENARIO 5: DATA VALIDATION & ERROR HANDLING (Intermediate) ║");
+  Write("╚══════════════════════════════════════════════════════════════╝");
+  Write("");
+  
+  Write("┌─ [VALIDATION RANGES] ────────────────────────────────────────┐");
+  Write("│ Temperature:  -40°C to 125°C   [INT]");
+  Write("│ Pressure:      0 PSI to 100 PSI [INT]");
+  Write("│ Speed:         0 km/h to 300 km/h [INT]");
+  Write("│ DLC:           0 to 8 bytes     [BYTE]");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [VALIDATION FUNCTION] ──────────────────────────────────────┐");
+  Write("│ INT ValidateTemperature(BYTE rawValue)");
+  Write("│ {");
+  Write("│   INT temp = (INT)rawValue - 40;");
+  Write("│   IF (temp < TEMP_MIN || temp > TEMP_MAX)");
+  Write("│   {");
+  Write("│     LogError(\"Temperature out of range\");");
+  Write("│     RETURN 0;  [Invalid]");
+  Write("│   }");
+  Write("│   IF (abs(temp - gLastTemp) > MAX_CHANGE)");
+  Write("│   {");
+  Write("│     LogError(\"Temperature change too large\");");
+  Write("│     RETURN 0;  [Invalid]");
+  Write("│   }");
+  Write("│   gLastTemp = temp;");
+  Write("│   RETURN 1;  [Valid]");
+  Write("│ }");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+}
+
+// ======================================================================
+// SCENARIO 6: Color-Coded Pattern Detection
+// ======================================================================
+
+void DisplayScenario6() {
+  Write("");
+  Write("╔══════════════════════════════════════════════════════════════╗");
+  Write("║ SCENARIO 6: PATTERN DETECTION (Advanced)                     ║");
+  Write("╚══════════════════════════════════════════════════════════════╝");
+  Write("");
+  
+  Write("┌─ [STARTUP PATTERN] ──────────────────────────────────────────┐");
+  Write("│ Step 1: 0x100 Data[0] = 0x00");
+  Write("│         Time: T0");
+  Write("│         |");
+  Write("│ Step 2: 0x100 Data[0] = 0x01");
+  Write("│         Time: T0 + (within 200ms)");
+  Write("│         |");
+  Write("│ Step 3: 0x200 Data[0] = 0x01");
+  Write("│         Time: T0 + (within 500ms total)");
+  Write("│         |");
+  Write("│     PATTERN DETECTED ✓");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [PATTERN STATE MACHINE] ────────────────────────────────────┐");
+  Write("│ gStartupState = PATTERN_IDLE");
+  Write("│   |");
+  Write("│   +---> PATTERN_STEP1 (First message detected)");
+  Write("│           |");
+  Write("│           +---> PATTERN_STEP2 (Second message within time)");
+  Write("│                   |");
+  Write("│                   +---> PATTERN_STEP3 (Third message arrives)");
+  Write("│                           |");
+  Write("│                           +---> PATTERN COMPLETE ✓");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+}
+
+// ======================================================================
+// SCENARIO 7: Color-Coded Control Flow
+// ======================================================================
+
+void DisplayScenario7() {
+  Write("");
+  Write("╔══════════════════════════════════════════════════════════════╗");
+  Write("║ SCENARIO 7: CONTROL FLOW STRUCTURES (Basic)                  ║");
+  Write("╚══════════════════════════════════════════════════════════════╝");
+  Write("");
+  
+  Write("┌─ [IF-ELSE STATEMENT] ────────────────────────────────────────┐");
+  Write("│ IF (condition)");
+  Write("│ {");
+  Write("│   // Execute if TRUE");
+  Write("│ }");
+  Write("│ ELSE IF (anotherCondition)");
+  Write("│ {");
+  Write("│   // Execute if first FALSE, this TRUE");
+  Write("│ }");
+  Write("│ ELSE");
+  Write("│ {");
+  Write("│   // Execute if all above FALSE");
+  Write("│ }");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [SWITCH STATEMENT] ─────────────────────────────────────────┐");
+  Write("│ SWITCH (value)");
+  Write("│ {");
+  Write("│   CASE 0:");
+  Write("│     Action1();");
+  Write("│     BREAK;");
+  Write("│   CASE 1:");
+  Write("│   CASE 2:");
+  Write("│     Action2();");
+  Write("│     BREAK;");
+  Write("│   DEFAULT:");
+  Write("│     ActionDefault();");
+  Write("│     BREAK;");
+  Write("│ }");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [LOOP STRUCTURES] ──────────────────────────────────────────┐");
+  Write("│ FOR (INT i = 0; i < 10; i++)      [For Loop]");
+  Write("│ {");
+  Write("│   ProcessElement(i);");
+  Write("│ }");
+  Write("│");
+  Write("│ WHILE (condition)                  [While Loop]");
+  Write("│ {");
+  Write("│   DoWork();");
+  Write("│ }");
+  Write("│");
+  Write("│ DO                                 [Do-While Loop]");
+  Write("│ {");
+  Write("│   DoWork();");
+  Write("│ } WHILE (condition);");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+}
+
+// ======================================================================
+// SCENARIO 8: Color-Coded Built-in Functions
+// ======================================================================
+
+void DisplayScenario8() {
+  Write("");
+  Write("╔══════════════════════════════════════════════════════════════╗");
+  Write("║ SCENARIO 8: BUILT-IN FUNCTIONS REFERENCE                     ║");
+  Write("╚══════════════════════════════════════════════════════════════╝");
+  Write("");
+  
+  Write("┌─ [OUTPUT FUNCTIONS] ─────────────────────────────────────────┐");
+  Write("│ WRITE(message)                    [Log to trace]");
+  Write("│ WRITE(format, value1, value2)     [Formatted output]");
+  Write("│ Format specifiers:");
+  Write("│   %d     - Integer");
+  Write("│   %X, %x - Hexadecimal");
+  Write("│   %f     - Float");
+  Write("│   %s     - String");
+  Write("│   %02X   - Hex with padding");
+  Write("│   %.2f   - Float with decimals");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [MESSAGE FUNCTIONS] ────────────────────────────────────────┐");
+  Write("│ SEND(msg)                         [Transmit message]");
+  Write("│ on MESSAGE ID { ... }             [Receive message]");
+  Write("│ on MESSAGE *  { ... }             [All messages]");
+  Write("│ on MESSAGE error { ... }          [Error frames]");
+  Write("│ this.ID                           [Message identifier]");
+  Write("│ this.DLC                          [Data length]");
+  Write("│ this.Data[0..7]                   [Data bytes]");
+  Write("│ this.Time                         [Timestamp]");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [TIMER FUNCTIONS] ──────────────────────────────────────────┐");
+  Write("│ TIMER myTimer;                    [Declare]");
+  Write("│ SetTimer(myTimer, 1000);          [Start (1000ms)]");
+  Write("│ CancelTimer(myTimer);             [Stop]");
+  Write("│ GetTime();                        [Current time]");
+  Write("│ WAIT(ms);                         [Pause execution]");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [STRING FUNCTIONS] ─────────────────────────────────────────┐");
+  Write("│ strlen(str)                       [Get length]");
+  Write("│ strcpy(dest, src)                 [Copy string]");
+  Write("│ strcat(dest, src)                 [Concatenate]");
+  Write("│ strcmp(str1, str2)                [Compare]");
+  Write("│ sprintf(buf, format, ...)         [Format to string]");
+  Write("│ atoi(str)                         [String to integer]");
+  Write("│ atof(str)                         [String to float]");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+}
+
+// ======================================================================
+// SCENARIO 9: Color-Coded Error Handling
+// ======================================================================
+
+void DisplayScenario9() {
+  Write("");
+  Write("╔══════════════════════════════════════════════════════════════╗");
+  Write("║ SCENARIO 9: ERROR HANDLING PATTERNS                          ║");
+  Write("╚══════════════════════════════════════════════════════════════╝");
+  Write("");
+  
+  Write("┌─ [ERROR DETECTION PATTERN] ──────────────────────────────────┐");
+  Write("│ EARLY RETURN:");
+  Write("│");
+  Write("│ ON MESSAGE 0x100");
+  Write("│ {");
+  Write("│   IF (this.DLC != 8) {");
+  Write("│     WRITE(\"Error: Invalid DLC\");");
+  Write("│     RETURN;  <-- Exit early");
+  Write("│   }");
+  Write("│   IF (this.Data[0] == 0xFF) {");
+  Write("│     WRITE(\"Error: Invalid data\");");
+  Write("│     RETURN;  <-- Exit early");
+  Write("│   }");
+  Write("│   // Valid message - continue processing");
+  Write("│   ProcessMessage();");
+  Write("│ }");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [VALIDATION PATTERN] ───────────────────────────────────────┐");
+  Write("│ VALIDATE INPUT -> CHECK LOGIC -> EXECUTE");
+  Write("│");
+  Write("│ INT SendCommand(INT cmdType, INT param)");
+  Write("│ {");
+  Write("│   // Validate input");
+  Write("│   IF (cmdType < 1 || cmdType > 10) {");
+  Write("│     RETURN 0;  [Validation failed]");
+  Write("│   }");
+  Write("│   IF (param < 0 || param > 65535) {");
+  Write("│     RETURN 0;  [Validation failed]");
+  Write("│   }");
+  Write("│   // Execute");
+  Write("│   SendMessage(cmdType, param);");
+  Write("│   RETURN 1;  [Success]");
+  Write("│ }");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+}
+
+// ======================================================================
+// SCENARIO 10: Color-Coded Key Binding
+// ======================================================================
+
+void DisplayScenario10() {
+  Write("");
+  Write("╔══════════════════════════════════════════════════════════════╗");
+  Write("║ SCENARIO 10: KEYBOARD CONTROL & INTERACTIVE FEATURES         ║");
+  Write("╚══════════════════════════════════════════════════════════════╝");
+  Write("");
+  
+  Write("┌─ [KEYBOARD HANDLERS] ────────────────────────────────────────┐");
+  Write("│ @ ON KEY 'H'");
+  Write("│   {");
+  Write("│     DisplayHelp();");
+  Write("│   }");
+  Write("│");
+  Write("│ @ ON KEY 'S'");
+  Write("│   {");
+  Write("│     DisplayStatistics();");
+  Write("│   }");
+  Write("│");
+  Write("│ @ ON KEY 'R'");
+  Write("│   {");
+  Write("│     ResetCounters();");
+  Write("│   }");
+  Write("│");
+  Write("│ @ ON KEY 'T'");
+  Write("│   {");
+  Write("│     StartTest();");
+  Write("│   }");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [COMMON KEY BINDINGS] ──────────────────────────────────────┐");
+  Write("│ 'H' = Help     - Display usage instructions");
+  Write("│ 'S' = Status   - Show statistics/current state");
+  Write("│ 'R' = Reset    - Reset counters/state");
+  Write("│ 'T' = Test     - Start test sequence");
+  Write("│ 'P' = Print    - Print detailed report");
+  Write("│ 'C' = Clear    - Clear buffers");
+  Write("│ 'E' = Export   - Export data");
+  Write("│ 'D' = Debug    - Toggle debug mode");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+}
+
+// ======================================================================
+// QUICK REFERENCE GUIDE
+// ======================================================================
+
+void DisplayQuickReference() {
+  Write("");
+  Write("╔══════════════════════════════════════════════════════════════╗");
+  Write("║ CAPL QUICK REFERENCE GUIDE                                   ║");
+  Write("╚══════════════════════════════════════════════════════════════╝");
+  Write("");
+  
+  Write("┌─ [SYMBOLS GUIDE] ────────────────────────────────────────────┐");
+  Write("│ ➜ = Function/Method");
+  Write("│ @ = Event Handler");
+  Write("│ # = Preprocessor directive");
+  Write("│ $ = Variable (global indicator)");
+  Write("│ ~ = Constructor/Destructor");
+  Write("│ [] = Array/Index");
+  Write("│ {} = Code block/Scope");
+  Write("│ () = Function parameters/grouping");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+  
+  Write("┌─ [STRUCTURE SYMBOLS] ────────────────────────────────────────┐");
+  Write("│ ║ = Line continuation");
+  Write("│ ├─ = Branch/Option");
+  Write("│ └─ = End of branch");
+  Write("│ ─── = Separator");
+  Write("│ ═══ = Major separator");
+  Write("│ ┌ = Top-left corner");
+  Write("│ ┐ = Top-right corner");
+  Write("│ └ = Bottom-left corner");
+  Write("│ ┘ = Bottom-right corner");
+  Write("└───────────────────────────────────────────────────────────────┘");
+  Write("");
+}
+
+// ======================================================================
+// MAIN - Display all scenarios
+// ======================================================================
+
+on start {
+  Write("");
+  Write("═══════════════════════════════════════════════════════════════");
+  Write("  CAPL SYNTAX HIGHLIGHTER - Color Coded Script Reference");
+  Write("═══════════════════════════════════════════════════════════════");
+  Write("");
+  Write("Press 'H' for help, 'S' for scenario menu, 'Q' to quit");
+  Write("");
+}
+
+on key 'H' {
+  Write("");
+  Write("KEYBOARD COMMANDS:");
+  Write("  '1' - Display Scenario 1: Message Reception");
+  Write("  '2' - Display Scenario 2: Message Transmission");
+  Write("  '3' - Display Scenario 3: Timer Operations");
+  Write("  '4' - Display Scenario 4: State Machine");
+  Write("  '5' - Display Scenario 5: Data Validation");
+  Write("  '6' - Display Scenario 6: Pattern Detection");
+  Write("  '7' - Display Scenario 7: Control Flow");
+  Write("  '8' - Display Scenario 8: Built-in Functions");
+  Write("  '9' - Display Scenario 9: Error Handling");
+  Write("  '0' - Display Scenario 10: Keyboard Control");
+  Write("  'Q' - Display Quick Reference");
+  Write("  'H' - Show this help message");
+  Write("");
+}
+
+on key '1' {
+  DisplayScenario1();
+}
+
+on key '2' {
+  DisplayScenario2();
+}
+
+on key '3' {
+  DisplayScenario3();
+}
+
+on key '4' {
+  DisplayScenario4();
+}
+
+on key '5' {
+  DisplayScenario5();
+}
+
+on key '6' {
+  DisplayScenario6();
+}
+
+on key '7' {
+  DisplayScenario7();
+}
+
+on key '8' {
+  DisplayScenario8();
+}
+
+on key '9' {
+  DisplayScenario9();
+}
+
+on key '0' {
+  DisplayScenario10();
+}
+
+on key 'Q' {
+  DisplayQuickReference();
+}
+
+on stop {
+  Write("");
+  Write("═══════════════════════════════════════════════════════════════");
+  Write("  CAPL Script terminated");
+  Write("═══════════════════════════════════════════════════════════════");
+}

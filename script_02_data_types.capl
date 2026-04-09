@@ -1,0 +1,78 @@
+/*
+ * Script 02: Data Types and Variables
+ * 
+ * Description:
+ *   Demonstrates all primitive data types in CAPL and how to
+ *   declare, initialize, and display their values.
+ * 
+ * Key Concepts:
+ *   - byte, word, dword data types
+ *   - int, float, double for numbers
+ *   - char for characters and strings
+ *   - Format specifiers in Write()
+ */
+
+// Global variables of different types
+byte gByteValue = 255;
+word gWordValue = 65535;
+dword gDwordValue = 4294967295;
+int gIntValue = -12345;
+float gFloatValue = 3.14159;
+double gDoubleValue = 2.71828;
+char gCharValue = 'X';
+char gStringValue[50] = "CAPL String Example";
+
+on start {
+  Write("========== Data Types Demonstration ==========");
+  Write("");
+  
+  // Display byte
+  Write("BYTE (0-255):");
+  Write("  Decimal: %d", gByteValue);
+  Write("  Hexadecimal: 0x%X", gByteValue);
+  Write("");
+  
+  // Display word
+  Write("WORD (0-65535):");
+  Write("  Value: %d", gWordValue);
+  Write("  Hex: 0x%X", gWordValue);
+  Write("");
+  
+  // Display dword
+  Write("DWORD (0-4294967295):");
+  Write("  Value: %d", gDwordValue);
+  Write("");
+  
+  // Display int (signed)
+  Write("INT (can be negative):");
+  Write("  Value: %d", gIntValue);
+  Write("");
+  
+  // Display float
+  Write("FLOAT (decimal precision):");
+  Write("  Value: %f", gFloatValue);
+  Write("  Formatted: %.2f", gFloatValue);
+  Write("");
+  
+  // Display double
+  Write("DOUBLE (higher precision):");
+  Write("  Value: %f", gDoubleValue);
+  Write("");
+  
+  // Display char and string
+  Write("CHAR and STRING:");
+  Write("  Single character: %c", gCharValue);
+  Write("  String: %s", gStringValue);
+  Write("  String length: %d", strlen(gStringValue));
+  Write("");
+  
+  // Type conversion
+  Write("========== Type Conversions ==========");
+  int intToFloat = 42;
+  float converted = (float)intToFloat;
+  Write("int %d converted to float: %f", intToFloat, converted);
+  
+  float floatToInt = 19.99;
+  int back = (int)floatToInt;
+  Write("float %.2f converted to int: %d", floatToInt, back);
+}

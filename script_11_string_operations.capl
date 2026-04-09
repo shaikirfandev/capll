@@ -1,0 +1,168 @@
+/*
+ * Script 11: String Operations and Text Manipulation
+ * 
+ * Description:
+ *   Demonstrates string functions for manipulation, comparison,
+ *   formatting, and conversion between types.
+ * 
+ * Key Concepts:
+ *   - String functions: strlen, strcpy, strcat, strcmp
+ *   - sprintf for formatting
+ *   - String to number conversions: atoi, atof
+ *   - Character manipulation
+ */
+
+on start {
+  Write("========== String Operation Basics ==========");
+  Write("");
+  
+  char str1[50] = "Hello";
+  char str2[50] = "World";
+  char str3[100];
+  
+  Write("String 1: %s", str1);
+  Write("String 2: %s", str2);
+  Write("");
+  
+  Write("========== strlen() - String Length ==========");
+  int len1 = strlen(str1);
+  int len2 = strlen(str2);
+  Write("Length of '%s': %d", str1, len1);
+  Write("Length of '%s': %d", str2, len2);
+  Write("");
+  
+  Write("========== strcpy() - String Copy ==========");
+  strcpy(str3, str1);
+  Write("Original: %s", str1);
+  Write("Copied:   %s", str3);
+  Write("");
+  
+  Write("========== strcat() - String Concatenation ==========");
+  strcpy(str3, str1);
+  Write("Before: %s", str3);
+  strcat(str3, " ");
+  strcat(str3, str2);
+  Write("After concatenation: %s", str3);
+  Write("Final length: %d", strlen(str3));
+  Write("");
+  
+  Write("========== strcmp() - String Comparison ==========");
+  int cmp1 = strcmp("Apple", "Apple");
+  int cmp2 = strcmp("Apple", "Banana");
+  int cmp3 = strcmp("Zebra", "Apple");
+  
+  Write("strcmp(\"Apple\", \"Apple\") = %d (0=equal)", cmp1);
+  Write("strcmp(\"Apple\", \"Banana\") = %d (negative)", cmp2);
+  Write("strcmp(\"Zebra\", \"Apple\") = %d (positive)", cmp3);
+  Write("");
+  
+  Write("========== sprintf() - String Formatting ==========");
+  char formatted[100];
+  int value = 42;
+  float decimal = 3.14159;
+  
+  sprintf(formatted, "Value: %d, Pi: %.2f", value, decimal);
+  Write("Formatted string: %s", formatted);
+  Write("");
+  
+  Write("========== Number to String Conversions ==========");
+  
+  // Int to string
+  sprintf(formatted, "%d", 12345);
+  Write("Integer 12345 → string: %s", formatted);
+  
+  // Float to string
+  sprintf(formatted, "%.2f", 98.76);
+  Write("Float 98.76 → string: %s", formatted);
+  
+  // Hex to string
+  sprintf(formatted, "0x%X", 255);
+  Write("Hex 255 → string: %s", formatted);
+  Write("");
+  
+  Write("========== String to Number Conversions ==========");
+  
+  // String to int
+  int num1 = atoi("12345");
+  Write("String \"12345\" → int: %d", num1);
+  
+  int num2 = atoi("-999");
+  Write("String \"-999\" → int: %d", num2);
+  
+  // String to float
+  float fnum1 = atof("3.14159");
+  Write("String \"3.14159\" → float: %.5f", fnum1);
+  
+  float fnum2 = atof("2.5");
+  Write("String \"2.5\" → float: %.1f", fnum2);
+  Write("");
+  
+  Write("========== Character Array Manipulation ==========");
+  char message[50] = "CAPL Script Test";
+  Write("Original message: %s", message);
+  
+  // Find character
+  int pos = -1;
+  for (int i = 0; i < strlen(message); i++) {
+    if (message[i] == 'C') {
+      pos = i;
+      break;
+    }
+  }
+  Write("Position of 'C': %d", pos);
+  
+  // Extract substring (3 characters starting at position 5)
+  char substring[10];
+  strncpy(substring, &message[5], 6);
+  substring[6] = '\0';
+  Write("Substring from position 5: %s", substring);
+  Write("");
+  
+  Write("========== Case Conversion ==========");
+  char testStr[50] = "CamelCaseString";
+  Write("Original: %s", testStr);
+  
+  // Convert to uppercase (simulate)
+  char upperStr[50];
+  strcpy(upperStr, testStr);
+  for (int i = 0; i < strlen(upperStr); i++) {
+    if (upperStr[i] >= 'a' && upperStr[i] <= 'z') {
+      upperStr[i] = upperStr[i] - 32;  // ASCII conversion
+    }
+  }
+  Write("Uppercase: %s", upperStr);
+  
+  // Convert to lowercase (simulate)
+  char lowerStr[50];
+  strcpy(lowerStr, testStr);
+  for (int i = 0; i < strlen(lowerStr); i++) {
+    if (lowerStr[i] >= 'A' && lowerStr[i] <= 'Z') {
+      lowerStr[i] = lowerStr[i] + 32;  // ASCII conversion
+    }
+  }
+  Write("Lowercase: %s", lowerStr);
+  Write("");
+  
+  Write("========== String Building ==========");
+  char result[200] = "Status: ";
+  
+  for (int i = 1; i <= 3; i++) {
+    char temp[50];
+    sprintf(temp, "Item%d ", i);
+    strcat(result, temp);
+  }
+  Write("Built string: %s", result);
+  Write("");
+  
+  Write("========== String Validation ==========");
+  char input[50] = "12345";
+  
+  if (atoi(input) > 0) {
+    Write("\"%s\" is a valid positive number", input);
+  }
+  
+  char testVal[50] = "ABC";
+  if (atoi(testVal) == 0) {
+    Write("\"%s\" is not a valid number", testVal);
+  }
+}

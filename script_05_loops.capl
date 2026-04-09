@@ -1,0 +1,128 @@
+/*
+ * Script 05: Loops - For, While, Do-While
+ * 
+ * Description:
+ *   Demonstrates all loop types including for loops, while loops,
+ *   do-while loops, and loop control with break/continue.
+ * 
+ * Key Concepts:
+ *   - for loops with initialization, condition, increment
+ *   - while loops
+ *   - do-while loops
+ *   - break and continue statements
+ */
+
+on start {
+  Write("========== For Loop - Basic ==========");
+  Write("Counting 1 to 5:");
+  
+  for (int i = 1; i <= 5; i++) {
+    Write("  i = %d", i);
+  }
+  Write("");
+  
+  Write("========== For Loop - Backwards ==========");
+  Write("Counting 5 to 1:");
+  
+  for (int i = 5; i >= 1; i--) {
+    Write("  i = %d", i);
+  }
+  Write("");
+  
+  Write("========== For Loop - With Arrays ==========");
+  byte values[5] = {10, 20, 30, 40, 50};
+  int sum = 0;
+  
+  for (int i = 0; i < 5; i++) {
+    sum += values[i];
+    Write("  values[%d] = %d (sum = %d)", i, values[i], sum);
+  }
+  Write("");
+  
+  Write("========== For Loop - Multiple Variables ==========");
+  Write("x and y counters:");
+  
+  for (int x = 0, y = 10; x <= 5; x++, y--) {
+    Write("  x = %d, y = %d", x, y);
+  }
+  Write("");
+  
+  Write("========== While Loop ==========");
+  int counter = 1;
+  Write("While loop from 1 to 5:");
+  
+  while (counter <= 5) {
+    Write("  counter = %d", counter);
+    counter++;
+  }
+  Write("");
+  
+  Write("========== Do-While Loop ==========");
+  int count = 1;
+  Write("Do-while loop from 1 to 3:");
+  
+  do {
+    Write("  count = %d", count);
+    count++;
+  } while (count <= 3);
+  Write("");
+  
+  Write("========== Do-While Executes at Least Once ==========");
+  int x = 10;
+  Write("Do-while with false initial condition:");
+  
+  do {
+    Write("  This gets executed even though x > 5");
+  } while (x < 5);  // Condition is false, but do-while executes once
+  Write("");
+  
+  Write("========== Break Statement ==========");
+  Write("Loop breaks when i == 3:");
+  
+  for (int i = 0; i < 10; i++) {
+    if (i == 3) {
+      Write("  Breaking at i = %d", i);
+      break;
+    }
+    Write("  i = %d", i);
+  }
+  Write("");
+  
+  Write("========== Continue Statement ==========");
+  Write("Loop skips even numbers:");
+  
+  for (int i = 0; i <= 5; i++) {
+    if (i % 2 == 0) {
+      continue;  // Skip to next iteration
+    }
+    Write("  %d (odd)", i);
+  }
+  Write("");
+  
+  Write("========== Nested Loops ==========");
+  Write("Multiplication table (2x2):");
+  
+  for (int row = 1; row <= 3; row++) {
+    for (int col = 1; col <= 3; col++) {
+      int product = row * col;
+      Write("  %d*%d=%d", row, col, product);
+    }
+  }
+  Write("");
+  
+  Write("========== Loop with Condition ==========");
+  Write("Find first value > 25:");
+  byte data[10] = {5, 10, 15, 20, 25, 30, 35, 40, 45, 50};
+  int found = -1;
+  
+  for (int i = 0; i < 10; i++) {
+    if (data[i] > 25) {
+      found = i;
+      break;
+    }
+  }
+  
+  if (found >= 0) {
+    Write("  Found at index %d: value = %d", found, data[found]);
+  }
+}

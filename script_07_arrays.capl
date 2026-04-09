@@ -1,0 +1,161 @@
+/*
+ * Script 07: Arrays and String Handling
+ * 
+ * Description:
+ *   Demonstrates array declaration, initialization, access,
+ *   and string manipulation functions.
+ * 
+ * Key Concepts:
+ *   - One-dimensional arrays
+ *   - Two-dimensional arrays
+ *   - String arrays (character arrays)
+ *   - String functions: strlen, strcpy, strcat, strcmp
+ *   - Array operations: iteration, searching, sorting
+ */
+
+void PrintByteArray(byte arr[], int size, char *description) {
+  Write("%s:", description);
+  for (int i = 0; i < size; i++) {
+    Write("  [%d] = 0x%X (%d)", i, arr[i], arr[i]);
+  }
+}
+
+void PrintIntArray(int arr[], int size, char *description) {
+  Write("%s:", description);
+  for (int i = 0; i < size; i++) {
+    Write("  [%d] = %d", i, arr[i]);
+  }
+}
+
+on start {
+  Write("========== One-Dimensional Arrays ==========");
+  Write("");
+  
+  // Array declaration and initialization
+  byte byteArray[5] = {0x0A, 0x0B, 0x0C, 0x0D, 0x0E};
+  PrintByteArray(byteArray, 5, "Byte Array");
+  Write("");
+  
+  // Array access and modification
+  Write("========== Array Access and Modification ==========");
+  byteArray[2] = 0xFF;
+  Write("After byteArray[2] = 0xFF:");
+  PrintByteArray(byteArray, 5, "Modified Array");
+  Write("");
+  
+  // Array initialization without explicit values
+  int scores[6];
+  for (int i = 0; i < 6; i++) {
+    scores[i] = (i + 1) * 10;
+  }
+  PrintIntArray(scores, 6, "Scores Array");
+  Write("");
+  
+  // Array search
+  Write("========== Array Search ==========");
+  int searchValue = 30;
+  int foundIndex = -1;
+  
+  for (int i = 0; i < 6; i++) {
+    if (scores[i] == searchValue) {
+      foundIndex = i;
+      break;
+    }
+  }
+  
+  if (foundIndex >= 0) {
+    Write("Found %d at index %d", searchValue, foundIndex);
+  } else {
+    Write("%d not found in array", searchValue);
+  }
+  Write("");
+  
+  // Array sum and average
+  Write("========== Array Sum and Average ==========");
+  int sum = 0;
+  for (int i = 0; i < 6; i++) {
+    sum += scores[i];
+  }
+  float average = (float)sum / 6;
+  Write("Sum: %d", sum);
+  Write("Average: %.2f", average);
+  Write("");
+  
+  Write("========== Array Sorting (Bubble Sort) ==========");
+  int unsorted[5] = {50, 20, 80, 10, 60};
+  PrintIntArray(unsorted, 5, "Before sorting");
+  
+  // Bubble sort
+  for (int i = 0; i < 5 - 1; i++) {
+    for (int j = 0; j < 5 - i - 1; j++) {
+      if (unsorted[j] > unsorted[j + 1]) {
+        // Swap
+        int temp = unsorted[j];
+        unsorted[j] = unsorted[j + 1];
+        unsorted[j + 1] = temp;
+      }
+    }
+  }
+  PrintIntArray(unsorted, 5, "After sorting");
+  Write("");
+  
+  Write("========== Two-Dimensional Arrays ==========");
+  int matrix[3][3] = {
+    {1, 2, 3},
+    {4, 5, 6},
+    {7, 8, 9}
+  };
+  
+  Write("Matrix contents:");
+  for (int row = 0; row < 3; row++) {
+    for (int col = 0; col < 3; col++) {
+      Write("  matrix[%d][%d] = %d", row, col, matrix[row][col]);
+    }
+  }
+  Write("");
+  
+  Write("========== String Arrays (Char Arrays) ==========");
+  char str1[30] = "Hello";
+  char str2[30] = "WORLD";
+  char str3[30];
+  char str4[30];
+  
+  Write("String 1: %s", str1);
+  Write("String 2: %s", str2);
+  Write("String 1 length: %d", strlen(str1));
+  Write("String 2 length: %d", strlen(str2));
+  Write("");
+  
+  Write("========== String Operations ==========");
+  
+  // String copy
+  strcpy(str3, str1);
+  Write("strcpy(str3, str1) → str3 = %s", str3);
+  
+  // String concatenation
+  strcpy(str4, str1);
+  strcat(str4, " ");
+  strcat(str4, str2);
+  Write("After concatenation: %s", str4);
+  
+  // String comparison
+  Write("");
+  int cmp1 = strcmp(str1, "Hello");
+  Write("strcmp(str1, \"Hello\") = %d (0 = equal)", cmp1);
+  
+  int cmp2 = strcmp(str1, str2);
+  Write("strcmp(str1, str2) = %d (!=0 = different)", cmp2);
+  Write("");
+  
+  Write("========== Character Array Manipulation ==========");
+  char message[30] = "CANopen";
+  Write("Original: %s (length = %d)", message, strlen(message));
+  
+  // Convert to uppercase manually
+  for (int i = 0; i < strlen(message); i++) {
+    if (message[i] >= 'a' && message[i] <= 'z') {
+      message[i] = message[i] - 32;  // ASCII offset
+    }
+  }
+  Write("Uppercase: %s", message);
+}

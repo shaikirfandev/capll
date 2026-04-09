@@ -1,0 +1,92 @@
+/*
+ * Script 03: Operators (Arithmetic and Logical)
+ * 
+ * Description:
+ *   Demonstrates all types of operators: arithmetic, comparison,
+ *   logical, and bitwise operations.
+ * 
+ * Key Concepts:
+ *   - Arithmetic operators: +, -, *, /, %
+ *   - Comparison operators: ==, !=, <, >, <=, >=
+ *   - Logical operators: &&, ||, !
+ *   - Bitwise operators: &, |, ^, ~, <<, >>
+ */
+
+on start {
+  int a = 15;
+  int b = 4;
+  
+  Write("========== Arithmetic Operators ==========");
+  Write("a = %d, b = %d", a, b);
+  Write("a + b = %d", a + b);
+  Write("a - b = %d", a - b);
+  Write("a * b = %d", a * b);
+  Write("a / b = %d", a / b);
+  Write("a %% b = %d", a % b);  // %% to display single %
+  Write("");
+  
+  Write("========== Comparison Operators ==========");
+  Write("(results: 1=true, 0=false)");
+  Write("a == b: %d", a == b);
+  Write("a != b: %d", a != b);
+  Write("a > b:  %d", a > b);
+  Write("a < b:  %d", a < b);
+  Write("a >= b: %d", a >= b);
+  Write("a <= b: %d", a <= b);
+  Write("");
+  
+  Write("========== Logical Operators ==========");
+  int x = 1, y = 1, z = 0;
+  Write("x=1, y=1, z=0");
+  Write("x && y (AND): %d", x && y);      // 1
+  Write("x && z (AND): %d", x && z);      // 0
+  Write("x || z (OR):  %d", x || z);      // 1
+  Write("z || z (OR):  %d", z || z);      // 0
+  Write("!x (NOT):     %d", !x);          // 0
+  Write("!z (NOT):     %d", !z);          // 1
+  Write("");
+  
+  byte byte1 = 0x0F;  // Binary: 00001111
+  byte byte2 = 0xF0;  // Binary: 11110000
+  
+  Write("========== Bitwise Operators ==========");
+  Write("byte1 = 0x0F (00001111)");
+  Write("byte2 = 0xF0 (11110000)");
+  Write("byte1 & byte2 (AND):  0x%X", byte1 & byte2);   // 0x00
+  Write("byte1 | byte2 (OR):   0x%X", byte1 | byte2);   // 0xFF
+  Write("byte1 ^ byte2 (XOR):  0x%X", byte1 ^ byte2);   // 0xFF
+  Write("~byte1 (NOT):         0x%X", ~byte1);          // 0xF0
+  Write("byte1 << 2 (left shift):  0x%X", byte1 << 2);  // 0x3C
+  Write("byte2 >> 2 (right shift): 0x%X", byte2 >> 2);  // 0x3C
+  Write("");
+  
+  Write("========== Compound Assignment ==========");
+  int val = 10;
+  Write("val = %d", val);
+  val += 5;
+  Write("val += 5 → %d", val);
+  val -= 3;
+  Write("val -= 3 → %d", val);
+  val *= 2;
+  Write("val *= 2 → %d", val);
+  val /= 4;
+  Write("val /= 4 → %d", val);
+  Write("");
+  
+  Write("========== Increment/Decrement ==========");
+  int counter = 0;
+  Write("counter = %d", counter);
+  Write("++counter (pre-increment):  %d", ++counter);
+  Write("counter++ (post-increment): %d", counter++);
+  Write("counter = %d", counter);
+  Write("--counter (pre-decrement):  %d", --counter);
+  Write("");
+  
+  Write("========== Ternary Operator ==========");
+  int age = 25;
+  char *status = (age >= 18) ? "Adult" : "Minor";
+  Write("Age: %d → %s", age, status);
+  
+  int max = (a > b) ? a : b;
+  Write("max(%d, %d) = %d", a, b, max);
+}

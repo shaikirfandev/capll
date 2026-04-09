@@ -1,0 +1,189 @@
+/*
+ * Script 13: Data Validation and Error Handling
+ * 
+ * Description:
+ *   Demonstrates data validation techniques, checksum calculations,
+ *   range checking, and error handling patterns.
+ * 
+ * Key Concepts:
+ *   - Input range validation
+ *   - Checksum calculation and verification
+ *   - Data consistency checks
+ *   - Error reporting
+ */
+
+// Calculate simple checksum (sum of all bytes)
+byte CalculateChecksum(byte data[], int length) {
+  byte checksum = 0;
+  
+  for (int i = 0; i < length; i++) {
+    checksum += data[i];
+  }
+  
+  // Return two's complement for checksum
+  return (~checksum) + 1;
+}
+
+// Verify checksum
+int VerifyChecksum(byte data[], int length) {
+  byte calculatedChecksum = CalculateChecksum(data, length - 1);
+  
+  if (calculatedChecksum == data[length - 1]) {
+    return 1;  // Valid
+  } else {
+    return 0;  // Invalid
+  }
+}
+
+// Validate temperature range
+int ValidateTemperature(int tempValue) {
+  // Acceptable range: -40 to +125 degrees Celsius
+  if (tempValue < -40 || tempValue > 125) {
+    return 0;  // Invalid
+  }
+  return 1;  // Valid
+}
+
+// Validate pressure range
+int ValidatePressure(int pressure) {
+  // Acceptable range: 300 to 1200 hPa
+  if (pressure < 300 || pressure > 1200) {
+    return 0;  // Invalid
+  }
+  return 1;  // Valid
+}
+
+on start {
+  Write("========== Data Validation Examples ==========");
+  Write("");
+  
+  Write("========== Range Validation ==========");
+  
+  // Temperature validation
+  int tempReadings[] = {-50, -40, 0, 25, 100, 125, 130};
+  
+  for (int i = 0; i < 7; i++) {
+    int temp = tempReadings[i];
+    int isValid = ValidateTemperature(temp);
+    
+    Write("Temperature %d°C: %s", temp, isValid ? "VALID" : "OUT OF RANGE");
+  }
+  Write("");
+  
+  // Pressure validation
+  int pressureReadings[] = {200, 300, 500, 1000, 1200, 1300};
+  
+  for (int i = 0; i < 6; i++) {
+    int pressure = pressureReadings[i];
+    int isValid = ValidatePressure(pressure);
+    
+    Write("Pressure %d hPa: %s", pressure, isValid ? "VALID" : "OUT OF RANGE");
+  }
+  Write("");
+  
+  Write("========== Checksum Validation ==========");
+  
+  // Create message with valid checksum
+  byte msg1[5] = {0x12, 0x34, 0x56, 0x78, 0x00};
+  msg1[4] = CalculateChecksum(msg1, 4);
+  
+  Write("Message 1: ");
+  for (int i = 0; i < 5; i++) {
+    Write("%02X ", msg1[i]);
+  }
+  Write("");
+  Write("Checksum: %s", VerifyChecksum(msg1, 5) ? "VALID" : "INVALID");
+  Write("");
+  
+  // Corrupt message (modify data)
+  byte msg2[5] = {0x12, 0x34, 0x56, 0x78, 0x00};
+  msg2[4] = CalculateChecksum(msg2, 4);
+  Write("Message 2 (original): ");
+  for (int i = 0; i < 5; i++) {
+    Write("%02X ", msg2[i]);
+  }
+  Write("");
+  
+  // Change data byte
+  msg2[2] = 0xFF;  // Corrupt data
+  Write("Message 2 (corrupted): ");
+  for (int i = 0; i < 5; i++) {
+    Write("%02X ", msg2[i]);
+  }
+  Write("");
+  Write("Checksum: %s", VerifyChecksum(msg2, 5) ? "VALID" : "INVALID");
+  Write("");
+  
+  Write("========== Value Bounds Checking ==========");
+  
+  int percentages[] = {-10, 0, 50, 100, 150};
+  
+  for (int i = 0; i < 5; i++) {
+    int percent = percentages[i];
+    
+    if (percent < 0) {
+      Write("%d%%: ERROR - Below minimum (0%%)", percent);
+    } else if (percent > 100) {
+      Write("%d%%: ERROR - Above maximum (100%%)", percent);
+    } else {
+      Write("%d%%: VALID", percent);
+    }
+  }
+  Write("");
+  
+  Write("========== Message Length Validation ==========");
+  
+  // Invalid DLC
+  int dlcValues[] = {0, 1, 4, 8, 9, 16};
+  
+  for (int i = 0; i < 6; i++) {
+    int dlc = dlcValues[i];
+    
+    if (dlc < 1 || dlc > 8) {
+      Write("DLC %d: INVALID (must be 1-8)", dlc);
+    } else {
+      Write("DLC %d: VALID", dlc);
+    }
+  }
+  Write("");
+  
+  Write("========== Data Consistency Check ==========");
+  
+  // Check if two measurements are consistent
+  int temp1 = 25;
+  int temp2 = 28;
+  int maxDeviation = 5;
+  
+  int diff = temp1 - temp2;
+  if (diff < 0) diff = -diff;
+  
+  Write("Temperature readings: %d°C and %d°C", temp1, temp2);
+  Write("Difference: %d°C (max allowed: %d°C)", diff, maxDeviation);
+  
+  if (diff > maxDeviation) {
+    Write("WARNING: Readings differ too much!");
+  } else {
+    Write("Readings are consistent");
+  }
+  Write("");
+  
+  Write("========== Sequence Validation ==========");
+  
+  // Check if message counter increments correctly
+  byte messageCounters[] = {1, 2, 3, 4, 5, 7, 8};  // Missing 6
+  int sequenceValid = 1;
+  
+  Write("Message sequence check:");
+  for (int i = 1; i < 7; i++) {
+    int expected = messageCounters[i - 1] + 1;
+    int actual = messageCounters[i];
+    
+    if (expected != actual) {
+      Write("  ERROR: Expected %d, got %d", expected, actual);
+      sequenceValid = 0;
+    } else {
+      Write("  %d → %d OK", messageCounters[i - 1], actual);
+    }
+  }
+  Write("Sequence: %s", sequenceValid ? "VALID" : "GAPS DETECTED");
+}

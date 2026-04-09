@@ -1,0 +1,212 @@
+/*
+ * Script 12: Bitwise Operations and Bit Manipulation
+ * 
+ * Description:
+ *   Demonstrates bitwise operations for manipulating individual bits,
+ *   useful for working with CAN message data and flags.
+ * 
+ * Key Concepts:
+ *   - Bitwise AND, OR, XOR, NOT
+ *   - Bit shifting (left, right)
+ *   - Setting, clearing, and checking bits
+ *   - Bit masking techniques
+ */
+
+// Helper functions for bit operations
+void SetBit(byte *data, int bitIndex) {
+  int byteIndex = bitIndex / 8;
+  int bitPosition = bitIndex % 8;
+  data[byteIndex] |= (1 << bitPosition);
+}
+
+void ClearBit(byte *data, int bitIndex) {
+  int byteIndex = bitIndex / 8;
+  int bitPosition = bitIndex % 8;
+  data[byteIndex] &= ~(1 << bitPosition);
+}
+
+int IsBitSet(byte data[], int bitIndex) {
+  int byteIndex = bitIndex / 8;
+  int bitPosition = bitIndex % 8;
+  return (data[byteIndex] >> bitPosition) & 1;
+}
+
+void PrintBinary(byte value) {
+  for (int i = 7; i >= 0; i--) {
+    if (value & (1 << i)) {
+      Write("1", 0);
+    } else {
+      Write("0", 0);
+    }
+  }
+}
+
+on start {
+  Write("========== Bitwise Operators ==========");
+  Write("");
+  
+  byte val1 = 0xF0;  // 11110000
+  byte val2 = 0x0F;  // 00001111
+  
+  Write("val1 = 0xF0 (binary: ");
+  PrintBinary(val1);
+  Write(")");
+  
+  Write("val2 = 0x0F (binary: ");
+  PrintBinary(val2);
+  Write(")");
+  Write("");
+  
+  Write("========== Bitwise AND (&) ==========");
+  byte andResult = val1 & val2;
+  Write("0xF0 & 0x0F = 0x%02X (binary: ", andResult);
+  PrintBinary(andResult);
+  Write(")");
+  Write("Explanation: No overlapping bits");
+  Write("");
+  
+  Write("========== Bitwise OR (|) ==========");
+  byte orResult = val1 | val2;
+  Write("0xF0 | 0x0F = 0x%02X (binary: ", orResult);
+  PrintBinary(orResult);
+  Write(")");
+  Write("Explanation: Combines all bits from both values");
+  Write("");
+  
+  Write("========== Bitwise XOR (^) ==========");
+  byte xorResult = val1 ^ val2;
+  Write("0xF0 ^ 0x0F = 0x%02X (binary: ", xorResult);
+  PrintBinary(xorResult);
+  Write(")");
+  Write("Explanation: Bits that differ between values");
+  Write("");
+  
+  Write("========== Bitwise NOT (~) ==========");
+  byte notResult = ~val1;
+  Write("~0xF0 = 0x%02X (binary: ", notResult);
+  PrintBinary(notResult);
+  Write(")");
+  Write("Explanation: Inverts all bits");
+  Write("");
+  
+  Write("========== Left Shift (<<) ==========");
+  byte shifted_left = val1 << 2;
+  Write("0xF0 << 2 = 0x%02X (binary: ", shifted_left);
+  PrintBinary(shifted_left);
+  Write(")");
+  Write("Explanation: Moves bits 2 positions left");
+  Write("");
+  
+  Write("========== Right Shift (>>) ==========");
+  byte shifted_right = val1 >> 2;
+  Write("0xF0 >> 2 = 0x%02X (binary: ", shifted_right);
+  PrintBinary(shifted_right);
+  Write(")");
+  Write("Explanation: Moves bits 2 positions right");
+  Write("");
+  
+  Write("========== Setting Individual Bits ==========");
+  byte bitData[2] = {0x00, 0x00};
+  Write("Initial value: 0x%02X%02X", bitData[1], bitData[0]);
+  
+  SetBit(bitData, 0);
+  Write("After SetBit(0): 0x%02X (binary: ", bitData[0]);
+  PrintBinary(bitData[0]);
+  Write(")");
+  
+  SetBit(bitData, 7);
+  Write("After SetBit(7): 0x%02X (binary: ", bitData[0]);
+  PrintBinary(bitData[0]);
+  Write(")");
+  Write("");
+  
+  Write("========== Clearing Individual Bits ==========");
+  byte bitData2[1] = {0xFF};
+  Write("Initial value: 0x%02X (binary: ", bitData2[0]);
+  PrintBinary(bitData2[0]);
+  Write(")");
+  
+  ClearBit(bitData2, 2);
+  Write("After ClearBit(2): 0x%02X (binary: ", bitData2[0]);
+  PrintBinary(bitData2[0]);
+  Write(")");
+  
+  ClearBit(bitData2, 5);
+  Write("After ClearBit(5): 0x%02X (binary: ", bitData2[0]);
+  PrintBinary(bitData2[0]);
+  Write(")");
+  Write("");
+  
+  Write("========== Checking Individual Bits ==========");
+  byte testByte[1] = {0xA5};  // 10100101
+  Write("Test byte: 0x%02X (binary: ", testByte[0]);
+  PrintBinary(testByte[0]);
+  Write(")");
+  Write("");
+  
+  for (int i = 0; i < 8; i++) {
+    int isSet = IsBitSet(testByte, i);
+    Write("Bit %d: %s", i, isSet ? "SET" : "CLEAR");
+  }
+  Write("");
+  
+  Write("========== Bit Masking ==========");
+  byte data = 0xB7;  // 10110111
+  Write("Original data: 0x%02X (binary: ", data);
+  PrintBinary(data);
+  Write(")");
+  
+  // Mask bits 4-6
+  byte mask = 0x70;  // 01110000
+  byte masked = data & mask;
+  Write("After masking bits 4-6: 0x%02X (binary: ", masked);
+  PrintBinary(masked);
+  Write(")");
+  Write("");
+  
+  Write("========== Multi-Byte Operations ==========");
+  word multiValue = 0xABCD;
+  Write("Original word: 0x%04X", multiValue);
+  
+  // Extract high byte
+  byte highByte = (multiValue >> 8) & 0xFF;
+  Write("High byte: 0x%02X", highByte);
+  
+  // Extract low byte
+  byte lowByte = multiValue & 0xFF;
+  Write("Low byte: 0x%02X", lowByte);
+  
+  // Combine bytes
+  word reconstructed = (highByte << 8) | lowByte;
+  Write("Reconstructed: 0x%04X", reconstructed);
+  Write("");
+  
+  Write("========== Bit Flag Examples ==========");
+  
+  // Status byte with multiple flags
+  byte statusFlags = 0x00;
+  #define FLAG_READY    0x01
+  #define FLAG_ERROR    0x02
+  #define FLAG_ACTIVE   0x04
+  #define FLAG_WARNING  0x08
+  
+  // Set flags
+  statusFlags |= FLAG_READY;
+  statusFlags |= FLAG_ACTIVE;
+  Write("Status with READY and ACTIVE: 0x%02X", statusFlags);
+  
+  // Check flags
+  if (statusFlags & FLAG_READY) {
+    Write("  → Device is READY");
+  }
+  if (statusFlags & FLAG_ACTIVE) {
+    Write("  → Device is ACTIVE");
+  }
+  if ((statusFlags & FLAG_ERROR) == 0) {
+    Write("  → No ERROR");
+  }
+  
+  // Clear flag
+  statusFlags &= ~FLAG_ACTIVE;
+  Write("After clearing ACTIVE: 0x%02X", statusFlags);
+}

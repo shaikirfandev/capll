@@ -1,0 +1,199 @@
+/*
+ * Script 10: Sending CAN Messages
+ * 
+ * Description:
+ *   Demonstrates sending CAN messages with different data patterns,
+ *   message structure setup, and periodic transmission.
+ * 
+ * Key Concepts:
+ *   - Message structure setup
+ *   - Setting ID, DLC, and data
+ *   - Send() function
+ *   - Periodic message sending with timers
+ *   - Data formatting and byte manipulation
+ */
+
+// Global variables
+timer gSendTimer;
+int gMessageCounter = 0;
+
+on start {
+  Write("========== Message Sender Started ==========");
+  Write("Starting to send CAN messages...");
+  Write("");
+  
+  // Start sending messages every 500ms
+  SetTimer(gSendTimer, 500);
+  
+  Write("Timer started: sending messages every 500ms");
+  Write("Press 'M' to send a single message");
+  Write("Press 'X' to send extended format message");
+}
+
+on timer gSendTimer {
+  gMessageCounter++;
+  
+  // Create a simple counter message
+  Message msg;
+  msg.ID = 0x123;
+  msg.DLC = 3;
+  msg.Data[0] = gMessageCounter & 0xFF;
+  msg.Data[1] = (gMessageCounter >> 8) & 0xFF;
+  msg.Data[2] = 0xAA;  // Fixed byte
+  
+  Send(msg);
+  
+  Write("Sent message #%d [ID: 0x%X]", gMessageCounter, msg.ID);
+  
+  // Stop after 10 messages
+  if (gMessageCounter >= 10) {
+    CancelTimer(gSendTimer);
+    Write("Sending complete");
+  }
+}
+
+// Send single message on key press
+on key 'M' {
+  Write("");
+  Write("========== Sending Single Message ==========");
+  
+  Message msg;
+  msg.ID = 0x200;
+  msg.DLC = 8;
+  
+  // Fill with test pattern
+  byte pattern[8] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
+  
+  for (int i = 0; i < 8; i++) {
+    msg.Data[i] = pattern[i];
+  }
+  
+  Send(msg);
+  Write("Message sent with pattern: 11 22 33 44 55 66 77 88");
+}
+
+// Send extended format message
+on key 'X' {
+  Write("");
+  Write("========== Sending Extended Format Message ==========");
+  
+  Message msg;
+  msg.ID = 0x18FF1234;  // Extended ID
+  msg.DLC = 4;
+  msg.Data[0] = 0x12;
+  msg.Data[1] = 0x34;
+  msg.Data[2] = 0x56;
+  msg.Data[3] = 0x78;
+  
+  Send(msg);
+  Write("Extended message sent [ID: 0x%X]", msg.ID);
+}
+
+// Send sensor data pattern
+on key 'S' {
+  Write("");
+  Write("========== Sending Sensor Data ==========");
+  
+  // Simulate temperature reading
+  Message tempMsg;
+  tempMsg.ID = 0x150;
+  tempMsg.DLC = 2;
+  
+  float temperature = 25.5;
+  int tempValue = (int)(temperature * 10);  // Scale: 0.1°C per count
+  
+  tempMsg.Data[0] = (tempValue >> 8) & 0xFF;  // MSB
+  tempMsg.Data[1] = tempValue & 0xFF;         // LSB
+  
+  Send(tempMsg);
+  Write("Temperature: %.1f°C", temperature);
+  Write("Data bytes: [%02X %02X]", tempMsg.Data[0], tempMsg.Data[1]);
+}
+
+// Send pressure data
+on key 'P' {
+  Write("");
+  Write("========== Sending Pressure Data ==========");
+  
+  Message pressMsg;
+  pressMsg.ID = 0x151;
+  pressMsg.DLC = 3;
+  
+  int pressure = 1013;  // hPa
+  
+  pressMsg.Data[0] = (pressure >> 8) & 0xFF;
+  pressMsg.Data[1] = pressure & 0xFF;
+  pressMsg.Data[2] = 0x42;  // Status/checksum
+  
+  Send(pressMsg);
+  Write("Pressure: %d hPa", pressure);
+  Write("Message sent");
+}
+
+// Send multi-byte values
+on key 'V' {
+  Write("");
+  Write("========== Sending Multi-Byte Values ==========");
+  
+  Message valueMsg;
+  valueMsg.ID = 0x300;
+  valueMsg.DLC = 4;
+  
+  // Send 32-bit value (0x12345678)
+  dword largeValue = 0x12345678;
+  
+  valueMsg.Data[0] = (largeValue >> 24) & 0xFF;
+  valueMsg.Data[1] = (largeValue >> 16) & 0xFF;
+  valueMsg.Data[2] = (largeValue >> 8) & 0xFF;
+  valueMsg.Data[3] = largeValue & 0xFF;
+  
+  Send(valueMsg);
+  Write("32-bit value: 0x%X", largeValue);
+  Write("Data bytes: [%02X %02X %02X %02X]", 
+        valueMsg.Data[0], valueMsg.Data[1], 
+        valueMsg.Data[2], valueMsg.Data[3]);
+}
+
+// Send all zeros and all ones
+on key 'Z' {
+  Write("");
+  Write("========== Sending Test Patterns ==========");
+  
+  // All zeros
+  Message zeroMsg;
+  zeroMsg.ID = 0x400;
+  zeroMsg.DLC = 8;
+  for (int i = 0; i < 8; i++) {
+    zeroMsg.Data[i] = 0x00;
+  }
+  Send(zeroMsg);
+  Write("Pattern: All zeros (0x00)");
+  
+  // All ones
+  Message oneMsg;
+  oneMsg.ID = 0x401;
+  oneMsg.DLC = 8;
+  for (int i = 0; i < 8; i++) {
+    oneMsg.Data[i] = 0xFF;
+  }
+  Send(oneMsg);
+  Write("Pattern: All ones (0xFF)");
+}
+
+on key 'H' {
+  Write("");
+  Write("========== Keyboard Help ==========");
+  Write("M - Send single message");
+  Write("X - Send extended format");
+  Write("S - Send sensor (temperature)");
+  Write("P - Send pressure");
+  Write("V - Send multi-byte value");
+  Write("Z - Send test patterns");
+  Write("");
+}
+
+on stop {
+  Write("========== Message Sender Stopped ==========");
+  Write("Total messages sent: %d", gMessageCounter);
+  CancelTimer(gSendTimer);
+}

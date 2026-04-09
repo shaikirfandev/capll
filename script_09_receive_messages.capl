@@ -1,0 +1,145 @@
+/*
+ * Script 09: Receiving CAN Messages
+ * 
+ * Description:
+ *   Demonstrates different ways to receive and process CAN messages,
+ *   including message structure, data access, and filtering.
+ * 
+ * Key Concepts:
+ *   - on message * event (catch all messages)
+ *   - on message ID event (specific message)
+ *   - Message attributes: ID, DLC, Data[], Time
+ *   - Filtering and validating messages
+ */
+
+// Global statistics
+dword gTotalMessagesReceived = 0;
+dword gTimer0x100Count = 0;
+dword gErrorMessagesCount = 0;
+dword gLastMessageTime = 0;
+
+on start {
+  Write("========== Message Receiver Started ==========");
+  Write("Receiving all CAN messages...");
+  Write("");
+  Write("Press 'S' to display statistics");
+  Write("Press 'C' to reset counters");
+  Write("");
+}
+
+// Catch ALL messages on the bus
+on message * {
+  gTotalMessagesReceived++;
+  gLastMessageTime = GetTime();
+  
+  // Display message info
+  Write("Message received:");
+  Write("  ID: 0x%03X", this.ID);
+  Write("  DLC: %d", this.DLC);
+  Write("  Time: %dms", this.Time);
+  Write("  Data: ", 0);
+  
+  for (int i = 0; i < this.DLC; i++) {
+    Write("%02X", this.Data[i]);
+    if (i < this.DLC - 1) {
+      Write(" ");
+    }
+  }
+  Write("");
+}
+
+// Handle specific message ID 0x100
+on message 0x100 {
+  gTimer0x100Count++;
+  
+  Write("=== Specific Message 0x100 ===");
+  Write("  Count: %d", gTimer0x100Count);
+  
+  // Extract data bytes
+  byte status = this.Data[0];
+  byte value1 = this.Data[1];
+  byte value2 = this.Data[2];
+  
+  Write("  Byte 0 (Status): 0x%02X", status);
+  Write("  Byte 1 (Value 1): 0x%02X", value1);
+  Write("  Byte 2 (Value 2): 0x%02X", value2);
+  
+  // Analyze status bits
+  if (status & 0x01) {
+    Write("  Bit 0 is SET");
+  }
+  if (status & 0x80) {
+    Write("  Bit 7 is SET");
+  }
+}
+
+// Handle messages in range 0x200-0x2FF
+on message 0x200 {
+  Write("=== Message Range 0x200-0x2XX ===");
+  Write("  ID: 0x%03X, DLC: %d", this.ID, this.DLC);
+}
+
+on message 0x300 {
+  Write("=== Message 0x300 ===");
+  Write("  DLC: %d", this.DLC);
+  
+  if (this.DLC == 8) {
+    // Extract 16-bit values
+    int value_16bit_0 = (this.Data[0] << 8) | this.Data[1];
+    int value_16bit_1 = (this.Data[2] << 8) | this.Data[3];
+    
+    Write("  16-bit value 0: %d (0x%04X)", value_16bit_0, value_16bit_0);
+    Write("  16-bit value 1: %d (0x%04X)", value_16bit_1, value_16bit_1);
+  }
+}
+
+// Handle error frames
+on message error {
+  gErrorMessagesCount++;
+  Write("!!! ERROR FRAME DETECTED !!!");
+  Write("  Error Count: %d", gErrorMessagesCount);
+  Write("  Timestamp: %dms", GetTime());
+}
+
+// Keyboard commands for statistics
+on key 'S' {
+  Write("");
+  Write("========== Message Statistics ==========");
+  Write("Total Messages Received: %d", gTotalMessagesReceived);
+  Write("Message 0x100 Count: %d", gTimer0x100Count);
+  Write("Error Frames: %d", gErrorMessagesCount);
+  
+  if (gLastMessageTime > 0) {
+    Write("Last Message Time: %dms", gLastMessageTime);
+  }
+  Write("");
+}
+
+on key 'C' {
+  Write("========== Resetting Counters ==========");
+  gTotalMessagesReceived = 0;
+  gTimer0x100Count = 0;
+  gErrorMessagesCount = 0;
+  Write("Counters reset to zero");
+}
+
+on key 'D' {
+  Write("");
+  Write("========== Message Details Help ==========");
+  Write("this.ID       - CAN message ID");
+  Write("this.DLC      - Data Length Code (0-8)");
+  Write("this.Time     - Timestamp in milliseconds");
+  Write("this.Data[n]  - Access individual data bytes");
+  Write("");
+  Write("Example message structure:");
+  Write("  Standard CAN: 11-bit ID (0x000-0x7FF)");
+  Write("  Extended CAN: 29-bit ID (0x00000000-0x1FFFFFFF)");
+  Write("");
+}
+
+on stop {
+  Write("========== Message Receiver Stopped ==========");
+  Write("Final Statistics:");
+  Write("  Total Messages: %d", gTotalMessagesReceived);
+  Write("  Error Frames: %d", gErrorMessagesCount);
+}

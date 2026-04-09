@@ -1,0 +1,133 @@
+/*
+ * Script 08: Timers and Timing
+ * 
+ * Description:
+ *   Demonstrates timer creation, timer events, GetTime() for measuring
+ *   elapsed time, and Wait() for delays.
+ * 
+ * Key Concepts:
+ *   - SetTimer() to start a timer
+ *   - on timer event handler
+ *   - CancelTimer() to stop a timer
+ *   - GetTime() for current timestamp
+ *   - Wait() for delays
+ */
+
+// Global variables
+timer gRecurringTimer;
+timer gOneTimeTimer;
+timer gCountdownTimer;
+
+int gTimerCounter = 0;
+dword gStartTime = 0;
+
+on start {
+  Write("========== Timer Script Started ==========");
+  Write("Initializing timers...");
+  Write("");
+  
+  // Start recurring timer (fires every 1000ms)
+  SetTimer(gRecurringTimer, 1000);
+  
+  // Start one-time timer (fires once after 3000ms)
+  SetTimer(gOneTimeTimer, 3000);
+  
+  // Start countdown timer
+  SetTimer(gCountdownTimer, 500);
+  
+  // Record start time
+  gStartTime = GetTime();
+  
+  Write("gRecurringTimer: 1000ms (recurring)");
+  Write("gOneTimeTimer: 3000ms (one-time)");
+  Write("gCountdownTimer: 500ms (countdown)");
+  Write("Start time recorded");
+}
+
+// Recurring timer - fires every 1000ms
+on timer gRecurringTimer {
+  gTimerCounter++;
+  dword elapsed = GetTime() - gStartTime;
+  
+  Write("Timer fired #%d (elapsed: %dms)", gTimerCounter, elapsed);
+  
+  // Stop after 5 firings
+  if (gTimerCounter >= 5) {
+    Write("Stopping recurring timer");
+    CancelTimer(gRecurringTimer);
+  }
+}
+
+// One-time timer - fires once after 3000ms
+on timer gOneTimeTimer {
+  dword elapsed = GetTime() - gStartTime;
+  Write("One-time timer fired at %dms - script will continue running", elapsed);
+}
+
+// Countdown timer - fires every 500ms
+on timer gCountdownTimer {
+  dword elapsed = GetTime() - gStartTime;
+  Write("Countdown tick: %dms", elapsed);
+  
+  // Cancel after 6 seconds
+  if (elapsed > 6000) {
+    Write("Canceling countdown timer");
+    CancelTimer(gCountdownTimer);
+  }
+}
+
+// Handle keyboard input to trigger actions
+on key 'T' {
+  Write("========== Key 'T' pressed ==========");
+  Write("Current time: %dms", GetTime() - gStartTime);
+}
+
+on key 'P' {
+  Write("========== Pause Test - Key 'P' pressed ==========");
+  Write("Waiting 2 seconds...");
+  Write("Time before wait: %dms", GetTime() - gStartTime);
+  
+  Wait(2000);  // Wait 2 seconds
+  
+  Write("Time after wait: %dms", GetTime() - gStartTime);
+  Write("Resume complete");
+}
+
+on key 'R' {
+  Write("========== Restart Timers - Key 'R' pressed ==========");
+  
+  // Cancel all timers
+  CancelTimer(gRecurringTimer);
+  CancelTimer(gOneTimeTimer);
+  CancelTimer(gCountdownTimer);
+  
+  // Reset counter and start time
+  gTimerCounter = 0;
+  gStartTime = GetTime();
+  
+  // Restart timers
+  SetTimer(gRecurringTimer, 1000);
+  SetTimer(gOneTimeTimer, 3000);
+  SetTimer(gCountdownTimer, 500);
+  
+  Write("Timers restarted");
+}
+
+on key 'Q' {
+  Write("========== Stop All Timers - Key 'Q' pressed ==========");
+  CancelTimer(gRecurringTimer);
+  CancelTimer(gOneTimeTimer);
+  CancelTimer(gCountdownTimer);
+  Write("All timers stopped");
+}
+
+on stop {
+  Write("========== Timer Script Stopped ==========");
+  Write("Total timer fires: %d", gTimerCounter);
+  Write("Total elapsed time: %dms", GetTime() - gStartTime);
+  
+  // Cancel any remaining timers
+  CancelTimer(gRecurringTimer);
+  CancelTimer(gOneTimeTimer);
+  CancelTimer(gCountdownTimer);
+}

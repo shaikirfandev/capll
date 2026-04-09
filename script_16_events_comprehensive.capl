@@ -1,0 +1,553 @@
+/*
+ * Script: CAPL Events and Event Handlers Comprehensive Demo
+ * 
+ * Description:
+ *   This script demonstrates ALL types of CAPL event handlers:
+ *   - System events (on start, on stop)
+ *   - Message events (on message)
+ *   - Timer events (on timer)
+ *   - Keyboard events (on key)
+ *   - Environment variable events (on SimVar)
+ *   - Error events (on message error)
+ * 
+ * Key Concepts:
+ *   - Event-driven programming
+ *   - Event handlers as reactive functions
+ *   - Event sequencing and execution order
+ *   - Practical event patterns
+ */
+
+// ===== TIMERS =====
+timer gMonitorTimer;
+timer gHeartbeatTimer;
+timer gCleanupTimer;
+
+// ===== GLOBAL COUNTERS =====
+int gTotalEvents = 0;
+int gMessageCount = 0;
+int gErrorCount = 0;
+int gKeyPressCount = 0;
+int gTimerFireCount = 0;
+
+// ===== STATUS VARIABLES =====
+int gIsActive = 0;
+int gScriptStartTime = 0;
+int gLastEventTime = 0;
+int gEventSequence = 0;
+
+// ===== STATISTICS BY EVENT TYPE =====
+int gEventStats[10] = {0};  // Store different event type counts
+#define STAT_SYSTEM 0
+#define STAT_MESSAGE 1
+#define STAT_TIMER 2
+#define STAT_KEYBOARD 3
+#define STAT_ERROR 4
+
+// ===== THE SYSTEM EVENT: ON START =====
+/*
+ * Triggers: Exactly once when the measurement/simulation starts
+ * Purpose: Initialize variables, setup timers, prepare system
+ * Guaranteed: Runs before any other events
+ */
+on start {
+  Write("");
+  Write("╔════════════════════════════════════════════════════╗");
+  Write("║        CAPL EVENTS AND EVENT HANDLERS DEMO         ║");
+  Write("║              >> ON START Event Fired <<             ║");
+  Write("╚════════════════════════════════════════════════════╝");
+  Write("");
+  
+  // Initialize variables
+  gIsActive = 1;
+  gScriptStartTime = GetTime();
+  gTotalEvents = 0;
+  gMessageCount = 0;
+  gErrorCount = 0;
+  gKeyPressCount = 0;
+  gTimerFireCount = 0;
+  gEventSequence = 0;
+  
+  // Reset statistics
+  for (int i = 0; i < 10; i++) {
+    gEventStats[i] = 0;
+  }
+  
+  Write("Initialization:");
+  Write("  Global variables reset");
+  Write("  Timers preparing...");
+  Write("");
+  
+  // Start recurring timers
+  SetTimer(gMonitorTimer, 2000);      // Monitor every 2 seconds
+  SetTimer(gHeartbeatTimer, 5000);    // Heartbeat every 5 seconds
+  
+  Write("Timers started:");
+  Write("  gMonitorTimer: 2000ms interval");
+  Write("  gHeartbeatTimer: 5000ms interval");
+  Write("");
+  
+  // Display help
+  DisplayHelpOnStartup();
+}
+
+// ===== SYSTEM EVENT: ON STOP =====
+/*
+ * Triggers: Exactly once when measurement/simulation stops
+ * Purpose: Cleanup, logging, cancel timers
+ * Last chance: Save data before script terminates
+ */
+on stop {
+  Write("");
+  Write("╔════════════════════════════════════════════════════╗");
+  Write("║            >> ON STOP Event Fired <<               ║");
+  Write("║              FINAL STATISTICS                      ║");
+  Write("╚════════════════════════════════════════════════════╝");
+  Write("");
+  
+  // Cancel all timers
+  CancelTimer(gMonitorTimer);
+  CancelTimer(gHeartbeatTimer);
+  CancelTimer(gCleanupTimer);
+  
+  // Display final statistics
+  int totalRuntime = GetTime() - gScriptStartTime;
+  
+  Write("FINAL RUNTIME STATISTICS:");
+  Write("─────────────────────────────────────");
+  Write("Total Runtime: %d ms (%.2f seconds)", totalRuntime, (float)totalRuntime / 1000);
+  Write("Total Events Processed: %d", gTotalEvents);
+  Write("");
+  
+  Write("EVENT BREAKDOWN:");
+  Write("─────────────────────────────────────");
+  Write("System Events: %d (on start + on stop)", gEventStats[STAT_SYSTEM]);
+  Write("Message Events: %d", gEventStats[STAT_MESSAGE]);
+  Write("Timer Events: %d", gEventStats[STAT_TIMER]);
+  Write("Keyboard Events: %d", gEventStats[STAT_KEYBOARD]);
+  Write("Error Events: %d", gEventStats[STAT_ERROR]);
+  Write("");
+  
+  Write("MESSAGE STATISTICS:");
+  Write("─────────────────────────────────────");
+  Write("Total Messages: %d", gMessageCount);
+  Write("Error Frames: %d", gErrorCount);
+  Write("");
+  
+  gIsActive = 0;
+}
+
+// ===== MESSAGE EVENTS =====
+
+/*
+ * Triggers: Every message that arrives on the bus
+ * Purpose: Count all messages, collect general statistics
+ * Keyword: * means "any message"
+ */
+on message * {
+  if (!gIsActive) return;
+  
+  gTotalEvents++;
+  gMessageCount++;
+  gEventStats[STAT_MESSAGE]++;
+  gLastEventTime = GetTime();
+  gEventSequence++;
+  
+  // Silently count (would flood output)
+  // Different messages can be handled by specific handlers
+}
+
+/*
+ * Triggers: Only when message with ID 0x100 arrives
+ * Purpose: Handle specific message type
+ * Advantage: More efficient than filtering in on message *
+ */
+on message 0x100 {
+  if (!gIsActive) return;
+  
+  Write("");
+  Write("┌─ on message 0x100 Event ─────────────────────────┐");
+  Write("│ Message ID: 0x100");
+  Write("│ DLC: %d bytes", this.DLC);
+  Write("│ Timestamp: %d ms", this.Time);
+  
+  // Display data bytes
+  Write("│ Data: ", 0);
+  for (int i = 0; i < this.DLC; i++) {
+    Write("%02X ", this.Data[i]);
+  }
+  Write("");
+  
+  // Extract example values
+  byte statusByte = this.Data[0];
+  int value16bit = (this.Data[1] << 8) | this.Data[2];
+  
+  Write("│ Extracted:");
+  Write("│   Status byte: 0x%02X", statusByte);
+  Write("│   16-bit value: %d (0x%04X)", value16bit, value16bit);
+  Write("└───────────────────────────────────────────────────┘");
+}
+
+/*
+ * Triggers: Only when message with ID 0x200 arrives
+ * Demonstrates: Multiple specific message handlers
+ */
+on message 0x200 {
+  if (!gIsActive) return;
+  
+  Write("");
+  Write("┌─ on message 0x200 Event ─────────────────────────┐");
+  Write("│ Specific message handler for 0x200");
+  Write("│ Bytes: %02X %02X %02X %02X", 
+        this.Data[0], this.Data[1], this.Data[2], this.Data[3]);
+  Write("└───────────────────────────────────────────────────┘");
+}
+
+/*
+ * Triggers: When a CAN error frame is detected on the bus
+ * Purpose: Handle bus errors and diagnostics
+ */
+on message error {
+  gTotalEvents++;
+  gErrorCount++;
+  gEventStats[STAT_ERROR]++;
+  
+  Write("");
+  Write("┌─ on message error Event ──────────────────────────┐");
+  Write("│ !!! CAN ERROR FRAME DETECTED !!!                 ");
+  Write("│ Error #%d at %d ms", gErrorCount, GetTime());
+  Write("│ This usually indicates a bus problem              ");
+  Write("└───────────────────────────────────────────────────┘");
+}
+
+// ===== TIMER EVENTS =====
+
+/*
+ * Triggers: When gMonitorTimer expires (every 2 seconds)
+ * Purpose: Periodic monitoring and reporting
+ * Pattern: Recurring timer - fires repeatedly until canceled
+ */
+on timer gMonitorTimer {
+  if (!gIsActive) return;
+  
+  gTotalEvents++;
+  gTimerFireCount++;
+  gEventStats[STAT_TIMER]++;
+  
+  Write("");
+  Write("┌─ on timer gMonitorTimer Event ────────────────────┐");
+  Write("│ Recurring Timer (2 second interval)               ");
+  Write("│ Fire Count: %d", gTimerFireCount);
+  Write("│ Current Time: %d ms", GetTime());
+  
+  int elapsed = GetTime() - gScriptStartTime;
+  Write("│ Elapsed: %.2f seconds", (float)elapsed / 1000);
+  
+  Write("│ Activity:");
+  Write("│   Total Events: %d", gTotalEvents);
+  Write("│   Messages: %d", gMessageCount);
+  Write("│   Errors: %d", gErrorCount);
+  Write("└───────────────────────────────────────────────────┘");
+}
+
+/*
+ * Triggers: When gHeartbeatTimer expires (every 5 seconds)
+ * Purpose: Demonstrate multiple concurrent timers
+ */
+on timer gHeartbeatTimer {
+  if (!gIsActive) return;
+  
+  gTotalEvents++;
+  gEventStats[STAT_TIMER]++;
+  
+  Write("");
+  Write("┌─ on timer gHeartbeatTimer Event ──────────────────┐");
+  Write("│ ♥ HEARTBEAT - System is alive!");
+  Write("│ Concurrent with gMonitorTimer");
+  Write("│ Executes every 5 seconds");
+  Write("└───────────────────────────────────────────────────┘");
+}
+
+/*
+ * Triggers: After gCleanupTimer expires
+ * Purpose: Demonstrate one-time timers
+ * Note: Not started automatically - started by keyboard command
+ */
+on timer gCleanupTimer {
+  if (!gIsActive) return;
+  
+  gTotalEvents++;
+  gEventStats[STAT_TIMER]++;
+  
+  Write("");
+  Write("┌─ on timer gCleanupTimer Event ────────────────────┐");
+  Write("│ ONE-TIME TIMER - Runs once after delay");
+  Write("│ Time: %d ms", GetTime());
+  Write("│ (No need to manually cancel one-time timers)      ");
+  Write("└───────────────────────────────────────────────────┘");
+}
+
+// ===== KEYBOARD EVENTS =====
+
+/*
+ * Triggers: When user presses 'H' key
+ * Purpose: Display help information
+ */
+on key 'H' {
+  if (!gIsActive) {
+    return;
+  }
+  
+  gTotalEvents++;
+  gKeyPressCount++;
+  gEventStats[STAT_KEYBOARD]++;
+  
+  DisplayHelpMenu();
+}
+
+/*
+ * Triggers: When user presses 'S' key
+ * Purpose: Display statistics
+ */
+on key 'S' {
+  if (!gIsActive) return;
+  
+  gTotalEvents++;
+  gKeyPressCount++;
+  gEventStats[STAT_KEYBOARD]++;
+  
+  Write("");
+  Write("┌─ on key 'S' Event ────────────────────────────────┐");
+  Write("│ KEY PRESSED: 'S' (Statistics)                     ");
+  Write("│ Key Press Count: %d", gKeyPressCount);
+  Write("│ Time: %d ms", GetTime());
+  Write("│");
+  Write("│ Statistics:");
+  Write("│   Total Events: %d", gTotalEvents);
+  Write("│   Messages Received: %d", gMessageCount);
+  Write("│   Error Frames: %d", gErrorCount);
+  Write("│   Key Presses: %d", gKeyPressCount);
+  Write("│   Timer Events: %d", gEventStats[STAT_TIMER]);
+  Write("└───────────────────────────────────────────────────┘");
+}
+
+/*
+ * Triggers: When user presses 'M' key
+ * Purpose: Send a test message (demonstrates cascading events)
+ */
+on key 'M' {
+  if (!gIsActive) return;
+  
+  gTotalEvents++;
+  gKeyPressCount++;
+  gEventStats[STAT_KEYBOARD]++;
+  
+  Write("");
+  Write("┌─ on key 'M' Event ────────────────────────────────┐");
+  Write("│ KEY PRESSED: 'M' (Send Message)                   ");
+  
+  // Create and send a test message
+  Message testMsg;
+  testMsg.ID = 0x100;
+  testMsg.DLC = 4;
+  testMsg.Data[0] = 0xAA;
+  testMsg.Data[1] = 0xBB;
+  testMsg.Data[2] = 0xCC;
+  testMsg.Data[3] = 0xDD;
+  
+  Write("│ Sending test message 0x100...");
+  Send(testMsg);
+  
+  Write("│ Message sent!");
+  Write("│");
+  Write("│ NOTE: This also triggers the on message * handler");
+  Write("│       and possibly on message 0x100 handler!      ");
+  Write("│       Shows how events can cascade.              ");
+  Write("└───────────────────────────────────────────────────┘");
+}
+
+/*
+ * Triggers: When user presses 'T' key
+ * Purpose: Start a one-time timer
+ */
+on key 'T' {
+  if (!gIsActive) return;
+  
+  gTotalEvents++;
+  gKeyPressCount++;
+  gEventStats[STAT_KEYBOARD]++;
+  
+  Write("");
+  Write("┌─ on key 'T' Event ────────────────────────────────┐");
+  Write("│ KEY PRESSED: 'T' (Start Timer)                    ");
+  
+  Write("│ Starting gCleanupTimer (3 second delay)...");
+  SetTimer(gCleanupTimer, 3000);
+  
+  Write("│ Timer started!");
+  Write("│ Watch for the 'on timer gCleanupTimer' event");
+  Write("│ in approximately 3 seconds.                      ");
+  Write("└───────────────────────────────────────────────────┘");
+}
+
+/*
+ * Triggers: When user presses 'R' key
+ * Purpose: Reset all counters
+ */
+on key 'R' {
+  if (!gIsActive) return;
+  
+  gTotalEvents++;
+  gKeyPressCount++;
+  gEventStats[STAT_KEYBOARD]++;
+  
+  Write("");
+  Write("┌─ on key 'R' Event ────────────────────────────────┐");
+  Write("│ KEY PRESSED: 'R' (Reset Counters)                 ");
+  
+  Write("│ Resetting counters...                             ");
+  
+  gMessageCount = 0;
+  gErrorCount = 0;
+  gTimerFireCount = 0;
+  gTotalEvents = 1;  // This event counts as 1
+  
+  Write("│ All counters reset!");
+  Write("└───────────────────────────────────────────────────┘");
+}
+
+/*
+ * Triggers: When user presses 'C' key
+ * Purpose: Clear screen (show current state)
+ */
+on key 'C' {
+  if (!gIsActive) return;
+  
+  gTotalEvents++;
+  gKeyPressCount++;
+  gEventStats[STAT_KEYBOARD]++;
+  
+  Write("");
+  Write("╔════════════════════════════════════════════════════╗");
+  Write("║           CURRENT SYSTEM STATE                     ║");
+  Write("╚════════════════════════════════════════════════════╝");
+  Write("");
+  
+  Write("Active: %s", gIsActive ? "YES" : "NO");
+  Write("Runtime: %d ms", GetTime() - gScriptStartTime);
+  Write("");
+  
+  Write("COUNTERS:");
+  Write("  Total Events: %d", gTotalEvents);
+  Write("  Messages: %d", gMessageCount);
+  Write("  Errors: %d", gErrorCount);
+  Write("  Key Presses: %d", gKeyPressCount);
+  Write("  Timer Fires: %d", gTimerFireCount);
+  Write("");
+}
+
+/*
+ * Triggers: When user presses '?' key
+ * Purpose: Show advanced information
+ */
+on key '?' {
+  if (!gIsActive) return;
+  
+  gTotalEvents++;
+  gKeyPressCount++;
+  gEventStats[STAT_KEYBOARD]++;
+  
+  Write("");
+  Write("╔════════════════════════════════════════════════════╗");
+  Write("║           EVENT HANDLER INFORMATION                ║");
+  Write("╚════════════════════════════════════════════════════╝");
+  Write("");
+  
+  Write("EVENT TYPES IN THIS SCRIPT:");
+  Write("─────────────────────────────────────");
+  Write("1. on start - Triggered once at startup");
+  Write("2. on stop - Triggered once at shutdown");
+  Write("3. on message * - Every message on bus");
+  Write("4. on message 0x100 - Specific message ID");
+  Write("5. on message 0x200 - Another specific ID");
+  Write("6. on message error - CAN error frames");
+  Write("7. on timer gMonitorTimer - Recurring timer");
+  Write("8. on timer gHeartbeatTimer - Another timer");
+  Write("9. on timer gCleanupTimer - One-time timer");
+  Write("10. on key 'X' - Keyboard events");
+  Write("");
+  
+  Write("EVENT EXECUTION:");
+  Write("─────────────────────────────────────");
+  Write("- Events are queued and processed in order");
+  Write("- Each event handler runs to completion");
+  Write("- Handlers can trigger other events");
+  Write("- Example: 'M' key sends message, triggers");
+  Write("  'on message *' and 'on message 0x100'");
+  Write("");
+}
+
+// ===== ON SIMVAR EVENTS (Environment Variables) =====
+// Note: These are typically used with CANoe environment variables
+// You would define these in CANoe's environment setup
+
+/*
+ * Triggers: When an environment variable changes
+ * Purpose: React to external simulation changes
+ * Usage: Must be set up in CANoe environment
+ */
+/*
+on SimVar SimulationSpeed {
+  if (!gIsActive) return;
+  
+  gTotalEvents++;
+  gEventStats[X]++;
+  
+  Write("on SimVar Event: SimulationSpeed changed");
+  Write("New value: %d", SimulationSpeed);
+}
+*/
+
+// ===== HELPER FUNCTIONS =====
+
+void DisplayHelpOnStartup() {
+  Write("╔════════════════════════════════════════════════════╗");
+  Write("║             KEYBOARD COMMANDS                      ║");
+  Write("╚════════════════════════════════════════════════════╝");
+  Write("");
+  Write("H - Display this help menu");
+  Write("S - Display statistics");
+  Write("M - Send test message (cascading events)");
+  Write("T - Start one-time timer");
+  Write("R - Reset all counters");
+  Write("C - Show current state");
+  Write("? - Show event information");
+  Write("");
+}
+
+void DisplayHelpMenu() {
+  Write("");
+  Write("╔════════════════════════════════════════════════════╗");
+  Write("║           KEYBOARD HELP MENU                       ║");
+  Write("╚════════════════════════════════════════════════════╝");
+  Write("");
+  
+  Write("COMMAND KEYS:");
+  Write("─────────────────────────────────────");
+  Write("H - Show this help menu");
+  Write("S - Show statistics (messages, errors, etc.)");
+  Write("M - Send test message (to demonstrate cascading)");
+  Write("T - Start a one-time timer (3 second delay)");
+  Write("R - Reset all counters to zero");
+  Write("C - Show current system state");
+  Write("? - Show event handler information");
+  Write("");
+  
+  Write("WHAT TO TRY:");
+  Write("─────────────────────────────────────");
+  Write("1. Press 'M' to send a message and see multiple");
+  Write("   event handlers triggered automatically");
+  Write("2. Press 'T' then wait to see a timer event");
+  Write("3. Press 'S' repeatedly to see counters change");
+  Write("4. Observe the pattern of recurring timers");
+  Write("");
+}

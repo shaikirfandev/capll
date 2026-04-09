@@ -1,0 +1,298 @@
+/*
+ * Script 15: Multiplexed Messages and Complex Data Handling
+ * 
+ * Description:
+ *   Demonstrates handling multiplexed CAN messages where different
+ *   data is contained in the same message ID but identified by a
+ *   multiplexer (selector) field.
+ * 
+ * Key Concepts:
+ *   - Multiplexer-based message parsing
+ *   - Different data structures for different multiplexer values
+ *   - Multi-byte value extraction
+ *   - Complex message protocol handling
+ */
+
+// Multiplexer IDs for different message types
+#define MUX_ENGINE_DATA      0
+#define MUX_TRANSMISSION     1
+#define MUX_CHASSIS          2
+#define MUX_ENVIRONMENT      3
+#define MUX_DIAGNOSTICS      4
+
+// Global counters
+int gEngineDataCount = 0;
+int gTransmissionCount = 0;
+int gChassisCount = 0;
+int gEnvironmentCount = 0;
+int gDiagnosticsCount = 0;
+
+void ProcessEngineData(Message msg) {
+  gEngineDataCount++;
+  
+  Write("=== Engine Data (ID: 0x%X) ===", msg.ID);
+  
+  // Extract RPM (bytes 1-2, big-endian)
+  int rpm = (msg.Data[1] << 8) | msg.Data[2];
+  Write("  RPM: %d", rpm);
+  
+  // Extract Temperature (byte 3, scaled: value-40°C)
+  int tempRaw = msg.Data[3];
+  int tempCelsius = tempRaw - 40;
+  Write("  Temperature: %d°C", tempCelsius);
+  
+  // Extract Fuel Level (byte 4, percentage)
+  int fuelPercent = msg.Data[4];
+  Write("  Fuel Level: %d%%", fuelPercent);
+  
+  // Extract status flags (byte 5)
+  byte statusByte = msg.Data[5];
+  Write("  Status flags: 0x%02X", statusByte);
+  if (statusByte & 0x01) Write("    - Engine Running");
+  if (statusByte & 0x02) Write("    - High Temperature Warning");
+  if (statusByte & 0x04) Write("    - Low Fuel Warning");
+}
+
+void ProcessTransmissionData(Message msg) {
+  gTransmissionCount++;
+  
+  Write("=== Transmission Data (ID: 0x%X) ===", msg.ID);
+  
+  // Extract Gear position (byte 1, 0-6: P,R,N,D,3,2,1)
+  byte gear = msg.Data[1];
+  char gearName[] = "P";
+  switch (gear) {
+    case 0: gearName = "P"; break;
+    case 1: gearName = "R"; break;
+    case 2: gearName = "N"; break;
+    case 3: gearName = "D"; break;
+    case 4: gearName = "3"; break;
+    case 5: gearName = "2"; break;
+    case 6: gearName = "1"; break;
+  }
+  Write("  Gear: %s", gearName);
+  
+  // Extract Torque (bytes 2-3, big-endian, in Nm)
+  int torque = (msg.Data[2] << 8) | msg.Data[3];
+  Write("  Torque: %d Nm", torque);
+  
+  // Extract Transmission Temperature (byte 4)
+  int transTemp = msg.Data[4];
+  Write("  Trans Temp: %d°C", transTemp);
+  
+  // Extract Slip (byte 5)
+  byte slip = msg.Data[5];
+  Write("  Slip: %d%%", slip);
+}
+
+void ProcessChassisData(Message msg) {
+  gChassisCount++;
+  
+  Write("=== Chassis Data (ID: 0x%X) ===", msg.ID);
+  
+  // Extract Vehicle Speed (bytes 1-2, big-endian, in km/h)
+  int speed = (msg.Data[1] << 8) | msg.Data[2];
+  Write("  Speed: %d km/h", speed);
+  
+  // Extract Brake Pressure (bytes 3-4, big-endian)
+  int brakePressure = (msg.Data[3] << 8) | msg.Data[4];
+  Write("  Brake Pressure: %d bar", brakePressure);
+  
+  // Extract Steering Angle (byte 5, signed, in degrees)
+  int steeringRaw = (int)msg.Data[5];
+  if (steeringRaw > 127) {
+    steeringRaw = steeringRaw - 256;  // Convert to signed
+  }
+  Write("  Steering Angle: %d degrees", steeringRaw);
+}
+
+void ProcessEnvironmentData(Message msg) {
+  gEnvironmentCount++;
+  
+  Write("=== Environment Data (ID: 0x%X) ===", msg.ID);
+  
+  // Extract Ambient Temperature (byte 1, offset -40)
+  int ambientTemp = msg.Data[1] - 40;
+  Write("  Ambient Temp: %d°C", ambientTemp);
+  
+  // Extract Humidity (byte 2)
+  byte humidity = msg.Data[2];
+  Write("  Humidity: %d%%", humidity);
+  
+  // Extract Barometric Pressure (bytes 3-4, big-endian)
+  int baroPressure = (msg.Data[3] << 8) | msg.Data[4];
+  Write("  Pressure: %d hPa", baroPressure);
+}
+
+void ProcessDiagnosticsData(Message msg) {
+  gDiagnosticsCount++;
+  
+  Write("=== Diagnostics Data (ID: 0x%X) ===", msg.ID);
+  
+  // Extract DTC Count (byte 1)
+  byte dtcCount = msg.Data[1];
+  Write("  Active DTCs: %d", dtcCount);
+  
+  // Extract Error Code (bytes 2-3)
+  int errorCode = (msg.Data[2] << 8) | msg.Data[3];
+  Write("  Primary Error Code: 0x%04X", errorCode);
+  
+  // Extract Battery Voltage (bytes 4-5, big-endian, in 0.01V units)
+  int batteryRaw = (msg.Data[4] << 8) | msg.Data[5];
+  float batteryVoltage = (float)batteryRaw / 100;
+  Write("  Battery Voltage: %.2f V", batteryVoltage);
+}
+
+on start {
+  Write("========== Multiplexed Message Handler ==========");
+  Write("Receiving multiplexed CAN messages...");
+  Write("");
+  Write("Message IDs: 0x200 (multiplex protocol)");
+  Write("Multiplexer in byte 0:");
+  Write("  0 = Engine Data");
+  Write("  1 = Transmission Data");
+  Write("  2 = Chassis Data");
+  Write("  3 = Environment Data");
+  Write("  4 = Diagnostics Data");
+  Write("");
+}
+
+// Main message handler for multiplexed messages
+on message 0x200 {
+  Write("");
+  Write("Message received at %dms, DLC: %d", this.Time, this.DLC);
+  
+  // Extract multiplexer (first byte)
+  byte multiplexer = this.Data[0];
+  Write("Multiplexer: %d", multiplexer);
+  
+  // Route to appropriate handler
+  switch (multiplexer) {
+    case MUX_ENGINE_DATA:
+      ProcessEngineData(this);
+      break;
+      
+    case MUX_TRANSMISSION:
+      ProcessTransmissionData(this);
+      break;
+      
+    case MUX_CHASSIS:
+      ProcessChassisData(this);
+      break;
+      
+    case MUX_ENVIRONMENT:
+      ProcessEnvironmentData(this);
+      break;
+      
+    case MUX_DIAGNOSTICS:
+      ProcessDiagnosticsData(this);
+      break;
+      
+    default:
+      Write("! Unknown multiplexer value: %d", multiplexer);
+      break;
+  }
+}
+
+// Keyboard command to display statistics
+on key 'S' {
+  Write("");
+  Write("========== Message Statistics ==========");
+  Write("Engine Data messages: %d", gEngineDataCount);
+  Write("Transmission messages: %d", gTransmissionCount);
+  Write("Chassis messages: %d", gChassisCount);
+  Write("Environment messages: %d", gEnvironmentCount);
+  Write("Diagnostics messages: %d", gDiagnosticsCount);
+  Write("");
+  int total = gEngineDataCount + gTransmissionCount + gChassisCount + 
+              gEnvironmentCount + gDiagnosticsCount;
+  Write("Total multiplexed messages: %d", total);
+  Write("");
+}
+
+// Keyboard command to reset statistics
+on key 'C' {
+  Write("");
+  Write("========== Counters Reset ==========");
+  gEngineDataCount = 0;
+  gTransmissionCount = 0;
+  gChassisCount = 0;
+  gEnvironmentCount = 0;
+  gDiagnosticsCount = 0;
+  Write("All counters reset");
+  Write("");
+}
+
+// Simulate sending multiplexed messages
+on key 'T' {
+  Write("");
+  Write("========== Sending Test Messages ==========");
+  
+  // Send Engine Data
+  Message engineMsg;
+  engineMsg.ID = 0x200;
+  engineMsg.DLC = 8;
+  engineMsg.Data[0] = MUX_ENGINE_DATA;
+  engineMsg.Data[1] = 0x0B;  // RPM high byte
+  engineMsg.Data[2] = 0xB8;  // RPM low byte (3000 RPM)
+  engineMsg.Data[3] = 0x59;  // Temperature (89°C)
+  engineMsg.Data[4] = 0x64;  // Fuel 100%
+  engineMsg.Data[5] = 0x03;  // Status flags
+  engineMsg.Data[6] = 0x00;
+  engineMsg.Data[7] = 0x00;
+  Send(engineMsg);
+  Write("Engine Data message sent");
+  
+  // Send Transmission Data
+  Message transMsg;
+  transMsg.ID = 0x200;
+  transMsg.DLC = 8;
+  transMsg.Data[0] = MUX_TRANSMISSION;
+  transMsg.Data[1] = 3;        // Gear D
+  transMsg.Data[2] = 0x00;     // Torque high
+  transMsg.Data[3] = 0xFF;     // Torque 255 Nm
+  transMsg.Data[4] = 0x52;     // Temp 82°C
+  transMsg.Data[5] = 0x00;     // No slip
+  transMsg.Data[6] = 0x00;
+  transMsg.Data[7] = 0x00;
+  Send(transMsg);
+  Write("Transmission Data message sent");
+  
+  // Send Chassis Data
+  Message chassisMsg;
+  chassisMsg.ID = 0x200;
+  chassisMsg.DLC = 8;
+  chassisMsg.Data[0] = MUX_CHASSIS;
+  chassisMsg.Data[1] = 0x00;   // Speed high
+  chassisMsg.Data[2] = 0x50;   // Speed 80 km/h
+  chassisMsg.Data[3] = 0x00;   // Brake high
+  chassisMsg.Data[4] = 0x50;   // Brake 80 bar
+  chassisMsg.Data[5] = 0x00;   // Steering 0 degrees
+  chassisMsg.Data[6] = 0x00;
+  chassisMsg.Data[7] = 0x00;
+  Send(chassisMsg);
+  Write("Chassis Data message sent");
+  
+  Write("");
+}
+
+on key 'H' {
+  Write("");
+  Write("========== Help ==========");
+  Write("S - Show statistics");
+  Write("C - Reset counters");
+  Write("T - Send test messages");
+  Write("H - Show this help");
+  Write("");
+}
+
+on stop {
+  Write("");
+  Write("========== Multiplexed Message Handler Stopped ==========");
+  Write("Final Statistics:");
+  Write("  Engine Data: %d", gEngineDataCount);
+  Write("  Transmission: %d", gTransmissionCount);
+  Write("  Chassis: %d", gChassisCount);
+  Write("  Environment: %d", gEnvironmentCount);
+  Write("  Diagnostics: %d", gDiagnosticsCount);
+}
