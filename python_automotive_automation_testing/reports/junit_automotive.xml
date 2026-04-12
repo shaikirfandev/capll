@@ -1,2 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<testsuite name="automotive_automation_suite" tests="4" failures="0" errors="0" time="0.000007"><testcase classname="automotive.samples" name="can_speed_plausibility" time="0.000004" /><testcase classname="automotive.samples" name="uds_read_vin" time="0.000002" /><testcase classname="automotive.samples" name="gateway_latency" time="0.000000" /><testcase classname="automotive.samples" name="ota_precheck_voltage" time="0.000001" /></testsuite>
