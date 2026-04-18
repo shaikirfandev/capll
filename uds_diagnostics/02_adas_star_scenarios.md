@@ -6,22 +6,99 @@
 
 ---
 
-### Case 1 — AEB DTC U0429 Lost Radar Communication
-**S:** Production vehicle has DTC U0429 (Lost Communication with Radar). AEB disabled warning on cluster. Customer complaint: AEB not functioning.
-**T:** Diagnose root cause and verify fix via UDS.
-**A:**
-```
-19 02 09 on 0x7A0 → U0429 confirmed
-19 04 C0 00 01 01 → Freeze frame: Odometer=12km, Speed=0, IgnCycles=3
-22 D0 80 → Read radar bus voltage status → 0x00 (no power)
-28 00 01 → Enable comms (was suppressed during earlier test)
-Physically check 12V supply to radar ECU → found fuse F27 blown
-Replace fuse → radar powers up
-14 FF FF FF → Clear DTCs
-19 02 09 → No active DTCs
-31 01 E0 01 → Run AEB self-test routine → Result: 0x01 PASS
-```
-**R:** U0429 cleared. AEB re-enabled. Root cause: blown supply fuse to radar. Added fuse rating check to EOL test procedure.
+### Case 1 — AEB DTC U0429 Lost Radar Communication (Expanded)
+
+**S (Situation):** A brand-new production vehicle (Odometer: 12km) displays an "AEB System Disabled" warning on the instrument cluster. The customer reports the Autonomous Emergency Braking (AEB) feature is unavailable. A preliminary scan shows DTC U0429 is active in the ADAS control module.
+
+**T (Task):** Perform a full root cause analysis to identify why the ADAS ECU has lost communication with the forward-looking radar. Diagnose the issue using UDS, propose a fix, verify the repair, and suggest a long-term prevention strategy.
+
+---
+
+#### **A (Action):**
+
+**1. Initial DTC Confirmation & Freeze Frame Analysis**
+
+*   **Action:** Send a `ReadDTCInformation` request to the ADAS ECU (address `0x7A0`) to confirm the fault and retrieve its status.
+*   **UDS Command:**
+    ```
+    19 02 09
+    ```
+*   **Byte Breakdown:**
+    *   `19`: Service ID for `ReadDTCInformation`.
+    *   `02`: Sub-function `reportDTCByStatusMask`. This asks for DTCs that match a specific status.
+    *   `09`: Status Mask. `0x09` (`0000 1001`) requests DTCs where `testFailed` (bit 0) is true AND `confirmedDTC` (bit 3) is true. This is the standard way to ask for currently active and confirmed faults.
+*   **Result:** The ECU responds confirming `U0429` is active.
+
+*   **Action:** Retrieve the freeze frame data associated with `U0429` to understand the conditions at the exact moment the fault was logged.
+*   **UDS Command:**
+    ```
+    19 04 C0 00 01 01
+    ```
+*   **Byte Breakdown:**
+    *   `19 04`: `ReadDTCInformation` with sub-function `reportDTCSnapshotRecordByDTCNumber`.
+    *   `C0 00 01`: The DTC `U0429` encoded. Network DTCs often have a different encoding scheme.
+    *   `01`: The snapshot record number. `0x01` is the first (and often only) record.
+*   **Result:** Freeze frame shows: `Odometer=12km`, `VehicleSpeed=0`, `IgnitionCycles=3`, `ECU_Voltage=12.4V`. This tells us the fault occurred very early in the vehicle's life, while stationary, and the ADAS ECU itself had good voltage.
+
+**2. Investigating the Radar Power Status**
+
+*   **Hypothesis:** If the ADAS ECU has power but can't communicate with the radar, the radar itself might not have power.
+*   **Action:** Read a custom DID (`Data Identifier`) from the ADAS ECU designed to report the status of its peripheral components, including the radar's power supply.
+*   **UDS Command:**
+    ```
+    22 D0 80
+    ```
+*   **Byte Breakdown:**
+    *   `22`: Service ID for `ReadDataByIdentifier`.
+    *   `D0 80`: A custom DID for "Peripheral Power Status". This is OEM-specific.
+*   **Result:** The ECU responds `62 D0 80 00`. The `0x00` in the response indicates `Radar_Power_Status = OFF`. This is the critical clue. The ADAS ECU is confirming it cannot detect a power signature from the radar module.
+
+**3. Physical Inspection & Repair**
+
+*   **Action:** Based on the UDS result, perform a physical inspection of the radar's power supply chain.
+*   **Steps:**
+    1.  Consult the vehicle's electrical schematic to locate the fuse for the radar module.
+    2.  Locate and inspect fuse F27 in the engine bay fuse box.
+    3.  **Finding:** The fuse is visibly blown.
+    4.  Replace the blown fuse with a new one of the correct rating (e.g., 5A).
+    5.  After replacement, the radar module's status LED turns on.
+
+**4. Verification and Closure**
+
+*   **Action:** Clear the DTCs and run a system self-test to confirm the fix.
+*   **UDS Commands:**
+    ```
+    14 FF FF FF   // Clear All DTCs
+    19 02 09      // Re-read DTCs by status mask
+    31 01 E0 01   // Start AEB Self-Test Routine
+    ```
+*   **Byte Breakdown:**
+    *   `14 FF FF FF`: Service `ClearDiagnosticInformation` with a group address of `0xFFFFFF` (all groups).
+    *   `31 01 E0 01`: Service `RoutineControl` (`31`), sub-function `startRoutine` (`01`), with a routine ID of `E0 01` (OEM-specific ID for "AEB Full System Self-Test").
+*   **Result:**
+    *   The `14` service returns a positive response.
+    *   The subsequent `19 02 09` read shows no active DTCs.
+    *   The `31` service returns `71 01 E0 01 01`, where the final `01` means "Test Passed".
+    *   The "AEB System Disabled" warning on the cluster is now off.
+
+---
+
+#### **R (Result) & Deeper Analysis:**
+
+*   **Immediate Cause:** The radar module was unpowered due to a blown fuse (F27), causing the ADAS ECU to log a `U0429` communication loss DTC.
+*   **Root Cause Theory:** A fuse blowing on a new vehicle suggests either a faulty fuse from the supplier (unlikely but possible) or, more likely, a momentary short circuit during the vehicle assembly/testing process that stressed the fuse. It could also indicate a wiring harness issue (e.g., chafing against the chassis), which would require a more in-depth physical inspection.
+*   **DTC Deep Dive (U0429):**
+    *   **Code:** `U0429 - Invalid Data Received From Steering Column Control Module`. *Wait, the description seems wrong!* This is a common interview trap. While the generic SAE definition for U0429 might point to the steering module, in the context of this specific OEM and ADAS system, this "U" code has been repurposed to mean "Lost Communication with Forward Radar". Always rely on the OEM's specific DTC tables, not generic online lists.
+    *   **Related DTCs:** `U0121` (Lost Comm with ABS), `U0155` (Lost Comm with Cluster), `B2A77` (ECU Internal Humidity). If multiple "U" codes are present, it points towards a broader network or power issue rather than a single component.
+*   **Prevention & Design-Level Fix:**
+    1.  **EOL Test Improvement:** The End-of-Line (EOL) testing procedure at the factory should be updated. After the final software flash, a UDS script should run that queries the status of all ADAS peripherals (like `22 D0 80`). This would have caught the unpowered radar before the vehicle ever left the plant.
+    2.  **Fuse Analysis:** The blown fuse should be sent for failure analysis to rule out a manufacturing defect in the fuse itself.
+    3.  **Harness Review:** If this issue repeats across other vehicles, a full design review of the radar wiring harness routing is necessary to check for potential chafing or pinch points that could cause intermittent shorts.
+*   **Interview Tips & What the Interviewer is Looking For:**
+    *   **Systematic Approach:** They want to see you move logically from DTC -> Freeze Frame -> Hypothesis -> Targeted Test -> Physical Inspection -> Verification. Don't just jump to replacing parts.
+    *   **UDS Knowledge:** Mentioning specific services (`19`, `14`, `22`, `31`) and sub-functions (`02`, `04`) shows you know the tools. Explaining the byte codes is a bonus.
+    *   **OEM Specificity:** Acknowledging that DIDs (`D080`) and Routine IDs (`E001`) are OEM-specific shows real-world experience. Pointing out the `U0429` description ambiguity is a sign of a senior-level engineer.
+    *   **Thinking Beyond the Fix:** The best candidates don't just fix the problem; they think about how to prevent it from happening again (EOL test improvement, design review). This shows a "quality mindset".
 
 ---
 
