@@ -102,1364 +102,916 @@
 
 ---
 
-### Case 2 — ACC DTC C1042 Radar Sensor Misalignment
-**S:** ACC disengages randomly on highway. DTC C1042 active: Radar Horizontal Misalignment.
-**T:** Verify radar alignment via UDS diagnostic and corrective calibration.
-**A:**
-```
-10 03 → Enter Extended Session
-22 [OEM DID radar alignment] → Read current alignment angle: +3.2° (spec: ±0.5°)
-31 01 [Radar Alignment RID] → Start radar alignment routine
-  → Position vehicle on flat ground, 25m to flat reflector
-71 01 [RID] 01 → Result: new angle computed −0.1° (within spec)
-2E [OEM DID] [−0.1° encoded] → Write new alignment value
-11 03 → Soft reset
-19 02 09 → C1042 not present
-31 01 E0 02 → Run alignment verification routine → PASS
-```
-**R:** C1042 cleared. Alignment corrected via UDS routine. Root cause: vehicle body damage moved radar bracket 3.2° off axis. Alignment re-done and verified.
+### Case 2 — ACC DTC C1042 Radar Sensor Misalignment (Expanded)
+
+**S (Situation):** A customer reports that their Adaptive Cruise Control (ACC) system randomly disengages, particularly on long, straight highways. The instrument cluster shows an "ACC Unavailable" message. A workshop scan reveals an active DTC `C1042: Radar Horizontal Misalignment`.
+
+**T (Task):** Verify the extent of the radar's misalignment using UDS. Perform a dynamic or static calibration routine to correct the angle. Confirm the fix by checking the alignment value post-calibration and ensuring the DTC does not return.
 
 ---
 
-### Case 3 — Emergency AEB Does Not Activate in Test
-**S:** NCAP-style AEB test at 50 km/h against stationary target. AEB does not activate. No DTCs present.
-**T:** Use UDS to read AEB activation thresholds and mode status.
-**A:**
-```
-10 03
-22 [AEB_Config DID] → Read: AEB_Enable=0x00 (disabled!)
-19 02 FF → Scan all DTCs → none
-22 [AEB_Mode DID] → AEB_Mode=0x04 (workshop mode = AEB suppressed)
-31 01 [ExitWorkshop RID] → Exit workshop mode → 71 01 [RID] 01 PASS
-2E [AEB_Enable DID] 01 → Re-enable AEB
-11 01 → Hard reset
-22 [AEB_Config DID] → AEB_Enable=0x01 confirmed
-```
-**R:** AEB was left in workshop mode from a previous repair. Workshop mode suppresses AEB to prevent false activation during service. Root cause: workshop mode not cleared after repair. EOL check now includes AEB mode verification.
+#### **A (Action):**
+
+**1. Enter Extended Diagnostic Session**
+
+*   **Action:** To access calibration and diagnostic routines, the ECU must be in an extended session.
+*   **UDS Command:**
+    ```
+    10 03
+    ```
+*   **Byte Breakdown:**
+    *   `10`: Service ID for `DiagnosticSessionControl`.
+    *   `03`: Sub-function `extendedDiagnosticSession`.
+*   **Result:** The ECU responds `50 03`, confirming entry into the extended session.
+
+**2. Read Current Misalignment Angle**
+
+*   **Hypothesis:** The DTC indicates a misalignment. The first step is to quantify how severe it is.
+*   **Action:** Read the OEM-specific DID that contains the radar's current horizontal and vertical alignment angles.
+*   **UDS Command:**
+    ```
+    22 D1 0A
+    ```
+*   **Byte Breakdown:**
+    *   `22`: Service ID for `ReadDataByIdentifier`.
+    *   `D1 0A`: An OEM-specific DID for "Radar Alignment Status".
+*   **Result:** The ECU responds `62 D1 0A +3.2 -0.1`. This indicates a horizontal angle of **+3.2 degrees** (far outside the typical specification of ±0.5 degrees) and a vertical angle of -0.1 degrees (which is acceptable). The horizontal misalignment is the cause of the DTC.
+
+**3. Perform Radar Calibration Routine**
+
+*   **Action:** Initiate the radar calibration routine. This procedure commands the radar to find its new center based on reflections from a known target. This can be a static target in a workshop bay or dynamic calibration on a clear road. Here, we'll use a static target.
+*   **UDS Command:**
+    ```
+    31 01 E0 11
+    ```
+*   **Byte Breakdown:**
+    *   `31`: Service ID for `RoutineControl`.
+    *   `01`: Sub-function `startRoutine`.
+    *   `E0 11`: OEM-specific Routine ID for "Start Radar Static Calibration".
+*   **Prerequisites:** The workshop manual specifies the conditions: vehicle parked on a level surface, exactly 25 meters from a certified flat radar reflector target. The routine will fail with NRC `0x22` (conditionsNotCorrect) if these are not met.
+*   **Result:** The ECU responds `71 01 E0 11 01`, with the final `01` indicating the routine completed successfully. The radar's internal software has now calculated the new required offset.
+
+**4. Write and Verify New Alignment Value**
+
+*   **Action:** The new alignment value must be permanently written back to the ECU's non-volatile memory.
+*   **UDS Commands:**
+    ```
+    2E D1 0A -0.1   // Write the new calculated angle
+    11 03           // Soft reset to apply the change
+    22 D1 0A        // Read the angle again to verify
+    ```
+*   **Byte Breakdown:**
+    *   `2E`: Service ID for `WriteDataByIdentifier`. The new value of -0.1 degrees is encoded and sent.
+    *   `11 03`: Service `ECUReset` with sub-function `softReset`.
+*   **Result:** The final `22 D1 0A` read returns `62 D1 0A -0.1 -0.1`, confirming the new value has been stored correctly.
+
+**5. Final DTC Clear and Verification**
+
+*   **Action:** Clear the old DTC and run a final verification routine.
+*   **UDS Commands:**
+    ```
+    14 FF FF FF   // Clear All DTCs
+    31 01 E0 12   // Run Alignment Verification Routine
+    ```
+*   **Result:** The `14` service clears the `C1042` DTC. The verification routine (`E0 12`) passes, confirming the radar's view is now aligned with the vehicle's true path. A test drive confirms the ACC no longer disengages.
 
 ---
 
-### Case 4 — DTC B2A41 Camera Sensor Dirty/Blocked
-**S:** Customer reports LDW and LKA not working. DTC B2A41: Forward Camera Blocked.
-**T:** Distinguish between a real obstruction and a faulty camera self-clean sensor.
-**A:**
-```
-19 02 09 on 0x7A4 (camera ECU) → B2A41 confirmed
-22 [Camera_Status DID] → BlockageStatus=0x01 (obscured)
-22 [Wiper_Status DID] → WindshieldWiper_Cycles=0 (camera area not cleaned by wiper)
-2F [Wiper_Control DID] 03 01 → Force single wiper cycle → camera area cleared
-Wait 2s...
-22 [Camera_Status DID] → BlockageStatus=0x00 (clear)
-14 FF FF FF
-19 02 09 → No active DTCs
-```
-**R:** B2A41 was genuine blockage (insect debris on camera). Wiper cleared it. Added to customer advisory: keep camera area clean. Camera self-diagnostic confirmed working correctly.
+#### **R (Result) & Deeper Analysis:**
+
+*   **Immediate Cause:** The radar's horizontal angle was +3.2°, exceeding the maximum operational threshold and causing the ACC to become unavailable as a safety measure.
+*   **Root Cause Theory:** A 3.2° shift is significant and rarely happens on its own. This almost always points to minor physical damage. Investigation revealed the vehicle had a minor front-end impact in a parking lot, which was enough to bend the radar's mounting bracket slightly. The body shop repaired the cosmetic damage but did not perform the mandatory ADAS recalibration.
+*   **DTC Deep Dive (C1042):**
+    *   **Code:** `C1042 - Radar Sensor Horizontal Misalignment`. This is a chassis (`Cxxxx`) code, indicating an issue related to vehicle dynamics and control.
+    *   **How it's set:** The radar continuously compares its detected motion vector (from Doppler shifts) with the vehicle's motion vector (from wheel speed sensors and yaw rate sensors). If these two vectors diverge by more than a calibrated threshold for a set period, the ECU concludes it is no longer pointing straight and sets the DTC.
+*   **Prevention & Design-Level Fix:**
+    1.  **Service Process:** Mandate that any repair work involving the front bumper, grille, or chassis requires a full ADAS calibration check as the final sign-off step. This is now a standard insurance industry requirement.
+    2.  **ECU Logic:** Some newer ADAS ECUs have a "continuous calibration" feature. They can make minor alignment adjustments (typically < 1.0°) dynamically over time by observing road infrastructure (like lane markings and guardrails). This can compensate for minor shifts but would not have been able to correct a large 3.2° error.
+*   **Interview Tips & What the Interviewer is Looking For:**
+    *   **Calibration Knowledge:** They want to know you understand that ADAS is not just about electronics but also about precise physical alignment. Mentioning both static (workshop target) and dynamic (on-road) calibration methods shows breadth of knowledge.
+    *   **Safety Implications:** Explain *why* the system disables itself. An uncalibrated radar could "see" a car in the next lane as being directly ahead, causing phantom braking. Disabling the feature is the only safe state.
+    *   **Tool Chain:** Mentioning the need for a level surface and a certified reflector target shows you understand the full scope of the workshop environment required for ADAS repair.
+    *   **Problem Solving:** You correctly identified that a large angle shift implies physical damage, linking the diagnostic data to a real-world event.
 
 ---
 
-### Case 5 — Security Access Lockout on ADAS ECU During Calibration
-**S:** Calibration station sends wrong security key 3 times. ADAS ECU now reporting 0x36 (exceededNumberOfAttempts). Entire calibration line stopped.
-**T:** Recover ECU from security lockout.
-**A:**
-```
-27 01 → 7F 27 37 (requiredTimeDelayNotExpired) ← lockout active
-Wait 90 seconds (manufacturer lockout period)
-27 01 → 67 01 [seed bytes]  ← seed now available
-Compute key with correct algorithm
-27 02 [correct key] → 67 02 ← security unlocked
-Continue calibration sequence
-31 01 [Cal RID] → calibration proceeds normally
-```
-**R:** ECU recovered after waiting the lockout timer (90s defined in ECU spec). Root cause: wrong security key version loaded at station. Updated station with correct key algorithm. Lockout timer value documented in station runbook.
+### Case 3 — Emergency AEB Does Not Activate in Test (Expanded)
+
+**S (Situation):** During a controlled NCAP (New Car Assessment Programme) test scenario, a vehicle traveling at 50 km/h fails to activate its Autonomous Emergency Braking (AEB) when approaching a stationary target. The vehicle collides with the target. Critically, no DTCs are logged in the ADAS ECU.
+
+**T (Task):** Investigate why the AEB system failed to intervene despite the clear and present collision danger. Use UDS to inspect the system's configuration and operational mode to find the hidden reason for its inaction.
 
 ---
 
-### Case 6 — AEB Permanent DTC Environmental Damage
-**S:** AEB system has permanent DTC P0A1F that cannot be cleared with 14 FF FF FF.
-**T:** Understand permanent DTC and either clear properly or replace ECU.
-**A:**
-```
-19 18 → reportDTCWithPermanentStatus → P0A1F present
-14 FF FF FF → 54 positive, but P0A1F still in 19 18
-19 02 09 → P0A1F not in confirmed memory (correctly cleared)
-Explanation: Permanent DTC can only be cleared by completing OBD drive cycle
-  → System must run self-monitoring → if monitor passes → permanent DTC cleared automatically
-Drive cycle completed:
-  - Highway at 80+ km/h for 5 min
-  - ACC function actively tracking target
-19 18 → P0A1F no longer present
-```
-**R:** Permanent DTC cleared after completed drive cycle. Root cause: previous water ingress into ADAS ECU connectors caused intermittent fault. Connector repaired and sealed. Monitor passed → permanent DTC cleared.
+#### **A (Action):**
+
+**1. Initial Checks and Session Entry**
+
+*   **Action:** Confirm the absence of DTCs and enter an extended session to read configuration data.
+*   **UDS Commands:**
+    ```
+    19 02 FF   // Read DTCs by status mask FF (all DTCs)
+    10 03      // Enter Extended Session
+    ```
+*   **Result:** The `19 02 FF` request returns a positive response with no DTCs, confirming the system *thinks* it is operating correctly. The `10 03` request is successful.
+
+**2. Inspecting the AEB Configuration**
+
+*   **Hypothesis:** If there are no faults, the feature might be disabled by a configuration setting.
+*   **Action:** Read the DID that controls the master enable/disable state for the AEB feature.
+*   **UDS Command:**
+    ```
+    22 D2 01
+    ```
+*   **Byte Breakdown:**
+    *   `22`: `ReadDataByIdentifier`.
+    *   `D2 01`: OEM-specific DID for "AEB System Configuration".
+*   **Result:** The ECU responds `62 D2 01 00`. The data byte `0x00` corresponds to `AEB_Enable = Disabled`. This is a major finding, but it doesn't explain *why* it's disabled.
+
+**3. Investigating the ECU's Operational Mode**
+
+*   **Hypothesis:** Certain vehicle modes can suppress safety features to prevent unwanted activations during service or transport.
+*   **Action:** Read the DID that reports the overall operational mode of the ADAS system.
+*   **UDS Command:**
+    ```
+    22 D2 00
+    ```
+*   **Byte Breakdown:**
+    *   `D2 00`: OEM-specific DID for "ADAS Operational Mode".
+*   **Result:** The ECU responds `62 D2 00 04`. The data byte `0x04` is defined in the spec as **"Workshop Mode"**. In this mode, features like AEB and ACC are deliberately suppressed to allow technicians to work on the vehicle (e.g., on a rolling road) without the car trying to brake.
+
+**4. Exiting Workshop Mode and Re-enabling AEB**
+
+*   **Action:** The solution is to command the ECU to exit workshop mode and then explicitly re-enable the AEB feature.
+*   **UDS Commands:**
+    ```
+    31 01 E0 50   // RoutineControl to Exit Workshop Mode
+    2E D2 01 01   // WriteDataByIdentifier to re-enable AEB
+    11 01         // Hard reset to ensure all changes are applied
+    ```
+*   **Byte Breakdown:**
+    *   `31 01 E0 50`: Starts the routine `E0 50` ("Exit Workshop Mode").
+    *   `2E D2 01 01`: Writes the value `0x01` (Enable) to the AEB configuration DID.
+    *   `11 01`: A hard reset is often required to exit special modes completely.
+*   **Result:** The routines complete successfully.
+
+**5. Verification**
+
+*   **Action:** Read the configuration DIDs again to confirm the changes.
+*   **UDS Commands:**
+    ```
+    22 D2 00   // Read ADAS Mode
+    22 D2 01   // Read AEB Config
+    ```
+*   **Result:** The ECU now responds with `62 D2 00 01` (Operational Mode) and `62 D2 01 01` (AEB Enabled). The NCAP test is re-run, and the vehicle's AEB system now activates correctly and avoids the collision.
 
 ---
 
-### Case 7 — Radar Object List Empty — Firmware Mismatch
-**S:** After radar ECU software update at dealer, ADAS fusion ECU shows no radar objects. No DTCs except U0429 (no communication).
-**T:** Verify software versions match between radar and fusion ECU expectations.
-**A:**
-```
-22 F1 89 on 0x7A2 (radar) → SW Version: 3.2.0
-22 F1 89 on 0x7A0 (ADAS fusion) → expected radar version: 3.1.x
-→ Version mismatch detected
-31 01 FF 01 on 0x7A0 → Check Programming Dependencies → Result: 0x02 FAIL (radar version incompatible)
-Load correct radar firmware version 3.1.5:
-10 02 → 27 11/12 → 28 03 01 → 31 01 FF 00 → 34 → 36 → 37 → 31 01 FF 01 → PASS
-11 01 → Reset
-19 02 09 → No DTCs. Radar objects present.
-```
-**R:** Root cause: dealer loaded wrong firmware version (3.2.0 not compatible with this ADAS ECU). Programming dependency check failure is the key diagnostic. Correct version 3.1.5 restored. Lessons: always run 31 01 FF 01 after any ECU flash.
+#### **R (Result) & Deeper Analysis:**
+
+*   **Immediate Cause:** The AEB system was inactive because the ADAS ECU was in "Workshop Mode", which is designed to suppress active safety features during maintenance.
+*   **Root Cause Theory:** The vehicle had undergone a pre-test software update. The flashing tool or the technician-run script correctly put the vehicle into Workshop Mode to perform the update but failed to execute the final step of exiting the mode. This is a process error.
+*   **DTC Deep Dive:** The absence of a DTC is a key part of this scenario. The system was not faulty; it was operating exactly as designed while in Workshop Mode. This highlights that "no DTCs" does not always mean "no problem". It's a classic case where understanding the system's state and configuration is more important than just reading fault codes.
+*   **Prevention & Design-Level Fix:**
+    1.  **Process Improvement:** The post-flash checklist for technicians must include a mandatory step: "Verify ADAS is in Operational Mode (0x01)". This can be an automated check in the diagnostic tool.
+    2.  **HMI Indication:** A better design would be to display a small, non-intrusive icon or message on the instrument cluster (e.g., "Service Mode Active") when the vehicle is in a non-standard operational state like Workshop Mode. This provides visibility to the driver and technician.
+    3.  **Automatic Timeout:** For safety, Workshop Mode could be designed to automatically time out and revert to Operational Mode after a set period (e.g., 24 hours) or a certain number of ignition cycles.
+*   **Interview Tips & What the Interviewer is Looking For:**
+    *   **Beyond DTCs:** This scenario tests if you can diagnose a problem when the ECU isn't telling you something is broken. A good engineer immediately thinks about configuration, state, and mode.
+    *   **Understanding System States:** Mentioning different modes like "Workshop," "Transport," and "Operational" shows a deep understanding of the vehicle lifecycle.
+    *   **Safety Process:** Explaining *why* workshop mode exists (to prevent false activations on a service lift or rolling road) demonstrates you think about the safety of technicians and the integrity of the system.
+    *   **HMI/UX Feedback:** Suggesting an HMI indicator as a preventative measure shows you are thinking about the end-user and how to make the system's state more transparent.
 
 ---
 
-### Case 8 — BSD (Blind Spot Detection) DTC Asymmetric
-**S:** DTC C0A45 active on left rear radar only. Right radar fine. BSD indicator only works on right side.
-**T:** Isolate fault to sensor vs harness vs ECU.
-**A:**
-```
-19 02 09 on 0x7A6 → C0A45: Left Rear Radar Fault
-22 [LRRD_Status DID] → Voltage=11.2V (spec: >11.5V), Comms_Errors=47
-22 [RRRD_Status DID] → Voltage=12.1V, Comms_Errors=0
-CAN trace: Left radar CAN bus has intermittent errors (bit error count rising)
-Physically inspect: Left rear radar connector corroded
-Clean and re-pin connector → left radar comms restored
-14 FF FF FF
-19 02 09 → No active DTCs
-Test: both BSD indicators function correctly
-```
-**R:** Corroded connector on left rear radar. High contact resistance caused voltage drop and CAN errors. Re-pinned connector. Post-fix: run 100 CAN error count check as pass criterion.
+### Case 4 — DTC B2A41 Camera Sensor Dirty/Blocked (Expanded)
+
+**S (Situation):** A customer reports that their Lane Departure Warning (LDW) and Lane Keeping Assist (LKA) features are intermittently unavailable. The warning message "Front Camera Temporarily Unavailable" appears on the cluster. A scan of the forward camera module (address `0x7A4`) reveals an active DTC `B2A41: Forward Camera Blocked`.
+
+**T (Task):** Determine if the camera blockage is a genuine physical obstruction (like mud, ice, or debris) or a fault within the camera's self-diagnostic system. Use UDS to command a corrective action and verify the result.
 
 ---
 
-### Case 9 — Park Assist: One Ultrasonic Sensor Fails at Hot Temperature
-**S:** Intermittent P1A23 DTC (Ultrasonic Sensor 3 Signal Invalid). Only occurs when ambient temperature > 35°C. Works fine in morning.
-**T:** Capture freeze frame and characterise thermal dependency.
-**A:**
-```
-19 04 [P1A23 bytes] 01 → Read freeze frame
-Freeze frame: AmbientTemp=38°C, Odometer=15420km, Speed=0
-22 [UltraTemp DID] on sensor 3 → SensorTemp=71°C (near design limit)
-22 [UltraTemp DID] on sensors 1,2,4 → 52°C, 53°C, 54°C (normal)
-Root cause hypothesis: Sensor 3 located near exhaust → thermal soak
-Confirm: 19 17 → DTC Fault Detection Counter for P1A23 = 89/127 (near confirmed threshold)
-Thermal protection cover added to sensor 3 bracket
-Re-test at 40°C ambient → SensorTemp=58°C → no fault
-```
-**R:** Sensor 3 directly above exhaust heat zone. Thermal soak caused circuit instability above 65°C. Metal heat shield added. Freeze frame data was essential to correlate temperature. Design change propagated to all vehicles with rear sensor in that position.
+#### **A (Action):**
+
+**1. Confirm DTC and Read Camera Status**
+
+*   **Action:** Connect to the camera module (`0x7A4`) and confirm the DTC. Then, read the specific DID that reports the camera's interpretation of its own view.
+*   **UDS Commands:**
+    ```
+    19 02 09      // On address 0x7A4
+    22 D3 10      // Read Camera View Status DID
+    ```
+*   **Byte Breakdown:**
+    *   `19 02 09`: Standard DTC read on the camera ECU.
+    *   `22 D3 10`: `ReadDataByIdentifier` for the OEM-specific DID "Camera View Status".
+*   **Result:** The `19` service confirms `B2A41` is active. The `22` service returns `62 D3 10 01`. The data byte `0x01` is defined as `BlockageStatus = Obscured`. This means the camera's internal image processing algorithm has determined that its field of view is compromised.
+
+**2. Investigate Environmental Factors**
+
+*   **Hypothesis:** The blockage could be something the wipers can clear.
+*   **Action:** Read the status of the windscreen wipers to see if a wipe cycle has occurred recently.
+*   **UDS Command:**
+    ```
+    22 D4 05      // Read Wiper Status DID from BCM
+    ```
+*   **Result:** The BCM reports `Wiper_Cycles_Since_Ignition = 0`. This indicates the driver has not activated the wipers, so the system hasn't had a chance to self-clear. A physical inspection reveals a large, dried insect splat directly over the camera lens area.
+
+**3. Command a Corrective Action**
+
+*   **Action:** Instead of manually cleaning the windscreen, use UDS to force a single wipe cycle to test if the system can recover on its own. This is done using an `InputOutputControlByIdentifier` command sent to the Body Control Module (BCM), which controls the wipers.
+*   **UDS Command:**
+    ```
+    2F C1 23 03 01
+    ```
+*   **Byte Breakdown:**
+    *   `2F`: Service ID for `InputOutputControlByIdentifier`.
+    *   `C1 23`: OEM-specific DID for "Wiper Motor Control".
+    *   `03`: Control Parameter `returnControlToECU`. This tells the BCM to run the action once and then return to normal operation.
+    *   `01`: Control Option `Start_Single_Wipe`.
+*   **Result:** The wiper performs a single sweep across the windscreen, successfully clearing the insect debris from the camera's view.
+
+**4. Verify the Fix**
+
+*   **Action:** Wait a few seconds for the camera to re-evaluate its view, then read the status DID again and clear the DTC.
+*   **UDS Commands:**
+    ```
+    22 D3 10      // Read Camera View Status again
+    14 FF FF FF   // On address 0x7A4
+    ```
+*   **Result:** The `22 D3 10` command now returns `62 D3 10 00`, where `0x00` means `BlockageStatus = Clear`. The `14` service successfully clears the `B2A41` DTC. The warning message on the cluster disappears, and LDW/LKA become available.
 
 ---
 
-### Case 10 — Lane Keeping Assist Pulls Incorrectly to Left
-**S:** LKA (Lane Keep Assist) applies steering correction pulling left when it should pull right. DTC B3A88 active: Lane Detection Camera Angle Offset Out of Range.
-**T:** Read and correct camera extrinsic calibration via UDS.
-**A:**
-```
-10 03 → Extended session
-22 [Camera_Pitch DID] → −1.8° (spec: −0.5° to +0.5°)
-22 [Camera_Yaw DID] → +2.1° (spec: ±0.5°)
-31 01 [Camera_Cal_RID] → Start camera calibration routine
-  → Vehicle on calibration rig with targets
-71 01 [RID] 01 → Calibration complete
-22 [Camera_Yaw DID] → +0.1° (within spec)
-22 [Camera_Pitch DID] → −0.2° (within spec)
-14 FF FF FF → Clear DTCs
-19 02 09 → B3A88 not present
-Test drive: LKA corrects correctly to right when drifting left
-```
-**R:** Camera misalignment (pitch + yaw) caused incorrect lane position estimate. LKA responded to wrong reference. Calibration via UDS corrected both axes. Likely cause: windscreen replacement without recalibration.
+#### **R (Result) & Deeper Analysis:**
+
+*   **Immediate Cause:** The `B2A41` DTC was legitimate, triggered by insect debris physically obstructing the camera's lens. A forced wiper cycle was sufficient to clean the lens and resolve the issue.
+*   **Root Cause Theory:** This is a common real-world scenario. ADAS cameras have sophisticated image processing algorithms that constantly monitor the clarity of their own view. They look for high-frequency noise, low contrast, or uniform color blocks (like a patch of mud) to determine if they are obscured. The system worked exactly as designed.
+*   **DTC Deep Dive (B2A41):**
+    *   **Code:** `B2A41 - Forward Looking Sensor #1 Obscured`. This is a Body (`Bxxxx`) code, as it relates to a sensor that is part of the vehicle body, but it's often stored in the ADAS/Camera ECU.
+    *   **Set/Clear Conditions:** The DTC is typically set when the blockage detection algorithm reports >90% obscurity for more than 5 seconds. It is "healed" (cleared automatically) when the algorithm reports <10% obscurity for more than 10 seconds. In our case, we forced the clear with a `14` service.
+*   **Prevention & Design-Level Fix:**
+    1.  **Driver Education:** The owner's manual should include clear instructions and diagrams explaining the importance of keeping the windscreen area in front of the camera clean.
+    2.  **Automatic Wipers:** On vehicles equipped with rain sensors, the system can be designed to automatically trigger a single wipe cycle over the camera area if a blockage is detected and the rain sensor is dry. This provides a degree of self-healing.
+    3.  **Heated Windscreen:** In colder climates, a small heating element embedded in the windscreen directly in front of the camera can prevent ice or frost from causing a blockage, which is a very common cause for this DTC in winter.
+*   **Interview Tips & What the Interviewer is Looking For:**
+    *   **Cross-ECU Diagnostics:** This problem required communicating with multiple ECUs: the Camera (`0x7A4`) to diagnose the fault and the BCM to command the fix. This demonstrates an understanding of distributed vehicle systems.
+    *   **IO Control (`2F`):** Using `InputOutputControl` is a powerful diagnostic technique. It shows you know how to actively command components to test their function, rather than just passively reading data.
+    *   **Real-World vs. System Fault:** They want to see if you can distinguish between the system correctly reporting a real-world problem (a dirty lens) versus the system itself being faulty.
+    *   **Practicality:** Suggesting driver education and simple hardware solutions like heaters shows you think about practical, cost-effective ways to improve system robustness in the real world.
 
 ---
 
-### Case 11 — ACC Following Distance Shorter Than Set
-**S:** Customer sets ACC following distance to level 3 (furthest). ACC follows at level 1 distance. No DTC.
-**T:** Read and verify following distance configuration via UDS.
-**A:**
-```
-22 [ACC_Gap DID] → Current_Gap_Setting=0x01 (level 1 — closest)
-22 [ACC_GapRequest DID] → Driver_Requested=0x03 (level 3 — correct)
-→ Gap setting not propagating from driver request to ACC setting
-22 [HMI_ACC DID] → Gap_Override_Active=0x01 (override active!)
-22 [Gap_Override_DID] → Override_Source=0x02 (EOL configuration)
-EOL accidentally set gap to override level 1
-2E [Gap_Override DID] 00 → Disable override
-11 03 → Soft reset
-22 [ACC_Gap DID] → Now follows driver request correctly
-```
-**R:** EOL station had erroneously written gap override = level 1. Driver's selection was ignored. EOL configuration write verified corrected. Regression test added: verify no gap override written at EOL unless intentionally specified.
+### Case 5 — Security Access Lockout on ADAS ECU During Calibration (Expanded)
+
+**S (Situation):** A calibration station on the assembly line has come to a halt. The ADAS ECU on the current vehicle is refusing to enter the security level required for calibration routines. The diagnostic tool shows the ECU is returning NRC `0x36` (exceededNumberOfAttempts) and then `0x37` (requiredTimeDelayNotExpired) to `SecurityAccess` requests. The operator admits they may have used an outdated tool that sent the wrong key several times.
+
+**T (Task):** Recover the ECU from its security-locked state as quickly as possible to get the production line moving again. Do this safely without bricking the ECU, and implement a process to prevent recurrence.
 
 ---
 
-### Case 12 — Highway Driving Assist Unavailable: Speed Sign Reader Fault
-**S:** HDA (Highway Drive Assist) shows unavailable. System reads road speed limit as 0 km/h from camera. DTC C3B12: Speed Sign Recognition Error.
-**T:** Diagnose whether camera classifier or DID configuration is the fault.
-**A:**
-```
-22 [SpeedLimit DID] → Detected_Limit=0x00 km/h (incorrect)
-22 [Camera_Mode DID] → Camera_Region=0x00 (unknown region!)
-→ Camera speed sign model requires market region to be configured
-2E [Camera_Region DID] 0x01 → Set region to Europe
-11 03 → Soft reset
-22 [SpeedLimit DID] → Detected_Limit read correctly on test drive
-14 FF FF FF
-19 02 09 → C3B12 cleared, no active DTCs
-```
-**R:** Camera region not configured — sign classifier could not select the correct sign model for European speed signs. EOL did not write market region configuration. Added to EOL sequence: write camera region DID.
+#### **A (Action):**
+
+**1. Initial Assessment of the Lockout**
+
+*   **Action:** Send a `SecurityAccess` request for a seed (`RequestSeed` - sub-function `01`) and analyze the negative response code (NRC).
+*   **UDS Command:**
+    ```
+    27 01
+    ```
+*   **Result:** The ECU immediately responds `7F 27 36` (exceededNumberOfAttempts). This confirms the ECU's internal security counter has been tripped. Any subsequent attempt within the lockout period will result in `7F 27 37` (requiredTimeDelayNotExpired).
+
+**2. Waiting for the Time Delay**
+
+*   **Hypothesis:** The ECU will not provide a new seed until a manufacturer-defined time delay has passed. Brute-force attempts during this window are futile and may increment a permanent lockout counter.
+*   **Action:**
+    1.  Consult the ECU's diagnostic specification to find the value for "Security Lockout Time". The spec says it is **90 seconds**.
+    2.  Wait for at least 90 seconds. Do not send any further `27 01` requests during this time.
+
+**3. Attempting a Valid Security Handshake**
+
+*   **Action:** After the 90-second delay, attempt a clean, valid `SecurityAccess` handshake.
+*   **UDS Commands:**
+    ```
+    27 01         // Request Seed
+    // ECU responds: 67 01 DE AD BE EF (example seed)
+    // Tool computes key: Key = f(Seed), e.g., Key = Seed XOR 0xA5A5A5A5
+    27 02 C1 B2 E1 F0 // Send Key (sub-function 02)
+    ```
+*   **Byte Breakdown:**
+    *   `27 01`: After the delay, the ECU now provides a valid seed (`DE AD BE EF`).
+    *   `27 02 C1 B2 E1 F0`: The diagnostic tool uses the correct, pre-programmed algorithm to transform the seed into a key and sends it back.
+*   **Result:** The ECU responds `67 02`, indicating the key was accepted and security is unlocked. The calibration station can now run its routines.
+
+**4. Verification**
+
+*   **Action:** Immediately start the required calibration routine to confirm access is granted.
+*   **UDS Command:**
+    ```
+    31 01 E0 11   // Start Radar Static Calibration
+    ```
+*   **Result:** The ECU responds `71 01 E0 11 01`, and the calibration proceeds normally. The production line is unblocked.
 
 ---
 
-### Case 13 — UDS Communication Timeout During ADAS Calibration
-**S:** Calibration routine (31 01 RID) times out after 25 seconds. ECU does not respond.
-**T:** Diagnose why ECU stops responding mid-calibration.
-**A:**
-```
-31 01 [Cal_RID] → Response pending (7F 31 78) ← responseCorrectlyReceivedResponsePending
-Wait... → second 7F 31 78 received at t=10s
-Wait... → third 7F 31 78 at t=20s
-Wait... → no response at t=25s → timeout
-Re-enter session: 10 03 → positive response (ECU still alive)
-22 [Cal_Status DID] → Calibration_State=0x03 (in-progress but waiting for sensor condition)
-22 [Cal_Condition DID] → Waiting for zero motion (vehicle moving slightly on lift)
-Stabilise vehicle on lift → re-run 31 01
-71 01 [Cal_RID] 01 → PASS in 8 seconds
-```
-**R:** Calibration routine was waiting for vehicle motion < 0.01 m/s (required for static calibration). Small movement from technician leaning on car was causing it. Vehicle stabilised → routine completed. 0x78 responses correctly indicate processing — tester must continue waiting up to P2* (5s between 0x78s is conformant).
+#### **R (Result) & Deeper Analysis:**
+
+*   **Immediate Cause:** The ECU entered a temporary security lockout after receiving three consecutive incorrect keys. It was recovered by waiting for the 90-second time delay and then providing the correct key.
+*   **Root Cause Theory:** The calibration station was using an old version of the diagnostic software which contained an outdated security algorithm for this new model year ECU. The first two attempts failed, the third attempt triggered the lockout. This is a process and configuration management failure.
+*   **DTC Deep Dive:**
+    *   While no DTC is mandated for this, many OEMs will log a non-emissions-related DTC like `B1A79 - Security Access Denied` in the background or mirror memory. This helps track which ECUs in the field are being subjected to potential hacking attempts. Reading the extended data for this DTC might show an "attempt counter".
+*   **Prevention & Design-Level Fix:**
+    1.  **Configuration Management:** The factory's IT department must have a robust process for ensuring all diagnostic and calibration stations are running the correct, version-controlled software for the specific vehicle model and year being produced.
+    2.  **ECU Security Strategy:** The 90-second delay is a simple brute-force deterrent. More advanced strategies include:
+        *   **Exponential Backoff:** The delay increases with each failed attempt (e.g., 30s, 2m, 10m, 1hr).
+        *   **Permanent Lockout:** Some safety-critical ECUs will permanently lock after a certain number of failed attempts (e.g., 10), requiring a full ECU replacement. This is a hard-line defense against theft and unauthorized modification.
+        *   **PKI/Certificates:** Modern systems use Public Key Infrastructure, where the diagnostic tool must present a valid, signed certificate to even request a seed, adding another layer of security.
+*   **Interview Tips & What the Interviewer is Looking For:**
+    *   **Calm Under Pressure:** This scenario is about fixing a problem on a live production line. The key is to be systematic and not panic. Don't just keep trying to send keys. Identify the NRC, consult the spec, and wait.
+    *   **Security Mindset:** Explain *why* security access is necessary (to protect safety-critical functions like calibration from unauthorized changes) and why lockouts are a required security feature.
+    *   **Understanding NRCs:** Knowing the difference between `0x36` (Exceeded Attempts) and `0x37` (Time Delay Not Expired) is crucial. It shows you can interpret the ECU's specific feedback.
+    *   **Process Improvement:** The best answer includes a recommendation for improving the factory's software management process to prevent the issue from happening again. This shows you think at a system level.
 
 ---
 
-### Case 14 — DTC Fault Detection Counter Used to Predict Imminent Failure
-**S:** Pre-delivery quality check. No confirmed DTCs but validation engineer wants to check early warning state.
-**T:** Use sub-function 0x17 to check pending DTC counters.
-**A:**
-```
-19 17 → reportDTCFaultDetectionCounter
-Response includes:
-  C0 A4 11 → FDC=45/127 (radar temperature — rising, not yet confirmed)
-  C0 B2 22 → FDC=12/127 (camera voltage margin — low but stable)
-  C0 A4 45 → FDC=3/127  (ultrasonic — just started showing)
-C0 A4 11 FDC=45 is concerning — radar ECU temperature cycles near threshold
-Check radar mounting: found partially blocked ventilation slot
-Clear obstruction → re-test → FDC drops to 8/127 after 30min soak
-Document: FDC monitoring is an excellent pre-confirm fault detection tool
-```
-**R:** Pre-delivery, caught a radar thermal pre-fault before it became a customer complaint. Sub-function 0x17 is available in default session — no security needed. Incorporated into pre-delivery inspection checklist.
+### Case 6 — AEB Permanent DTC Environmental Damage (Expanded)
+
+**S (Situation):** A vehicle that was temporarily submerged in a flood has been repaired. Most ECUs responded to a `14 FF FF FF` (ClearAllDTCs) command, but the ADAS ECU retains a DTC, `P0A1F: Hybrid/EV Battery Pack Coolant Temperature Sensor 'A' Circuit Range/Performance`. This DTC cannot be cleared using the standard clear command, and it is preventing the AEB system from becoming active.
+
+**T (Task):** Explain the nature of a "Permanent DTC" (pDTC). Diagnose the underlying issue, perform the specific actions required to clear the pDTC, and verify that the AEB system is fully functional.
 
 ---
 
-### Case 15 — AEB Software Rollback After Customer Complaint
-**S:** New AEB SW version 3.5 causes false braking events. Need to roll back to 3.4. ADAS ECU is in field vehicles.
-**T:** Re-flash ADAS ECU with older software using full UDS programming sequence.
-**A:**
-```
-22 F1 89 → Current SW: 3.5.0
-Enter programming:
-  10 01 → 27 01/02 → 10 02 → 27 11/12
-  28 03 01 → Disable comms
-  31 01 FF 00 → Erase memory → 71 01 FF 00 01 PASS
-  34 00 44 [start addr] [size] → 74 20 [max block] ← max block 256 bytes
-  36 01...36 nn → Transfer all blocks
-  37 → Transfer exit
-  31 01 FF 01 → Check dependencies → PASS
-  28 00 01 → Re-enable comms
-  11 01 → Hard reset
-22 F1 89 → SW: 3.4.2 confirmed
-31 01 E0 01 → AEB self-test → PASS
-```
-**R:** SW 3.5 successfully replaced with 3.4.2. Post-flash: dependency check always run. Root cause under investigation: 3.5 had modified TTC calculation threshold causing false triggers. 3.5 removed from field update.
+#### **A (Action):**
+
+**1. Initial DTC Assessment**
+
+*   **Action:** Attempt to clear the DTC using the standard method and observe the result. Then, specifically request DTCs with "permanent" status.
+*   **UDS Commands:**
+    ```
+    14 FF FF FF      // Attempt to clear all DTCs
+    19 02 09         // Read standard confirmed DTCs
+    19 18 09         // Read permanent DTCs
+    ```
+*   **Byte Breakdown:**
+    *   `19 18 09`: `ReadDTCInformation` with sub-function `reportDTCWithPermanentStatus`. This specifically asks the ECU to report only the DTCs stored in its special, non-volatile permanent memory.
+*   **Result:**
+    *   The `14` service returns a positive response.
+    *   The `19 02 09` read returns no DTCs, meaning the fault is not *currently* failing.
+    *   The `19 18 09` read **still returns `P0A1F`**. This confirms its status as a permanent DTC.
+
+**2. Understanding and Clearing a Permanent DTC**
+
+*   **Hypothesis:** A pDTC is a special class of fault code, primarily for emissions-related components, that cannot be erased by a diagnostic tool. The ECU itself must erase it, but only after it has successfully run its internal self-test (its "monitor") and confirmed the fault is truly gone. The purpose is to prevent someone from clearing an emissions fault just before an inspection without actually fixing the problem.
+*   **Action:** The only way to clear the pDTC is to perform the specific "OBD Drive Cycle" required to run the monitor for the `P0A1F` fault.
+*   **Drive Cycle Steps (from OEM spec):**
+    1.  Ensure the vehicle has been off for at least 8 hours (cold start).
+    2.  Start the engine and let it idle for 2 minutes.
+    3.  Drive in stop-and-go traffic for 5 minutes, including at least 3 stops.
+    4.  Drive on a highway at a steady speed between 80-100 km/h for at least 5 minutes.
+    5.  During the highway drive, ensure the ACC is active and tracking a target vehicle. This specifically exercises the ADAS system's inputs.
+
+**3. Verification**
+
+*   **Action:** After completing the drive cycle, re-read the permanent DTC status.
+*   **UDS Command:**
+    ```
+    19 18 09
+    ```
+*   **Result:** The ECU now returns a positive response with no DTCs. The internal monitor for the coolant sensor circuit ran successfully during the drive cycle and, finding no fault, the ECU automatically erased the pDTC. The AEB system warning light is now off.
 
 ---
 
-### Case 16 — ACC Cruise Speed Incorrect by 10 km/h
-**S:** ACC set speed = 100 km/h. Actual maintaining speed = 110 km/h. No DTCs.
-**T:** Investigate set speed signal vs actual control.
-**A:**
-```
-22 [ACC_SetSpeed DID] → SetSpeed=100 km/h (correct)
-22 [Ego_Speed DID] → EgoSpeed_kph=89.1 km/h (incorrect — too low)
-22 [WheelSpeed DID] → LF=100, LR=100, RF=101, RR=100 (correct)
-→ ACC's EgoSpeed is under-reading by ~10%
-22 [WheelCircumference DID] → 1.98m (spec for this tyre: 2.19m)
-→ Wrong tyre circumference! ECU configured for 16" tyre, vehicle has 18"
-2E [WheelCircumference DID] 2.19 encoded → Write correct value
-11 03 → Soft reset
-22 [Ego_Speed DID] → Correct at 100 km/h
-```
-**R:** Wrong tyre (wheel) circumference calibration caused ~10% speed error. ACC compensated by maintaining 110 km/h while thinking it was driving at 100. Root cause: vehicle built with non-standard tyre without updating ECU configuration. Added tyre size check to EOL test.
+#### **R (Result) & Deeper Analysis:**
+
+*   **Immediate Cause:** The permanent DTC `P0A1F` was preventing AEB activation. It was cleared by successfully executing the prescribed OBD drive cycle, which allowed the ECU's internal self-test monitor to run and pass.
+*   **Root Cause Theory:** The DTC `P0A1F` seems unrelated to ADAS. However, in this integrated system, the ADAS ECU uses battery pack temperature data as an input for its operational strategy (e.g., it might limit ACC acceleration if the battery is overheating). The floodwater caused a temporary short or corrosion on the battery coolant sensor connector. The physical repair (cleaning and sealing the connector) fixed the fault, but the pDTC remained until the monitor could be run.
+*   **DTC Deep Dive (pDTCs):**
+    *   **Purpose:** Mandated by regulations like CARB (California Air Resources Board) to ensure emissions-related faults are genuinely fixed.
+    *   **Behavior:** A pDTC is stored in a separate, non-volatile memory location from standard DTCs. It can only be erased by the ECU's own software. The "Malfunction Indicator Lamp" (MIL) or Check Engine Light will remain on as long as a pDTC is stored.
+    *   **Clearing:** The ECU will clear the pDTC only after the monitor for that specific fault has run and passed on three consecutive drive cycles (in some implementations). Our single drive cycle was sufficient here.
+*   **Prevention & Design-Level Fix:**
+    1.  **Improved Sealing:** The root cause was water ingress. The connector for the battery temperature sensor should be reviewed for a higher IP (Ingress Protection) rating, like IP67 or IP6K9K, especially if it's in a location susceptible to water spray or submersion.
+    2.  **Service Information:** Workshop repair manuals must be crystal clear about pDTCs. The manual should explicitly state: "After fixing fault X, DTC Y will remain. You MUST perform drive cycle Z to clear the permanent DTC." This prevents technicians from wasting time trying to clear it with a tool or unnecessarily replacing the ECU.
+*   **Interview Tips & What the Interviewer is Looking For:**
+    *   **Regulatory Knowledge:** Mentioning CARB or OBD-II/EOBD regulations shows you understand that diagnostic design is not just about engineering convenience; it's driven by law.
+    *   **Distinguishing DTC Types:** Clearly explaining the difference between a regular DTC, a pending DTC, and a permanent DTC is a sign of a skilled diagnostician.
+    *   **System-Level Thinking:** You connected an apparently unrelated DTC (battery temp) to the ADAS system, showing you think about how different vehicle domains interact.
+    *   **Practical Repair:** Describing the need for a specific drive cycle shows you have experience with the practical, real-world steps of vehicle repair, not just theoretical diagnostics.
 
 ---
 
-### Case 17 — Emergency Call Trigger During ADAS Test (Unexpected)
-**S:** During ADAS bench test with simulated crash signal, eCall system activates unexpectedly. ADAS ECU is flooding CAN with crash signal.
-**T:** Suppress eCall during ADAS testing using UDS.
-**A:**
-```
-85 02 on eCall ECU → turnOffDTCSetting (prevent eCall DTC from triggering comms cascade)
-28 01 01 on ADAS ECU → enableRxDisableTx (suppress crash signal broadcast)
-Run ADAS test
-28 00 01 → Re-enable comms
-85 01 → Re-enable DTC setting
-Note: Could also use 2F [CrashSignal DID] 02 (freeze current state = no crash) during test
-```
-**R:** Communication control and DTC suppression used together to isolate ADAS test from safety systems. Always restore both services after test. Safety: confirm 28 00 01 and 85 01 sent before vehicle leaves test bench.
+### Case 7 — Radar Object List Empty — Firmware Mismatch (Expanded)
+
+**S (Situation):** A dealership service department replaces a faulty radar sensor on a vehicle. After installation, the ADAS system is completely non-functional. The ADAS fusion ECU logs DTC `U0429` (Lost Communication with Radar), and critically, the internal list of radar objects is empty. The new radar is physically connected and has power.
+
+**T (Task):** Diagnose why the ADAS fusion ECU is not receiving object data from a brand-new, powered radar. Verify the software and hardware compatibility between the two components and execute the correct recovery procedure.
 
 ---
 
-### Case 18 — Park Pilot Calibration via UDS Fails: NRC 0x22
-**S:** New Park Pilot feature requires post-production calibration. UDS command 31 01 [Park_Cal] returns 0x22 conditionsNotCorrect.
-**T:** Determine and satisfy the conditions required for calibration.
-**A:**
-```
-31 01 [Park_Cal RID] → 7F 31 22
-22 [Park_Cal_Conditions DID] → Conditions byte: 0x03
-  Bit 0=1: requires engine running
-  Bit 1=1: requires gear = Reverse
-  Bit 2=0: OK (speed = 0 met)
-  Bit 3=0: OK (vehicle on flat ground met)
-Start engine → shift to Reverse → re-attempt
-31 01 [Park_Cal RID] → 71 01 [RID] 01 PASS
-```
-**R:** 0x22 NRC is often misread as a permanent error. It means conditions are not met. Always read the conditions DID to understand what the ECU is waiting for. Calibration required: engine on + reverse gear.
+#### **A (Action):**
+
+**1. Verify Software Versions**
+
+*   **Hypothesis:** The new radar module may have been shipped with a firmware version that is incompatible with the existing ADAS fusion ECU.
+*   **Action:** Read the "Application Software Identification" DID from both the radar module and the ADAS fusion ECU.
+*   **UDS Commands:**
+    ```
+    22 F1 89      // On radar ECU (address 0x7A2)
+    22 F1 89      // On ADAS fusion ECU (address 0x7A0)
+    ```
+*   **Byte Breakdown:**
+    *   `22 F1 89`: `ReadDataByIdentifier` for the standardized DID `applicationSoftwareIdentification`.
+*   **Result:**
+    *   Radar (`0x7A2`) responds with software version **`3.2.0`**.
+    *   ADAS ECU (`0x7A0`) responds with its own software version and, in the extended data, a list of expected versions for its peripherals. The expected radar version is **`3.1.x`**.
+    *   This confirms a major version mismatch. The ADAS ECU is programmed to reject communication from any radar that doesn't have a `3.1.x` version.
+
+**2. Confirm Programming Dependencies**
+
+*   **Action:** To be certain, run the `CheckProgrammingDependencies` routine. This is a formal check where the ECU verifies the compatibility of all its connected sub-components.
+*   **UDS Command:**
+    ```
+    31 01 FF 01
+    ```
+*   **Byte Breakdown:**
+    *   `31 01`: `RoutineControl`, `startRoutine`.
+    *   `FF 01`: Standardized Routine ID for `checkProgrammingDependencies`.
+*   **Result:** The ECU responds `71 01 FF 01 02`. The final byte, `0x02`, means **"FAIL"**. The ECU is formally stating that its dependencies are not met, confirming the incompatibility.
+
+**3. Re-flash Radar with Correct Firmware**
+
+*   **Action:** The only solution is to flash the radar module with a compatible firmware version (`3.1.5` is the latest in the `3.1.x` series). This requires a full UDS programming sequence.
+*   **UDS Sequence (abbreviated):**
+    1.  `10 02`: Enter Programming Session.
+    2.  `27 11`/`27 12`: Unlock the ECU with a programming-level security key.
+    3.  `28 03 01`: Disable normal CAN communication.
+    4.  `31 01 FF 00`: Erase the radar's application memory.
+    5.  `34` / `36` / `37`: `RequestDownload`, `TransferData`, `RequestTransferExit` sequence to download the `3.1.5` firmware file.
+    6.  `31 01 FF 01`: Run `checkProgrammingDependencies` again. This time it returns `...01` (PASS).
+    7.  `11 01`: Hard reset the radar ECU.
+
+**4. Verification**
+
+*   **Action:** After the reset, clear DTCs and check the system status.
+*   **UDS Commands:**
+    ```
+    14 FF FF FF   // On ADAS ECU (0x7A0)
+    19 02 09      // On ADAS ECU (0x7A0)
+    22 D5 00      // Read "Radar Object Count" DID
+    ```
+*   **Result:** The `U0429` DTC is now cleared and does not return. A read of the object count DID now shows a positive number of tracked objects, confirming the ADAS ECU is receiving and processing data from the radar.
 
 ---
 
-### Case 19 — Ghost DTC After ADAS ECU Replacement
-**S:** ADAS ECU replaced. New ECU now shows aged DTCs from previous unit history (configuration mismatch).
-**T:** Clear ECU NVM configuration to factory state.
-**A:**
-```
-19 02 FF → Many old DTCs with confirmed status (from previous ECU history — impossible on fresh ECU)
-→ Replacement ECU was actually a refurbished unit with old data
-31 01 [FactoryReset RID] → Factory reset routine
-71 01 [RID] 01 → PASS (reset confirmed)
-11 01 → Hard reset
-19 02 FF → No DTCs (clean state)
-22 F1 8C → Serial number now correct (new ECU serial)
-Perform full EOL sequence to re-write configuration
-```
-**R:** Refurbished ECU retained previous vehicle data. Factory reset via routine control cleared NVM. Always run factory reset + full EOL configuration sequence on any replacement ECU.
+#### **R (Result) & Deeper Analysis:**
+
+*   **Immediate Cause:** The replacement radar was loaded with firmware `3.2.0`, which was incompatible with the ADAS fusion ECU's software that expected version `3.1.x`.
+*   **Root Cause Theory:** This is a classic logistics and parts management failure. The dealership's parts department ordered a "radar module" but did not specify the correct software variant required for the vehicle's specific model year and ADAS ECU combination. The new part was physically identical but logically incompatible.
+*   **DTC Deep Dive (U0429):** In this context, the "Lost Communication" code was slightly misleading. The ECUs *could* communicate at a basic level (enough for the ADAS ECU to read the radar's version number). However, once the version mismatch was detected, the ADAS ECU's application layer deliberately "shunned" the radar, refusing to accept any further object data from it. From the application's perspective, the radar was "lost".
+*   **Prevention & Design-Level Fix:**
+    1.  **Parts Ordering System:** The dealership's parts system must be improved. When ordering a replacement ECU, the system should require the vehicle's VIN. The backend system should then automatically cross-reference the vehicle's as-built configuration and ensure the replacement part is shipped with the correct, compatible firmware pre-installed.
+    2.  **Bootloader Strategy:** A more robust bootloader in the radar could have a "compatibility negotiation" feature. Upon first connection, it could communicate with the ADAS ECU, recognize the mismatch, and automatically request the correct firmware version via an OTA update from the TCU, simplifying the dealer's job.
+*   **Interview Tips & What the Interviewer is Looking For:**
+    *   **Standardized DIDs/RIDs:** Knowing the common, standardized identifiers like `F189` (SW Version) and `FF01` (Check Dependencies) is a huge plus. It shows you're familiar with ISO 14229 standards, not just one company's custom DIDs.
+    *   **Programming Sequence Knowledge:** You don't need to know every byte, but being able to outline the main steps of a UDS flash sequence (`10`, `27`, `28`, `31`, `34/36/37`, `11`) is a core skill for an automotive diagnostics engineer.
+    *   **Logistics & Process:** The best engineers understand that technical problems often have their roots in human or logistical processes. Identifying the parts ordering system as the true root cause shows a mature, system-level perspective.
+    *   **Explaining the "Why":** Explaining *why* the ADAS ECU shuns the incompatible radar (to prevent unpredictable behavior from mismatched algorithms) demonstrates a deep understanding of functional safety principles.
 
 ---
 
-### Case 20 — ADAS ECU 0x78 Response Pending Loop
-**S:** Service 0x19 to read DTCs returns 0x78 response pending 15 times then finally responds. Total wait: 8 seconds. Is this a problem?
-**T:** Determine if this is a conformance issue or normal behaviour.
-**A:**
-```
-P2 Server = 50ms (max time before first response or 0x78)
-P2* Server = 5000ms (max time between each 0x78 and final response)
-Session P2* Client = 5000ms (tester waits up to 5s for each part)
+### Case 8 — BSD (Blind Spot Detection) DTC Asymmetric (Expanded)
 
-15 × 0x78 = 15 × some interval...
-Total 8s: each 0x78 arrived < 5s apart? YES (about every 500ms per 0x78)
-→ Conformant behaviour but unusual for a simple DTC read
-Check: ECU was busy running self-monitoring routines at start-up
-After ECU warm (60s after key on): same 19 02 09 returns in < 200ms
-→ Behaviour is start-up artefact, not a conformance violation
-```
-**R:** Conformant but sub-optimal. ECU was prioritising start-up monitoring over diagnostic response. Timing documented. Tool configured to wait full P2* × count. No issue if each 0x78 arrives within P2* = 5 seconds of the previous response or request.
+**S (Situation):** The driver reports that the Blind Spot Detection (BSD) warning light in the right-side mirror works correctly, but the light in the left-side mirror never illuminates, even when cars are present. A workshop scan reveals DTC `C0A45: Left Rear Radar Sensor Circuit Malfunction` is active.
+
+**T (Task):** Systematically diagnose the fault to determine if it lies with the left rear radar sensor itself, the wiring harness, or the main ADAS ECU's input channel. Isolate the root cause and verify the repair.
 
 ---
 
-### Case 21 — AEB DTC C0501 Wrong Vehicle Speed Signal Source
-**S:** DTC C0501: Invalid Vehicle Speed from ABS active. AEB disabled. ABS is working correctly (vehicle speed on cluster is correct).
-**T:** Identify signal routing mismatch.
-**A:**
-```
-22 [ADAS_EgoSpeed_Source DID] → Source=0x02 (reading from body CAN)
-22 [ABS_Speed DID] on body CAN → Signal present, correct value
-22 [ADAS_ABS_Comms DID] → Last_ABS_msg_age=2400ms (2.4 seconds stale!)
-→ ADAS is on powertrain CAN; ABS speed message is on body CAN
-→ Gateway should bridge speed from body to powertrain, but gateway routing not configured
-2E [Gateway_Route DID] [enable ABS speed bridge] → configure gateway
-11 01 → Reset both gateway and ADAS
-19 02 09 → C0501 cleared
-```
-**R:** Signal routing was missing at gateway. After a gateway software update, the ABS speed routing rule was dropped. ABS message on body CAN not forwarded to powertrain CAN where ADAS ECU lives. Gateway routing table restored.
+#### **A (Action):**
+
+**1. Initial DTC Confirmation and Targeted Reads**
+
+*   **Action:** Confirm the DTC and then read specific DIDs that report the health and status of both the left and right rear radar sensors to establish a baseline comparison. The BSD radars are often on a sub-bus, addressed by the ADAS gateway or a dedicated BSD module (e.g., at `0x7A6`).
+*   **UDS Commands (on address `0x7A6`):**
+    ```
+    19 02 09      // Confirms C0A45 is active
+    22 E1 01      // Read Left Rear Radar Status DID
+    22 E1 02      // Read Right Rear Radar Status DID
+    ```
+*   **Result:**
+    *   Left Radar (`22 E1 01`) responds: `62 E1 01 11.2 47`. This decodes to: `Voltage=11.2V`, `Comms_Errors=47`.
+    *   Right Radar (`22 E1 02`) responds: `62 E1 02 12.1 0`. This decodes to: `Voltage=12.1V`, `Comms_Errors=0`.
+
+**2. Analyzing the Diagnostic Data**
+
+*   **Hypothesis:** The data reveals two critical clues pointing towards a hardware issue on the left side:
+    1.  **Voltage Drop:** The left radar has a nearly 1V lower supply voltage than the right.
+    2.  **Communication Errors:** The left radar is reporting a high number of communication errors on the CAN/LIN bus, while the right has zero.
+*   **Conclusion:** This pattern strongly suggests a problem in the physical connection to the left radar, such as high resistance in the power or ground line, or a poor data line connection.
+
+**3. Physical Inspection and Repair**
+
+*   **Action:** Based on the UDS data, a targeted physical inspection of the left rear radar's connector and harness is required.
+*   **Steps:**
+    1.  The vehicle's rear bumper is removed to access the left rear radar module.
+    2.  **Finding:** The main connector on the radar module shows significant green-blue corrosion, a classic sign of water ingress. The pins for power and CAN High are visibly degraded.
+    3.  The corroded pins are carefully cleaned using a specialized contact cleaner.
+    4.  The corresponding terminals in the harness-side connector are also cleaned and re-tensioned.
+    5.  Dielectric grease is applied to the connector seal to prevent future water ingress.
+    6.  The connector is securely re-seated.
+
+**4. Verification**
+
+*   **Action:** With the physical repair complete, use UDS to verify that the electrical and communication parameters have returned to normal.
+*   **UDS Commands (on address `0x7A6`):**
+    ```
+    14 FF FF FF      // Clear the C0A45 DTC
+    22 E1 01         // Re-read Left Rear Radar Status
+    19 02 09         // Confirm no DTCs return
+    ```
+*   **Result:**
+    *   The `22 E1 01` read now returns: `62 E1 01 12.1 0`. The voltage is now `12.1V` (matching the right side) and the communication error count is `0`.
+    *   The `19 02 09` read confirms that the `C0A45` DTC does not reappear.
+    *   A road test confirms that the left-side BSD indicator now functions correctly.
 
 ---
 
-### Case 22 — Multi-DID Read for ADAS Health Check
-**S:** Daily build verification requires checking 5 ADAS configuration DIDs quickly (< 2 seconds total).
-**T:** Use multi-DID read to efficiently read all in one transaction.
-**A:**
-```
-Request: 22 F1 89 F1 90 D0 10 D0 11 D0 12
-Response: 62
-  F1 89 [SW Version bytes]
-  F1 90 [VIN bytes]
-  D0 10 [AEB Enable flag]
-  D0 11 [ACC Enable flag]
-  D0 12 [LKA Enable flag]
+#### **R (Result) & Deeper Analysis:**
 
-Single request → all 5 values in one response
-Verify:
-  SW Version = expected build
-  VIN = test vehicle VIN
-  AEB/ACC/LKA all = 0x01 (enabled)
-```
-**R:** Multi-DID read confirmed all 5 values in 140ms. More efficient than 5 individual reads (would take ~500ms at P2 spacing). Incorporate into build verification script.
+*   **Immediate Cause:** High resistance in the corroded left rear radar connector caused a voltage drop and signal integrity issues on the communication bus, leading to the `C0A45` DTC.
+*   **Root Cause Theory:** The connector's weather seal was likely compromised, either from the factory or during a previous repair, allowing moisture to enter over time and cause the corrosion. This is a common failure mode for sensors located in high-splash areas like behind the rear bumper.
+*   **DTC Deep Dive (C0A45):**
+    *   **Code:** `C0A45 - Sensor Circuit Malfunction`. This is a generic chassis (`Cxxxx`) code that many OEMs use for peripheral sensor failures. The key is the associated text: "Left Rear Radar".
+    *   **Set Conditions:** The ECU likely sets this DTC when a combination of factors is met, such as: `(Supply_Voltage < 11.5V)` AND `(Comms_Error_Count > 20 in 100ms)`.
+*   **Prevention & Design-Level Fix:**
+    1.  **Connector Design:** Use automotive-grade connectors with a higher IP rating (IP67 or IP6K9K) that are fully validated for the specific mounting location and its environmental exposure (e.g., salt spray, pressure washing).
+    2.  **Assembly Process:** The factory assembly procedure should include a final electrical test *after* the bumper is fitted that verifies the voltage and communication quality of the rear radars, which could catch a poorly seated connector.
+    3.  **Diagnostic Improvement:** The ADAS ECU could be programmed with more specific DTCs, such as `C0A45-16` (Circuit Voltage Below Threshold) or `C0A45-87` (Missing Message), which would allow a technician to pinpoint the issue even faster, distinguishing between a power problem and a data problem.
+*   **Interview Tips & What the Interviewer is Looking For:**
+    *   **Comparative Diagnostics:** The key to solving this quickly was comparing the faulty left sensor's data to the healthy right sensor's data. This immediately highlighted the voltage drop and comms errors as the primary anomalies.
+    *   **Linking Data to Physics:** A good engineer doesn't just read the data; they understand what it means physically. You correctly inferred that "low voltage + comms errors" points directly to a "bad connection".
+    *   **Targeted Inspection:** You didn't just start randomly checking wires. The UDS data allowed you to go straight to the most likely point of failure (the sensor connector), saving significant diagnostic time.
+    *   **Robustness:** Suggesting better IP-rated connectors and the application of dielectric grease shows you are thinking about long-term reliability and how to prevent the problem from recurring.
 
 ---
 
-### Case 23 — ADAS Cooldown: Security Access After 0x36 Lockout Recovery
-**S:** ADAS ECU locked out (0x36). Development spec says lockout = 10 attempts per vehicle lifetime. Current vehicle at attempt 9. Must proceed carefully.
-**T:** Plan single careful attempt with correct key.
-**A:**
-```
-Check: 19 17 → DTC P1F34 (SecurityAccessAttemptExceeded) FDC=115/127 (nearly to permanent DTC)
-Wait: 27 01 → 7F 27 37 (delay not expired: must wait 240 seconds per spec)
-Wait 240s...
-27 01 → 67 01 [seed: DE AD BE EF]
-Apply correct algorithm: Key = (Seed × 0x3141) XOR 0xA5A5A5A5 → Key = [correct bytes]
-27 02 [key] → 67 02 ← success! Security level 1 unlocked
-Print in work order: "Attempt 10/10 used — ECU must not need further security access or replacement required"
-```
-**R:** Final attempt used carefully. Correct key computed accurately. If this had failed: ECU permanently locked, replacement mandatory. Documentation updated: always verify key algorithm version before any security access attempt.
+### Case 9 — Park Assist: One Ultrasonic Sensor Fails at Hot Temperature (Expanded)
+
+**S (Situation):** A customer reports that their Park Assist system works perfectly in the morning but intermittently fails in the afternoon, especially on hot, sunny days. When it fails, the system shows a "Park Assist Unavailable" message. A scan reveals an intermittent DTC `P1A23: Front Ultrasonic Sensor 3 Signal Invalid`.
+
+**T (Task):** Capture environmental data to confirm the thermal dependency of the fault. Isolate the root cause to the sensor, its location, or the wiring. Propose and verify a robust fix that addresses the thermal issue.
 
 ---
 
-### Case 24 — Read DTC Extended Data: Failure Counter and Healing
-**S:** DTC P2A09 (Radar Return Rate Too Low) appears intermittently. Need to understand if it is healing (self-recovering) or getting worse.
-**T:** Use extended data record to read occurrence count and healing counter.
-**A:**
-```
-19 06 [P2A09 bytes] 01 → Read extended data record 0x01
-Response includes:
-  ExtRecord 0x01:
-    FailureCounter=14 (set 14 times since last clear)
-    HealingCounter=11 (healed 11 of 14 times — 79% heal rate)
-    LastFailOdometer=14620km
-    LastHealOdometer=14631km
-→ Most failures heal quickly → intermittent condition, not permanent hardware fault
-Pattern: failures at cold start (radar warm-up), heals after 2-3 minutes
-Root cause: Radar heater not coming on at cold start (related DTC P2B11 heater fault)
-Fix heater circuit → P2A09 failure counter stops incrementing
-```
-**R:** Extended data records reveal failure history patterns not visible from confirmed DTC alone. Healing counter showed intermittent nature. Led to correct root cause (heater fault) rather than replacing the radar.
+#### **A (Action):**
+
+**1. Retrieve Freeze Frame Data**
+
+*   **Action:** The fault is intermittent, so the freeze frame data is the most critical piece of evidence. It captures the vehicle's state at the exact moment the fault was logged.
+*   **UDS Command:**
+    ```
+    19 04 P1 A2 30 01
+    ```
+*   **Byte Breakdown:**
+    *   `19 04`: `ReadDTCInformation`, sub-function `reportDTCSnapshotRecordByDTCNumber`.
+    *   `P1 A2 30`: The DTC, encoded.
+    *   `01`: Record number 1.
+*   **Result:** The freeze frame data shows: `AmbientTemperature=38°C`, `VehicleSpeed=0`, `Odometer=15420km`. This confirms the customer's report that the fault occurs at high ambient temperatures.
+
+**2. Read Live Sensor Temperature Data**
+
+*   **Hypothesis:** The ambient temperature is high, but the sensor's local temperature could be even higher due to its mounting location.
+*   **Action:** Use a heat gun to carefully warm the front bumper area while monitoring the individual temperatures of the ultrasonic sensors via UDS.
+*   **UDS Commands:**
+    ```
+    22 E2 01   // Read Temperature, Sensor 1
+    22 E2 02   // Read Temperature, Sensor 2
+    22 E2 03   // Read Temperature, Sensor 3
+    22 E2 04   // Read Temperature, Sensor 4
+    ```
+*   **Result:** As the bumper warms to ~40°C, the DIDs report:
+    *   Sensor 1, 2, 4: Temperature rises to ~55°C.
+    *   Sensor 3: Temperature rises rapidly to **71°C**, which is near the sensor's maximum design limit of 75°C. At this point, the `P1A23` DTC sets.
+
+**3. Analyze Fault Detection Counter**
+
+*   **Action:** Check the Fault Detection Counter (FDC) to see how close the DTC is to becoming "confirmed". This tells us if the fault is borderline or happening frequently.
+*   **UDS Command:**
+    ```
+    19 17
+    ```
+*   **Result:** The response for `P1A23` shows an FDC value of `89/127`. This means the fault condition has been met 89 times out of the 127 required to promote the DTC to "confirmed" status. It's happening often, but not quite long enough to become a hard fault.
+
+**4. Physical Inspection and Repair**
+
+*   **Action:** The data points to a thermal issue specific to sensor 3's location. A physical inspection is needed.
+*   **Finding:** Upon removing the front bumper, it's discovered that ultrasonic sensor 3 is mounted directly above the vehicle's exhaust manifold heat shield, with minimal air gap. Heat radiating from the exhaust is "soaking" the sensor.
+*   **Repair:** A custom-fabricated metal heat shield is installed on the sensor's mounting bracket, creating a thermal barrier between the exhaust and the sensor.
+
+**5. Verification**
+
+*   **Action:** Re-run the heat gun test.
+*   **Result:** With the heat shield in place, the bumper is heated to 40°C again. The temperature of sensor 3 now stabilizes at **58°C**, well below its critical limit. The `P1A23` DTC does not set. The fix is successful.
 
 ---
 
-### Case 25 — LDW Incorrectly Active at Low Speed (Below Threshold)
-**S:** LDW activating at parking lot speeds (< 15 km/h). Should only activate above 60 km/h. No DTC.
-**T:** Check LDW activation speed threshold configuration.
-**A:**
-```
-22 [LDW_LowSpeed_Threshold DID] → 0x0F = 15 km/h (should be 0x3C = 60 km/h)
-→ Low speed threshold incorrectly programmed
-2E [LDW_LowSpeed_Threshold DID] 0x3C → Write 60 km/h
-11 03 → Soft reset
-22 [LDW_LowSpeed_Threshold DID] → 0x3C = 60 km/h confirmed
-Test: LDW not active below 60 km/h → pass
-Test: LDW active above 60 km/h with lane drift → pass
-```
-**R:** EOL configuration error: threshold DID scaled by 4 (0x3C = 60, not 60 directly). Encoding error in EOL station tool parameter file. Fixed in parameter file; all affected vehicles recalled for configuration update. 84 vehicles affected.
+#### **R (Result) & Deeper Analysis:**
+
+*   **Immediate Cause:** The internal electronics of ultrasonic sensor 3 were becoming unstable when its local temperature exceeded ~70°C, causing it to send invalid signals and trigger the `P1A23` DTC.
+*   **Root Cause Theory:** This is a classic design flaw related to component placement and thermal management. The design engineer who placed sensor 3 did not adequately account for the radiant heat from the nearby exhaust system, creating a thermal "hot spot".
+*   **DTC Deep Dive (P1A23):**
+    *   **Code:** `P1A23 - Ultrasonic Sensor 3 Signal Invalid`. This is a powertrain-related (`Pxxxx`) code, but it's manufacturer-defined (`P1xxx`). It indicates the signal from the sensor is irrational or missing, but not necessarily an electrical open/short circuit.
+    *   **Set Conditions:** The ECU likely sets this DTC when the sensor's echo return signal does not match the expected pattern, or if the sensor's internal self-diagnostic reports a temperature or voltage anomaly.
+*   **Prevention & Design-Level Fix:**
+    1.  **Design Relocation:** The permanent fix is a design change. The mounting position for sensor 3 must be moved in future production runs to a location with better airflow and less exposure to exhaust heat.
+    2.  **Th
+    3.  **Component Specification:** If the sensor cannot be moved, a higher-temperature-rated sensor (e.g., one rated to 95°C) must be specified for that specific location.
+*   **Interview Tips & What the Interviewer is Looking For:**
+    *   **Importance of Freeze Frames:** You immediately recognized that for an intermittent fault, the freeze frame is the #1 most valuable piece of data.
+    *   **Creative Diagnostics:** You didn't just wait for a hot day. You used a heat gun to replicate the failure condition in a controlled workshop environment, which is a hallmark of an efficient diagnostician.
+    *   **Reading Beyond the Code:** You didn't just stop at "Signal Invalid". You dug deeper to find the *thermal* root cause, showing you can think beyond the electrical domain.
+    *   **Design Feedback Loop:** The ultimate goal of diagnostics is not just to fix one car, but to provide feedback to engineering to make all future cars better. Suggesting a design relocation and the use of thermal simulation shows you understand this "feedback loop".
 
 ---
 
-### Case 26 — Traffic Sign Recognition: Region Coded Incorrectly
-**S:** TSR (Traffic Sign Recognition) reads 30 mph signs as 48 km/h. Vehicle is in UK (mph market).
-**T:** Verify and correct market/unit configuration.
-**A:**
-```
-22 [TSR_Region DID] → Region=0x01 (Europe km/h)
-Vehicle is UK market → should be 0x02 (UK mph)
-2E [TSR_Region DID] 0x02 → Set UK mph
-22 [TSR_Unit DID] → Now mph
-Test: TSR correctly reads UK road signs in mph
-Cluster display matches TSR reading
-```
-**R:** Region coded incorrectly at production (vehicle diverted from EU order to UK without ECU re-coding). Market code is a single write via 2E. Added to divert/remarket procedure.
+### Case 10 — Lane Keeping Assist Pulls Incorrectly to Left (Expanded)
+
+**S (Situation):** A customer complains that their Lane Keeping Assist (LKA) system feels "aggressive" and sometimes seems to pull the vehicle to the left, even when it's centered in the lane. A workshop test confirms the issue: when the vehicle drifts towards the right lane marking, the LKA correctly steers it back to the center. However, when it drifts left, the LKA does nothing or sometimes even applies a slight additional pull to the left. A DTC `B3A88: Lane Detection Camera Angle Offset Out of Range` is active.
+
+**T (Task):** Use UDS to read the camera's extrinsic calibration angles (its physical aim relative to the car's chassis). Perform a full recalibration to correct the angular offset and verify that the LKA system behaves correctly afterward.
 
 ---
 
-### Case 27 — Cross-Traffic Alert False Alarm Suppression via UDS
-**S:** RCTA (Rear Cross Traffic Alert) triggers every time reversing from home garage due to reflections off metal garage door.
-**T:** Check if there is a sensitivity calibration option.
-**A:**
-```
-10 03 → Extended session
-22 [RCTA_Threshold DID] → Threshold=0x14 (20 — in raw ECU units, most sensitive)
-Spec range: 0x14 (most sensitive, 20) to 0x28 (least sensitive, 40)
-Adjust: 2E [RCTA_Threshold DID] 0x1E → 30 (medium sensitivity)
-Test in garage → RCTA no longer false-triggers on metal door
-Test on road crossing → RCTA still triggers correctly on approaching vehicles
-Document adjustment in work order
-```
-**R:** Sensitivity reduced to eliminate garage reflection false alarm while maintaining proper cross-traffic detection. Customer-specific calibration possible via authorised workshop UDS session.
+#### **A (Action):**
+
+**1. Session Entry and Reading Calibration Angles**
+
+*   **Action:** Enter an extended session and read the specific DIDs that store the camera's current pitch (vertical angle) and yaw (horizontal angle).
+*   **UDS Commands:**
+    ```
+    10 03         // Enter Extended Session
+    22 D3 01      // Read Camera Pitch Angle DID
+    22 D3 02      // Read Camera Yaw Angle DID
+    ```
+*   **Result:**
+    *   The Pitch DID returns `-1.8` degrees.
+    *   The Yaw DID returns `+2.1` degrees.
+*   **Analysis:** The diagnostic specification for this camera states the operational tolerance is `±0.5` degrees for both pitch and yaw. Both angles are significantly out of specification. The positive yaw of +2.1° means the camera is physically pointing to the right of the vehicle's centerline.
+
+**2. Understanding the Faulty Behavior**
+
+*   **Hypothesis:** Because the camera is pointing 2.1° to the right, it "thinks" the vehicle's centerline is further to the right than it actually is. When the car is truly centered, the camera sees the left lane line as being dangerously close and the right lane line as being far away. This explains why it's aggressive about pulling away from the left line and reluctant to correct from the right.
+
+**3. Performing Camera Recalibration**
+
+*   **Action:** Initiate the camera's static calibration routine. This requires placing the vehicle in a specific bay with a large, patterned target board placed at a precise distance and height.
+*   **UDS Commands:**
+    ```
+    27 01 / 27 02   // Security Access for calibration
+    31 01 E0 20      // Start Camera Static Calibration Routine
+    ```
+*   **Byte Breakdown:**
+    *   `27 01`/`02`: Calibration is a safety-critical function and requires security to be unlocked.
+    *   `31 01 E0 20`: Starts the OEM-specific routine for camera calibration.
+*   **Process:** The routine commands the camera to take an image of the target board. The camera's software knows what the pattern *should* look like and calculates the precise pitch and yaw adjustments needed to make its view match the ideal reference.
+*   **Result:** The ECU responds `71 01 E0 20 01`, indicating the calibration was successful.
+
+**4. Verification**
+
+*   **Action:** Read the angles again, clear the DTC, and perform a final verification.
+*   **UDS Commands:**
+    ```
+    22 D3 01      // Read Pitch
+    22 D3 02      // Read Yaw
+    14 FF FF FF   // Clear DTCs
+    ```
+*   **Result:**
+    *   The Pitch DID now returns `-0.2` degrees (within spec).
+    *   The Yaw DID now returns `+0.1` degrees (within spec).
+    *   The `B3A88` DTC is cleared and does not return.
+    *   A final test drive confirms the LKA system now applies smooth, correct steering inputs for both left and right lane drifts.
 
 ---
 
-### Case 28 — AEB Inhibition During Trailer Tow Via UDS
-**S:** Customer attaches trailer. AEB rear radar output causes false frontal AEB events (trailer detected as object). Need to configure trailer tow mode.
-**T:** Enable trailer tow mode to suppress rear radar input to ADAS fusion.
-**A:**
-```
-22 [TrailerTow_Mode DID] → 0x00 (disabled)
-2E [TrailerTow_Mode DID] 0x01 → Enable trailer tow mode
-Effect: Rear radar excluded from ADAS fusion
-Effect: BSD and RCTA disabled automatically (documented in owner manual)
-Effect: AEB still functional for front radar/camera combination
-Test: No false AEB events with trailer attached
-Test: AEB still activates on forward stationary target
-11 03 → Soft reset
-22 [TrailerTow_Mode DID] → 0x01 confirmed
-```
-**R:** Trailer tow mode configured via UDS. Mode must be manually disabled when trailer detached. Some OEMs auto-detect trailer via 7-pin socket supply voltage. Documented customer procedure.
+#### **R (Result) & Deeper Analysis:**
+
+*   **Immediate Cause:** The forward-facing camera was physically misaligned with a yaw of +2.1°, causing the LKA system to have an incorrect perception of the vehicle's position within the lane. A full recalibration corrected the angular offsets.
+*   **Root Cause Theory:** A significant misalignment like this is almost always due to a physical change. Investigation revealed the customer had their windscreen replaced a week prior at a non-specialist, third-party glass shop. The shop physically installed the new windscreen and camera but did not have the diagnostic equipment or knowledge to perform the mandatory electronic recalibration.
+*   **DTC Deep Dive (B3A88):**
+    *   **Code:** `B3A88 - Camera Angle Offset Out of Range`. This is a body (`Bxxxx`) code that is highly specific. It is set when the camera's self-diagnosis or calibration routine calculates an angle that exceeds the pre-programmed maximum allowable deviation.
+*   **Prevention & Design-Level Fix:**
+    1.  **Service Industry Education:** Automotive manufacturers must provide clear information and training to independent repair shops about the absolute necessity of ADAS recalibration after common repairs like windscreen replacement, wheel alignment, or suspension work.
+    2.  **System Lockout:** A more aggressive safety strategy would be for the LKA system to be completely disabled (not just intermittent) and for a non-clearable DTC to be set if the system detects a post-replacement state without a subsequent calibration. The vehicle would have to be taken to an authorized dealer to unlock the system.
+    3.  **Dynamic Calibration:** While not suitable for a large initial error, some systems have dynamic calibration that can fine-tune the angles over several miles of driving on well-marked roads. This can help maintain accuracy over the vehicle's life but cannot replace the initial static calibration after a major physical change.
+*   **Interview Tips & What the Interviewer is Looking For:**
+    *   **Connecting the Dots:** The key is to connect the customer's subjective complaint ("pulls left") to the objective data (`+2.1° yaw`) and the physical explanation (camera pointing right).
+    *   **Extrinsic vs. Intrinsic:** Mentioning that this is an "extrinsic" calibration (the camera's position relative to the car) as opposed to "intrinsic" calibration (the camera's internal lens distortion) shows a deeper level of knowledge.
+    *   **Safety Rationale:** Explain *why* calibration is critical. An uncalibrated camera can cause the car to steer incorrectly, which is a major safety hazard. This is why the system logs a DTC and performs erratically.
+    *   **Industry Awareness:** Talking about the challenges of third-party repair and the need for industry education shows you're aware of the broader ecosystem and real-world challenges of maintaining ADAS-equipped vehicles.
 
 ---
 
-### Case 29 — ADAS ECU: Programming Fails at Erase Memory Routine
-**S:** During ECU flash, 31 01 FF 00 (erase memory) returns 7F 31 22 conditionsNotCorrect.
-**T:** Satisfy erase conditions.
-**A:**
-```
-31 01 FF 00 → 7F 31 22
-22 [Flash_Precondition DID] → Bits:
-  Bit0=0: OK (programming session active ✓)
-  Bit1=1: FAIL — DTC setting not disabled
-  Bit2=1: FAIL — Comms not disabled
-  Bit3=0: OK (security unlocked ✓)
+### Case 11 — Adaptive Cruise Control (ACC) Fails to Detect Vehicle After ECU Swap (Expanded)
 
-85 02 → Turn off DTC setting
-28 03 01 → Disable Rx/Tx
-31 01 FF 00 → 71 01 FF 00 01 PASS
-```
-**R:** Erase prerequisite check requires both DTC setting disabled and communication control disabled before allowing flash erase. Missed steps in flash sequence. Tool script updated to always include 85 02 and 28 03 01 before erase.
+**S (Situation):** A workshop replaces a faulty forward-facing radar module for the Adaptive Cruise Control (ACC) system. The new radar is a brand-new, genuine part. However, after installation, the ACC system is inoperative. When activated, the instrument cluster displays "ACC Unavailable." A DTC `C1A67: VIN Mismatch` is stored in the new radar module.
+
+**T (Task):** The new radar module is in a default "virgin" state. It needs to be provisioned with the host vehicle's Vehicle Identification Number (VIN) to become a trusted part of the vehicle's network. Use UDS to write the correct VIN to the radar's memory and then perform a full system reset to allow it to initialize correctly.
 
 ---
 
-### Case 30 — ADAS: Mirror Memory DTC Investigation
-**S:** Customer reports ADAS warning light in history (not current). Service DTC read shows nothing in standard memory. Customer insisting fault happened.
-**T:** Check mirror memory for historical DTCs.
-**A:**
-```
-19 02 09 → No confirmed DTCs
-19 0F 09 → reportMirrorMemoryDTCByStatusMask
-Response: C0 A1 12 [status byte]   ← C0A112: ADAS Processor Overtemperature
-  Status: bit3=1 confirmed, bit5=1 failed since clear → was a real fault, now healed
-19 04 C0 A1 12 01 → Mirror memory freeze frame:
-  Odometer=8420km, AmbientTemp=42°C, CPUTemp=105°C (spec max=90°C)
-Root cause: Severe ambient temperature + long sun exposure
-Check: cooling solution, ventilation path, ADAS ECU placement near A/C vent
-```
-**R:** Mirror memory reveals what standard DTC read misses. DTC was real, confirmed, and healed. Useful for investigating customer complaints where the fault has cleared. CPU temperature at 105°C → design review of thermal management initiated for high-ambient markets.
+#### **A (Action):**
+
+**1. Initial Diagnosis and Verification**
+
+*   **Action:** Enter an extended session and attempt to read the VIN from the new radar module.
+*   **UDS Command:**
+    ```
+    10 03         // Enter Extended Session
+    22 F1 90      // Read Data By Identifier: VIN
+    ```
+*   **Result:** The radar module responds with `62 F1 90 FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF`.
+*   **Analysis:** The response `FF FF...` is typical for unprogrammed memory. This confirms the radar is in a "virgin" state and does not have a VIN written to it. The `C1A67` DTC is being set because the radar's VIN (currently blank) does not match the VIN broadcast by the central gateway, which is a primary security and configuration check.
+
+**2. Writing the VIN to the New Module**
+
+*   **Action:** Unlock the ECU and write the correct 17-character vehicle VIN to the appropriate memory location. The VIN is obtained from the vehicle's registration or the central gateway. Let's assume the VIN is `1A2B3C4D5E6F7G8H9`.
+*   **UDS Commands:**
+    ```
+    27 01 / 27 02   // Security Access (Level 1)
+    2E F1 90 1A 2B 3C 4D 5E 6F 7G 8H 9... // Write Data By Identifier: VIN
+    ```
+*   **Byte Breakdown:**
+    *   `27 01`/`02`: Security access is required to write critical data like the VIN.
+    *   `2E`: WriteDataByIdentifier service.
+    *   `F1 90`: The DID for the VIN.
+    *   `1A 2B...`: The 17 bytes of the ASCII VIN.
+*   **Result:** The radar responds with `6E F1 90`, confirming the write operation was successful.
+
+**3. Verification and System Reset**
+
+*   **Action:** Read the VIN back to confirm it was written correctly. Then, clear the DTCs and perform a hard reset of the ECU to force it to re-initialize with its new identity.
+*   **UDS Commands:**
+    ```
+    22 F1 90      // Read VIN again
+    14 FF FF FF   // Clear All DTCs
+    11 01         // ECU Reset (Hard Reset)
+    ```
+*   **Result:**
+    *   The `22 F1 90` command now returns the correct VIN: `62 F1 90 1A 2B...`.
+    *   The `14` command clears the `C1A67` DTC.
+    *   After the `11 01` reset, the ECU reboots. Upon restart, it sees its VIN now matches the gateway's VIN, so the mismatch DTC does not reappear.
+    *   The "ACC Unavailable" message in the cluster disappears, and the ACC system can be activated and functions correctly.
 
 ---
 
-### Case 31 — AEB not available after windscreen replacement
-**S:** Customer had windscreen replaced at a third-party shop. AEB warning light on. Camera shows B2A50: Camera Calibration Required.
-**T:** Perform post-windscreen camera calibration via UDS.
-**A:**
-```
-19 02 09 → B2A50 pending/confirmed
-22 [Camera_CalStatus DID] → CalStatus=0x02 (calibration required)
-Drive to calibration bay with static target board
-10 03 → Extended session
-27 01/02 → Security access (calibration level)
-31 01 [Camera_Static_Cal RID] → Start static calibration
-  → Park 3m from target board (positioning per workshop manual)
-71 01 [RID] 01 → PASS
-14 FF FF FF → Clear DTCs
-19 02 09 → B2A50 not present
-22 [Camera_CalStatus DID] → 0x01 (calibrated)
-```
-**R:** Camera calibration mandatory after windscreen replacement. Third-party shop missed this step. Calibration via UDS routine with static target board completed in ~5 minutes. Added to third-party windscreen replacement instruction sheet.
+#### **R (Result) & Deeper Analysis:**
+
+*   **Immediate Cause:** The new radar module was not provisioned with the vehicle's VIN. This is a security and configuration feature to prevent incorrect parts from being used. Writing the VIN via UDS resolved the mismatch.
+*   **Root Cause Theory:** This is not a "fault" but a required procedural step. Modern vehicle architectures, especially for safety-critical systems like ADAS, use VIN locking (also known as component protection or personalization) to ensure traceability, correct configuration, and to prevent theft. A new part from the factory is intentionally left blank. The repair procedure *must* include this programming step. The workshop technician missed or was unaware of this step.
+*   **DTC Deep Dive (C1A67):**
+    *   **Code:** `C1A67 - VIN Mismatch`. This is a chassis (`Cxxxx`) code. It's a very common DTC in modern vehicles when a new module is installed. It is set when an ECU compares the VIN stored in its own non-volatile memory against the VIN it receives from a master ECU (usually the Body Control Module or Gateway) over the CAN bus, and the two do not match.
+*   **Prevention & Design-Level Fix:**
+    1.  **Guided Diagnostics:** The official manufacturer diagnostic tool should automatically detect a VIN mismatch on a new module and immediately launch a guided function that walks the technician through the VIN writing process. It should not be a manual, "look-up-the-DID" task.
+    2.  **QR Code Provisioning:** Future systems can streamline this. The new part could have a QR code on it. The technician scans the QR code with their diagnostic tool, which contains a unique identifier for the part. The tool then communicates with a manufacturer server to get the correct configuration and security certificates for that part and that specific VIN, automating the provisioning process.
+    3.  **Clearer Technician Information:** The error message in the instrument cluster could be more descriptive. Instead of "ACC Unavailable," it could say "ACC Service Required: Component Mismatch" to better guide the technician.
+*   **Interview Tips & What the Interviewer is Looking For:**
+    *   **Component Protection:** Use the term "component protection" or "VIN locking." This shows you understand the high-level concept and its purpose.
+    *   **Virgin vs. Used ECUs:** Explain the difference. A "virgin" ECU (like in this case) needs a VIN written to it. A used ECU from a salvage vehicle would already have the *wrong* VIN, which can be much harder (or impossible) to change without special tools.
+    *   **Process, Not a Failure:** Emphasize that this scenario is about following the correct *process* for module replacement, not about diagnosing an unexpected failure.
+    *   **Security Implications:** Discuss *why* VIN locking is important: it prevents someone from swapping in a stolen part, ensures the part has the correct software/calibration for that specific vehicle model, and maintains a traceable history for the component.
+
+### Case 12 — Blind Spot Monitor Disabled Due to Environmental Conditions (Expanded)
+
+**S (Situation):** A customer reports that their Blind Spot Monitor (BSM) system frequently turns off, displaying a message "Blind Spot Monitor Unavailable" in the instrument cluster, especially during heavy rain or snow. The system works perfectly in clear weather. When the fault is active, a DTC `B18D3: Blind Spot Sensor Blocked` is stored in the BSM modules.
+
+**T (Task):** This is an example of a system behaving as designed. The BSM radar sensors cannot function reliably when their view is obstructed by a buildup of water, ice, or mud. The task is to use UDS to read the sensor status and blockage percentage to confirm the reason for the shutdown and to explain to the customer why this is expected behavior.
 
 ---
 
-### Case 32 — ADAS Fault: NRC 0x25 (noResponseFromSubnetComponent)
-**S:** Sending UDS request to ADAS gateway address 0x7A0. Response 7F XX 25 received from gateway.
-**T:** Understand and resolve sub-network no-response.
-**A:**
-```
-7F 27 25 = noResponseFromSubnetComponent
-→ Gateway received request and forwarded to ADAS ECU on sub-bus
-→ ADAS ECU did not respond within gateway timeout
-Check: is ADAS ECU initialised? (may be in sleep mode)
-Send 3E 00 to ADAS ECU OBD address → 7E 00 response? No.
-Attempt to wake ECU via NM (Network Management) frame
-After NM wake-up: 22 F1 89 response in 50ms
-Root cause: ADAS ECU in low-power sleep mode. Gateway timed out before ECU woke.
-Fix: Adjust gateway forwarding timeout from 50ms to 300ms for ADAS sub-network
-```
-**R:** NRC 0x25 is a gateway error — the ECU didn't reply to the gateway's forwarded request. Not a direct ECU error. Sleep mode wakeup time was 200ms; gateway timeout was 50ms. Timeout extended.
+#### **A (Action):**
+
+**1. Connecting and Reading Sensor Status**
+
+*   **Action:** With the vehicle still in the "faulty" condition (i.e., during a simulated heavy rainstorm in a workshop wash bay or immediately after being driven in snow), connect a diagnostic tool.
+*   **UDS Commands:**
+    ```
+    10 02         // Enter Default Session (Extended not required for this read)
+    22 E1 10      // Read Left BSM Sensor Blockage Percentage
+    22 E1 11      // Read Right BSM Sensor Blockage Percentage
+    ```
+*   **Result:**
+    *   The Left BSM module (typically the master) responds: `62 E1 10 5A` (Hex `5A` = Decimal `90`).
+    *   The Right BSM module responds: `62 E1 11 61` (Hex `61` = Decimal `97`).
+*   **Analysis:** The DIDs return a blockage value from 0% to 100%. The system is reading that the left sensor is 90% blocked and the right is 97% blocked. The system's software has a pre-defined threshold (e.g., 80%) above which it considers the sensor data unreliable and must disable the feature for safety.
+
+**2. Clearing the Condition and Verifying Recovery**
+
+*   **Action:** Clean and dry the rear bumper corners where the BSM radar units are located. Then, re-read the blockage percentages.
+*   **UDS Commands:**
+    ```
+    22 E1 10      // Re-read Left BSM Sensor Blockage
+    22 E1 11      // Re-read Right BSM Sensor Blockage
+    ```
+*   **Result:**
+    *   Left BSM now responds: `62 E1 10 05` (5% blockage).
+    *   Right BSM now responds: `62 E1 11 04` (4% blockage).
+*   **Analysis:** The blockage values are now well below the threshold.
+
+**3. Final System Check**
+
+*   **Action:** Cycle the ignition and clear the DTCs.
+*   **UDS Command:**
+    ```
+    14 FF FF FF   // Clear All DTCs
+    ```
+*   **Result:** The `B18D3` DTC is now stored as "passive" or "historic" and can be cleared. The "Blind Spot Monitor Unavailable" message disappears from the cluster, and the system becomes fully functional again. No parts were replaced because no parts were faulty.
 
 ---
 
-### Case 33 — ACC DTC: Speed Sensor Improbable Signal
-**S:** DTC C1021 (Speed Signal Improbable) on ACC. Triggered during highway driving. Intermittent.
-**T:** Correlate with environmental conditions.
-**A:**
-```
-19 06 [C1021 bytes] 01 → Extended data:
-  FailureCount=8, Odometer at last fail=22145km
-  Freeze: Speed=142 km/h, SteeringAngle=2°, AccY=0.1g
-Pattern: Only occurs above 130 km/h
-22 [SpeedHistory DID] → Speed samples: 138, 139, 141, 41, 143, 144
-  → Single sample = 41 km/h (clearly an error spike)
-22 [SpeedSource DID] → Source=ABS LF wheel speed
-Investigate: wheel speed sensor gap (air gap) measured → LF sensor gap 2.1mm (spec: 0.4-0.9mm)
-Replace wheel speed sensor
-19 17 → C1021 FDC drops to 0 after fix
-```
-**R:** Air gap on LF wheel speed sensor too large → at high speed (high rotation frequency), sensor occasionally misses pulses → speed spike. Extended data pointing to LF sensor source was key. Replaced sensor; no further occurrences.
+#### **R (Result) & Deeper Analysis:**
+
+*   **Immediate Cause:** The BSM radar sensors, which are typically mounted behind the plastic rear bumper fascia, were obstructed by a layer of water/snow. This attenuated the radar signals to a point where the system could no longer guarantee accurate detection of other vehicles.
+*   **Root Cause Theory:** This is a fundamental limitation of the 24 GHz or 77 GHz radar technology used in these systems. While robust, they are not immune to severe environmental conditions. The system is correctly identifying this limitation and disabling itself to prevent false negatives (not detecting a car) or false positives (triggering a warning for a ghost object). This is a "fail-safe" design.
+*   **DTC Deep Dive (B18D3):**
+    *   **Code:** `B18D3 - Blind Spot Sensor Blocked`. This is a body (`Bxxxx`) code. It is not an electrical fault code. It is an informational code set by the BSM module's software algorithm. The algorithm continuously monitors the "noise" and return signature of its radar signals. When the signal quality degrades in a way that's characteristic of obstruction (e.g., high attenuation, diffuse reflections), it increments a blockage counter. When this counter exceeds the calibrated threshold, the DTC is set and the feature is disabled.
+*   **Prevention & Design-Level Fix:**
+    1.  **Heated Sensors:** High-end vehicles are beginning to incorporate small heating elements near the BSM sensors (or heated bumper fascias) to melt away ice and snow, increasing system availability in winter conditions.
+    2.  **Hydrophobic Coatings:** Applying a hydrophobic coating to the exterior of the bumper in front of the sensors can help water bead up and run off more easily, reducing the likelihood of a complete water film forming.
+    3.  **Smarter Algorithms:** Advanced algorithms can attempt to compensate for partial blockage or distinguish between different types of "noise," potentially allowing the system to remain active in less severe conditions. However, there will always be a point where physics wins and a shutdown is necessary.
+    4.  **Customer Education:** The most important fix is non-technical. The vehicle's owner's manual and the dealership service advisors must clearly explain that this is normal, expected behavior in certain weather conditions.
+*   **Interview Tips & What the Interviewer is Looking For:**
+    *   **System Limitations vs. Faults:** The key takeaway is your ability to distinguish between a genuine component fault and a system operating as designed under limiting conditions. This is a critical skill for a diagnostic engineer.
+    *   **Fail-Safe Mentality:** Explain *why* the system shuts down. It's a "fail-safe" action. An unreliable BSM is more dangerous than no BSM at all. The system prioritizes safety over feature availability.
+    *   **Informational DTCs:** Show that you understand that not all DTCs point to a broken part. Some are purely informational. The `B18D3` code is telling the technician "My sensors are blocked," not "My sensor is broken."
+    *   **Customer Communication:** A great answer includes the final step: how to communicate this to a non-technical customer. Explaining it's a safety feature working correctly builds trust and avoids unnecessary repairs.
+
+### Case 13 — Park-Assist Inaccurately Reports Obstacle Distance (Expanded)
+
+**S (Situation):** A customer complains that the rear park-assist system is not trustworthy. It beeps erratically when no obstacle is present and sometimes fails to detect a large object (like a wall) until the vehicle is dangerously close. A visual inspection shows one of the four ultrasonic sensors on the rear bumper is physically damaged, with a large crack in its surface. A DTC `B1B58: Rear Right Inner Ultrasonic Sensor Failure` is active.
+
+**T (Task):** The damaged sensor is sending unreliable data, confusing the park-assist algorithm. The task is to confirm the sensor's failure by reading its raw data via UDS, replace the faulty sensor, and then verify the new sensor is reporting plausible distance values.
 
 ---
 
-### Case 34 — ADAS ECU Variant Coding for Different Markets
-**S:** Same ADAS ECU hardware used in 5 market variants. Need to configure market-specific features.
-**T:** Write correct variant code for each market.
-**A:**
-```
-Market Variant Coding DID: 0xD010
-Encoding:
-  0x01 = Germany (ISA speed limit enforcement not mandatory)
-  0x02 = France (ISA mandatory, curfew features)
-  0x03 = Japan (pedestrian proximity alert required)
-  0x04 = US-California (AEB to FMVSS 127 required)
-  0x05 = China GB standard
+#### **A (Action):**
 
-For vehicle destined Germany:
-  10 03 → 27 01/02 →
-  2E D0 10 01 → Write 0x01
-  2E D0 11 [Germany feature flags] → additional features
-  11 03 → Soft reset
-  22 D0 10 → 0x01 confirmed
-```
-**R:** Variant coding enables one hardware design to serve multiple markets. Critical: coding must be completed at EOL before vehicle leaves plant. Wrong variant code in wrong market = regulatory non-compliance. Added variant code verification to EOL boundary check.
+**1. Reading Raw Sensor Data**
 
----
+*   **Action:** Connect to the Park Assist Control Module (PACM) and read the individual distance DIDs for each of the four rear sensors while an assistant walks behind the vehicle.
+*   **UDS Commands:**
+    ```
+    10 03         // Enter Extended Session
+    22 C2 01      // Read Rear Left Outer Sensor Distance
+    22 C2 02      // Read Rear Left Inner Sensor Distance
+    22 C2 03      // Read Rear Right Inner Sensor Distance (The suspect one)
+    22 C2 04      // Read Rear Right Outer Sensor Distance
+    ```
+*   **Result:**
+    *   Sensors 1, 2, and 4 report changing distance values that plausibly match the assistant's position (e.g., `150 cm`, `100 cm`, `50 cm`).
+    *   Sensor 3 (the damaged one) responds with a fixed, nonsensical value: `62 C2 03 FF FF`. The `FF FF` indicates a fault condition, often meaning "max range" or "invalid data." It does not change regardless of where the assistant stands.
 
-### Case 35 — Park Assist Grid Drawing Error Investigation
-**S:** Parking assist camera shows distorted gridlines. No DTCs. Customer complaint: gridlines don't align with vehicle path.
-**T:** Check camera distortion/projection calibration parameters.
-**A:**
-```
-22 [Camera_Projection DID] → K1=−0.28, K2=0.08, P1=0.001, P2=0.002
-Reference spec: K1=−0.25±0.05, K2=0.07±0.03
-Values within spec but:
-22 [Camera_Mount_Height DID] → 0.28m
-Spec for RVC camera: 0.29m–0.32m
-Camera bracket mounting height 0.28m (too low by 0.01m–0.04m)
-→ Projection grid assumes different camera height → gridlines shifted up
-Adjust bracket: camera height now 0.30m
-2E [Camera_Mount_Height DID] 0.30 encoded
-11 03 → Soft reset
-Recheck grid: lines align with rear bumper correctly
-```
-**R:** Camera mount height parameter did not match physical installation. Grid overlay projection uses mount height to compute parking space edges. After bracket correction and DID update: gridlines aligned correctly.
+**2. Replacing the Sensor**
+
+*   **Action:** Physically replace the damaged sensor. This typically involves removing the rear bumper fascia, unclipping the old sensor from its bracket, connecting the new one, and reassembling. The new sensor is a pre-painted, plug-and-play part.
+
+**3. Verification of the New Sensor**
+
+*   **Action:** After replacement, repeat the UDS read requests without clearing the DTC first.
+*   **UDS Command:**
+    ```
+    22 C2 03      // Re-read Rear Right Inner Sensor Distance
+    ```
+*   **Result:** The PACM now responds with plausible, changing data for this DID (e.g., `62 C2 03 00 FA` for 250cm). The value changes correctly as the assistant moves.
+
+**4. Finalization**
+
+*   **Action:** Clear the DTCs and perform a final system test using the vehicle's infotainment display.
+*   **UDS Command:**
+    ```
+    14 FF FF FF   // Clear All DTCs
+    ```
+*   **Result:** The `B1B58` DTC is cleared and does not return. The park-assist graphical display now shows a reliable representation of obstacles, and the audible beeps correspond correctly to the distance of the closest object.
 
 ---
 
-### Case 36 — Multi-ECU DTC Scan via Functional Addressing
-**S:** After a rear collision repair, need to scan all ADAS ECUs simultaneously for new DTCs.
-**T:** Use functional addressing for efficient multi-ECU DTC read.
-**A:**
-```
-Physical address: must query each ECU individually (slow)
-Functional address: 7DF#03 19 02 09
+#### **R (Result) & Deeper Analysis:**
+
+*   **Immediate Cause:** The rear right inner ultrasonic sensor was physically damaged and providing invalid data to the Park Assist Control Module. Replacing the sensor restored the system's functionality.
+*   **Root Cause Theory:** The crack on the sensor was the clear point of failure. Ultrasonic sensors work by sending out a "ping" (a high-frequency sound wave) and listening for the echo. The time it takes for the echo to return determines the distance. The crack in the sensor's diaphragm likely prevented it from either sending a clean ping or receiving the echo correctly, leading to the `FF FF` (invalid) reading. This is a simple case of physical damage from a minor impact.
+*   **DTC Deep Dive (B1B58):**
+    *   **Code:** `B1B58 - Rear Right Inner Ultrasonic Sensor Failure`. This is a body (`Bxxxx`) code. It can be set for several reasons, all detected by the PACM:
+        1.  **Open/Short Circuit:** The PACM detects an electrical fault in the wiring to the sensor.
+        2.  **No Echo Return (Permanent):** If the sensor consistently reports no echo, even when other sensors are detecting objects (a plausibility check), the PACM flags it as faulty.
+        3.  **Invalid Data (This Case):** The sensor returns a signal that is out of its expected range or format. The cracked diaphragm produced such a signal.
+*   **Prevention & Design-Level Fix:**
+    1.  **Sensor Robustness:** While sensors must be exposed, ongoing research aims to make them more resistant to minor impacts with more durable materials and construction.
+    2.  **Redundancy and Plausibility:** The system correctly used data from the other three sensors to know that the `FF FF` reading from the one sensor was implausible. This prevented a total system failure and allowed it to set a very specific DTC.
+    3.  **Self-Healing Materials:** A futuristic concept involves using self-healing polymers for sensor housings that could repair minor cracks over time, though this is not yet commercially viable.
+    4.  **Better Diagnostics for Technicians:** The diagnostic tool could offer a "live data" screen that graphically shows the output of all sensors simultaneously, making it instantly obvious to a technician which one is flat-lining.
+*   **Interview Tips & What the Interviewer is Looking For:**
+    *   **Technology Fundamentals:** Explain *how* an ultrasonic sensor works (sends a ping, measures time-of-flight of the echo). This demonstrates you understand the physics behind the component.
+    *   **DTC Specificity:** Note how the DTC was extremely specific (`Rear Right Inner`). This is a feature of a well-designed diagnostic strategy. It saves the technician immense time compared to a generic "Park Assist Fault" code.
+    *   **Plausibility Checks:** Talk about the importance of plausibility checks in the software. The PACM didn't just trust the faulty sensor; it compared its data to its neighbors to determine it was the outlier. This is a key concept in robust system design.
+    *   **Practicality:** Acknowledge that this is a common and straightforward repair. This shows you have a realistic understanding of real-world workshop scenarios, not just complex software issues.
 
-Single broadcast request 7DF#03 19 02 09 →
-Responses (each ECU responds independently):
-  7A8#xx 59 02 09 ... (ADAS ECU — 2 DTCs)
-  7A2#xx 59 02 09 ... (Radar — 0 DTCs)
-  7A4#xx 59 02 09 ... (Camera — 1 DTC B2A50)
-  7A6#xx 59 02 09 ... (Ultrasonic — 0 DTCs)
-
-All responses collected in < 200ms total
-Focus on B2A50: camera calibration required after repair
-```
-**R:** Functional addressing collects all ECU DTCs in one short window. B2A50 found — rear camera needs recalibration after collision repair. Calibration performed. Final re-scan confirms clear.
-
----
-
-### Case 37 — ADAS Firmware Fingerprint Read for Audit
-**S:** Warranty claim investigation. Customer says ADAS SW was modified by tuning garage. Need to verify original manufacturer SW.
-**T:** Read programming fingerprint to identify last programming event.
-**A:**
-```
-22 F1 98 → Read ApplicationSoftwareFingerprint
-Response: [Tester ID: "0x1234 CARVANA-TUNING"] [Date: 2025-11-14] [Tool: "AutoFlash Pro"]
-→ SW was re-programmed on 14 Nov 2025 by third party
-Reference: OEM fingerprint should be [OEM Production ID + Manufacturing Date]
-22 F1 99 → Read ApplicationDataFingerprint → Same third-party ID
-
-Conclusion: ECU was re-programmed with non-OEM software by tuning shop
-Warranty voided for ADAS system
-```
-**R:** Fingerprint DIDs (0xF198, 0xF199) are written by the flash tool and identify who last programmed the ECU. This is inadmissible evidence in some jurisdictions but very useful for warranty fraud detection. OEM programming always writes OEM tester ID.
-
----
-
-### Case 38 — AEB DTC After OTA Update Fails Midway
-**S:** OTA update for ADAS ECU fails at 60% completion (vehicle reset during transfer). Now ADAS reports P0A99 (ECU Programming Error) and is non-functional.
-**T:** Recover ECU from partial flash state.
-**A:**
-```
-22 F1 89 → SW version: "CORRUPT_VER_0000" (known corrupt state indicator)
-22 [Boot_Status DID] → In bootloader mode: 0x01 (bootloader active, no application SW)
-Enter programming via bootloader:
-  10 02 direct → 27 11/12
-  31 01 FF 00 → Full erase
-  34/36/37 → Transfer complete correct SW image
-  31 01 FF 01 → Check dependencies → PASS
-  11 01 → Hard reset
-22 F1 89 → Correct SW version restored
-19 02 09 → P0A99 cleared
-```
-**R:** Partial flash left ECU in bootloader. Bootloader allows recovery programming without security unlocking the application (bootloader has separate security or none for recovery). Always ensure stable power during OTA update. Added OTA pre-condition: battery SOC > 70%.
-
----
-
-### Case 39 — Read All Supported DTCs on New ADAS ECU
-**S:** New ADAS ECU platform. Need to understand all DTCs it can report for test coverage planning.
-**T:** Read complete supported DTC list.
-**A:**
-```
-19 0A → reportSupportedDTC
-Response: 59 0A [all DTC bytes with availability status byte]
-Result: 142 DTCs reported as supported
-Export to spreadsheet:
-  DTC group C0xxx: 34 DTCs (radar related)
-  DTC group C1xxx: 28 DTCs (camera related)
-  DTC group B2xxx: 18 DTCs (sensor bus communication)
-  DTC group U0xxx: 41 DTCs (network/communication)
-  DTC group P1xxx: 21 DTCs (output/control)
-
-Use list to build test case coverage matrix
-Goal: test coverage > 80% of supported DTCs
-```
-**R:** 0x19 0A is extremely useful at start of test development. Lists all DTCs the ECU knows about regardless of whether any have been configured. Full coverage matrix built. 142 DTCs → 117 covered (82%) in test cases.
-
----
-
-### Case 40 — Negative Test: Service Not Supported in Default Session
-**S:** Test engineer verifies that sensitive ADAS write functions are NOT accessible in default session (security validation test).
-**T:** Confirm 0x2E is rejected in default session.
-**A:**
-```
-10 01 → Default session
-2E D0 10 01 → 7F 2E 7F (serviceNotSupportedInActiveSession)
-2E F1 90 [VIN] → 7F 2E 7F
-31 01 [Cal RID] → 7F 31 7F
-27 01 → 7F 27 7F (security access not available in default session per this ECU)
-
-Now in extended:
-10 03 → Extended session
-27 01 → 67 01 [seed] ← security unlock available
-27 02 [key] → 67 02
-2E D0 10 01 → 6E D0 10 ← write now permitted
-
-PASS: Confirmed write services gated by session + security
-```
-**R:** Session and security gating working correctly. Write services inaccessible without proper session + security unlock. This is a mandated security validation test for any ADAS ECU before homologation.
-
----
-
-### Cases 41–50 — AEB/ACC Quick-Fire Scenarios
-
-**Case 41 — DTC B2B31 (ACC Target Lost): Windscreen Contamination**
-```
-19 04 → Freeze: Rainy conditions, wiper active=0 (washer fluid empty)
-Fix: Top up washer fluid, clean camera lens area
-Result: B2B31 healed, ACC re-enabled
-Lesson: Camera-based ACC relies on clean windscreen
-```
-
-**Case 42 — ACC Sudden Brake from Stationary (Low-Speed False AEB)**
-```
-19 06 → Extended data: Speed=0, Sensor=Ultrasonic3, Confidence=0.55
-Ultrasonic sensor 3 confidence < threshold → should not trigger AEB
-SW bug: AEB threshold check uses OR instead of AND for confidence
-Fixed in SW patch 2.4.1
-```
-
-**Case 43 — DTC U0155 Lost Comm with Instrument Cluster (ADAS)**
-```
-Cluster not sending ACC set speed confirmation back to ADAS ECU
-Gateway log: Cluster in sleep mode (power save)
-Wake-up message added to Network Management sequence
-U0155 cleared
-```
-
-**Case 44 — AEB Dual-Horn Test via Routine Control**
-```
-Workshop test: 31 01 [AEB_Horn_Test RID] → Two short horn blasts confirm AEB warning device
-71 01 [RID] 01 PASS
-Used to verify horn functional without driving scenario
-```
-
-**Case 45 — Read ACC History Data (Activation Log)**
-```
-22 [ACC_Activation_Log DID] → Last 10 ACC engagements logged with speed and distance
-Odometer: 14221km, Speed=97km/h, Gap=2.8s (normal operation)
-Odometer: 14231km, Speed=0, Gap=0.0s, EmergencyBrake=1 (AEB event)
-Log shows one AEB event → same customer complaint corresponds to real AEB activation
-```
-
-**Case 46 — Suppress AEB DTC During Chassis Roller Test**
-```
-On chassis rollers: rear wheels spinning, front wheels stationary
-AEB detects imminent collision (front camera sees static wall)
-85 02 → DTC setting off prevents accumulation of false DTCs
-28 01 01 → Suppress AEB output
-After test: 85 01, 28 00 01 → restore normal operation
-Run 14 FF FF FF → clear any test accumulation
-```
-
-**Case 47 — ADAS NVM Corruption: SW Checksum Fault**
-```
-DTC P0B15: ADAS Configuration Checksum Error
-22 [Checksum_DID] → Stored=0x4A2F, Calculated=0x4A1F (mismatch)
-NVM corruption after voltage spike (customer modified battery)
-Re-write configuration via EOL sequence
-P0B15 clears after correct config written and checksum verified
-```
-
-**Case 48 — Cross-Platform Feature Toggle (ADAS Feature Flags)**
-```
-Europe requires ISA (Intelligent Speed Assistance) from July 2024
-22 [ISA_Enable DID] → 0x00 (disabled on this vehicle)
-Verify build date: July 2024 production → must be enabled
-2E [ISA_Enable DID] 0x01
-Regulatory requirement documented
-```
-
-**Case 49 — ADAS ECU Response Time Measurement**
-```
-Measure diagnostic response latency (P2 Server compliance test):
-10 × 22 F1 89 requests, measure request-to-response time
-Results: Min=12ms, Max=48ms, Avg=23ms (all < 50ms P2 Server spec)
-PASS: ECU meets ISO 14229 P2 timing
-```
-
-**Case 50 — AEB First/Last DTC Tracking**
-```
-19 0B → reportFirstTestFailedDTC: C0A11 (radar temp fault — first ever fault)
-19 0C → reportFirstConfirmedDTC: C0A11  
-19 0D → reportMostRecentTestFailedDTC: U0429 (most recent)
-19 0E → reportMostRecentConfirmedDTC: U0429
-Pattern: Chronological fault investigation using first/last DTC services
-```
-
----
-
-### Cases 51–70 — LDW / LKA / HWA / TSR / ISA Scenarios
-
-**Case 51 — LKA Torque Calibration After Steering Column Replacement**
-```
-Steering column replaced → LKA apply torque reference lost
-31 01 [Steering_Cal RID] → Calibrate steering centre
-Drives straight line at 80 km/h → confirms zero-torque centre
-71 01 [RID] 01 PASS → LKA re-enabled
-```
-
-**Case 52 — ISA Override Counter Exceeded**
-```
-ISA (Intelligent Speed Assist) spec: max 3 overrides per trip
-DTC C3B21: ISA Override Limit Exceeded
-22 [ISA_Override_Count DID] → 7 overrides in 45 mins
-ISA function disabled for remainder of trip per regulation
-Resets on next key cycle
-14 FF FF FF → Not effective on ISA override count (resets only on ign cycle)
-```
-
-**Case 53 — HWA (Highway Assist) Not Available: Missing MAP Data**
-```
-DTC C4A12: Map Data Not Available for HWA
-22 [MAP_Version DID] → 0x00000000 (no map loaded)
-HWA requires HD map for lane-level positioning
-Map provisioning via OTA needed
-After map update (via TCU OTA): C4A12 cleared, HWA available
-```
-
-**Case 54 — TSR: Country-Specific Sign Not Recognised**
-```
-French 110 km/h autoroute sign not recognised after model update
-22 [TSR_Model_Version DID] → 2.1.0
-Known issue: Model 2.1.0 missing FR autoroute signs
-Update model to 2.1.1 via OTA
-Post-update: FR 110 km/h signs correctly read
-```
-
-**Case 55 — LDW Sensitivity Customer Complaint: Too Sensitive**
-```
-LDW alerts even for minor lane position changes (lane centering)
-22 [LDW_Sensitivity DID] → 0x01 (most sensitive — Level 1)
-Customer preference: Level 3 (less sensitive)
-2E [LDW_Sensitivity DID] 0x03
-11 03 → Soft reset
-Test: LDW only alerts at clear lane departure, not random centering
-```
-
-**Case 56 — Speed Limit DID Verification (22 F4 10)**
-```
-22 F4 10 → Read current road speed limit (from TSR + map blend)
-Response: 62 F4 10 50 00 = 80 km/h (correct for UK 50 mph zone)
-Verify cluster display shows 50 mph
-Test: limit changes correctly at sign transitions
-```
-
-**Case 57 — LKA Steering Actuation Test via 0x2F**
-```
-2F [LKA_Steer DID] 03 01 → Force small left steer (1° command, short-term adjustment)
-Verify: steering wheel moves 1° left
-2F [LKA_Steer DID] 00 → returnControlToECU
-Important: Only use in stationary vehicle — live road use is dangerous!
-```
-
-**Case 58 — ADAS DTC for CAN Bus Off Condition**
-```
-DTC U0001: CAN Bus Off (High Speed CAN)
-CANalyzer log: 1200 bit errors in 3 seconds → bus went off
-Root cause: Incorrect termination (120Ω missing on ADAS sub-bus)
-2 × 120Ω terminators required; one missing after ECU swap
-Install terminator → bus off clears → U0001 heals
-```
-
-**Case 59 — HWA Lateral Positioning Error**
-```
-HWA holds vehicle 0.3m right of lane centre
-22 [HWA_LateralOffset DID] → +0.30m (offset from camera lane centre)
-22 [Camera_CalStatus DID] → CalRequired
-Camera not calibrated after windscreen replacement (same hospital as Case 31)
-Calibration → HWA centred correctly
-```
-
-**Case 60 — DTC P1F50: ADAS Memory Limit Reached**
-```
-DTC P1F50: Object List Memory Full
-22 [Object_Count DID] → MaxObjects=40, CurrentObjects=40 (at limit)
-22 [Object_Overflow_Count DID] → 7 (7 objects dropped since last clear)
-Root cause: Roundabout scenario — 40+ vehicles simultaneously detected
-SW update increases max object list to 64
-Post-update: P1F50 no longer triggered in roundabout test
-```
-
-**Case 61 — AEB Night Mode Configuration**
-```
-22 [AEB_NightMode DID] → NightMode_Active=0x00 (disabled)
-Night mode: lower confidence threshold for pedestrian detection
-Customer in dark rural area wants this enabled
-2E [AEB_NightMode DID] 0x01 → Enable
-Retest AEB pedestrian night scenario → detection rate improved
-Note: Increases false positive risk — customer informed
-```
-
-**Case 62 — Mass Configuration Rollout via UDS Script**
-```
-60 vehicles need same configuration update (AEB threshold change after NCAP fail)
-Automated UDS script:
-  For each vehicle:
-    10 03 → 27 01/02 → 2E [AEB_Thresh DID] [new value] → 14 FF FF FF → 11 03
-  Log: Pass/Fail per vehicle → 58 PASS, 2 FAIL (security timeout on 2 vehicles)
-  Retry 2 failures → both pass on retry
-  Configuration update complete: 60/60
-```
-
-**Case 63 — ADAS: Mirror Memory Freeze Frame Under Water Ingress**
-```
-19 0F 09 → B2A77 (Internal ECU Humidity Detected) in mirror memory
-19 14 → Mirror memory freeze frame: HumidityLevel=87% (spec < 50%)
-Condition healed (ECU dried out) but mirror memory captures the peak
-Physical inspection: cracked ECU housing seal
-Replace ECU, seal housing, apply conformal coating
-No further humidity DTCs
-```
-
-**Case 64 — ACC Headway Time Setting Via DID**
-```
-22 [ACC_Headway DID] → Default=0x03 (2.5 seconds — level 3)
-Range: 0x01=1.5s Level1, 0x02=2.0s L2, 0x03=2.5s L3, 0x04=3.0s L4, 0x05=3.5s L5
-Customer wants Level 4 default on vehicle delivery
-2E [ACC_Headway DID] 0x04 → Customer preference written
-Verified: ACC maintains 3.0s headway on road test
-```
-
-**Case 65 — Negative: Attempting 0x2E in Default Session**
-```
-Security validation test (TCF-ADAS-2065):
-Default session → 2E D0 10 01 → 7F 2E 7F ← serviceNotSupportedInActiveSession
-Expected NRC: 7F 2E 7F ← PASS
-Also: 2E F1 90 [invalid VIN] → 7F 2E 7F ← also PASS
-Confirms: write protection working in default session
-```
-
-**Case 66 — ACC: Diagnosis of Sporadic Hard Braking on Highway**
-```
-22 [ACC_Log DID] → Event at odometer 49,210km: TTC=0.8s, Decel=8.3 m/s²
-Normal: TTC threshold 1.5s for max braking
-TTC=0.8s → object appeared very late (occluded by spray behind lorry)
-AEB response was correct (genuine emergency)
-Radar range limited by water spray → documentation updated to note range reduction in heavy rain
-No SW change needed
-```
-
-**Case 67 — TSR Speed Limit Fusion: Camera vs Map Conflict**
-```
-22 [TSR_Camera_Limit DID] → 70 km/h (from sign)
-22 [TSR_Map_Limit DID] → 50 km/h (map database — outdated)
-22 [TSR_Final_Limit DID] → 70 km/h (camera takes precedence — correct behaviour)
-22 [TSR_Fusion_Mode DID] → 0x02 (camera-priority mode)
-Verify: Map database update resolves conflict
-After map OTA update: both sources agree at 70 km/h
-```
-
-**Case 68 — ADAS Remote Diagnosis via Telematics**
-```
-Remote UDS session via TCU DoIP gateway:
-Vehicle on public road → TCU provides DoIP tunnel
-10 03 → 22 F1 89 → Read SW version remotely
-19 02 09 → Read DTCs remotely → C0A55 radar temperature (intermittent)
-Send: 14 FF FF FF → Clear remotely
-Confirm: 19 02 09 → clean
-All performed without vehicle visit — first-time fix rate improved
-```
-
-**Case 69 — AEB Sensor Fusion Weight Modification**
-```
-After NCAP pedestrian night test fail:
-22 [Fusion_Weights DID] → Radar=0.70, Camera=0.30
-Change: Camera weight increase for pedestrian classification
-2E [Fusion_Weights DID] → Radar=0.50, Camera=0.50
-Retest NCAP: pedestrian detection rate 94% → PASS
-Note: Fusion weights are safety-critical — ASIL D validation required before change
-```
-
-**Case 70 — Routine Control: AEB Full Self-Test Sequence**
-```
-31 01 [AEB_Full_Test RID] → Start full self-test
-7F 31 78 × 3 (responsesPending — test running ~3 seconds)
-71 01 [RID] 01 [TestResult: 8 bytes]
-Result breakdown:
-  Byte 1: Radar comms = 01 (PASS)
-  Byte 2: Camera comms = 01 (PASS)
-  Byte 3: CAN output = 01 (PASS)
-  Byte 4: Brake interface = 01 (PASS)
-  Byte 5: Reaction time = 01 (< 150ms PASS)
-  Byte 6: Sensor alignment = 01 (PASS)
-  Byte 7: Confidence calibration = 01 (PASS)
-  Byte 8: Overall = 01 (PASS)
-Use at EOL and post-service for full AEB system verification
-```
-
----
-
-### Cases 71–85 — BSD / Ultrasonic / Park Assist / Parking Pilot
-
-**Case 71 — BSD DTC: Azimuth Association Fault After Rear Bumper Repaint**
-```
-19 02 09 → C1B44 (BSD Sensor Physical Disruption)
-22 [BSD_Signal_Quality DID] → LR=0.31, RR=0.89 (LR signal quality poor)
-Physical: Rear bumper repainted with metallic paint 3× thickness over LR sensor
-Paint thickness attenuates radar signal
-Recommendation: Radar-transparent bump zone (no metallic paint over sensor)
-ECU replacement not needed — paint refinished correctly
-```
-
-**Case 72 — Park Assist Camera 360° Individual Camera Calibration**
-```
-After one side camera replaced:
-31 01 [Cam3_Stitch_Cal RID] → Calibrate left side camera stitching
-Park vehicle over calibration mat
-71 01 [RID] 01 PASS
-22 [Stitch_Quality DID] → All seams < 0.5cm misalignment PASS
-SVM (Surround View Monitor) top-down view restored correctly
-```
-
-**Case 73 — Ultrasonic Self-Test: Crosstalk between Sensors**
-```
-31 01 [Ultrasonic_Crosstalk RID] → Fire sensors sequentially, measure crosstalk
-71 01 [RID] [8 bytes: crosstalk matrix]
-Sensor 3 triggering Sensor 4 response = crosstalk level 0x2A (spec < 0x20)
-Adjust sensor 3 firing delay +2ms → reduces overlap → crosstalk 0x18 (PASS)
-2E [S3_Fire_Delay DID] [2ms encoded] → Write adjustment
-```
-
-**Case 74 — Park Assist: Distance Calibration for Non-Standard Vehicle Length**
-```
-Tow bar attached adds 0.52m to vehicle length
-Park assist distance reading incorrect (shows 0.52m shorter than actual)
-2E [Vehicle_Length_Ext DID] 0x34 = 52cm → Write trailer/tow bar extension
-22 [Rear_Stop_Distance DID] → Now accounts for tow bar
-Park assist shows correct distance including tow bar
-```
-
-**Case 75 — Cross-Traffic: Pedestrian vs Cyclist Classification**
-```
-22 [RCTA_Class_DID] → Classification data: Object at 8m, Class=Pedestrian, Speed=4 m/s
-4 m/s is fast for pedestrian → could be cyclist
-22 [RCTA_Classify_Thresh DID] → Cyclist threshold = 5 m/s (only class as cyclist above 5 m/s)
-4 m/s < 5 m/s → correctly classified as pedestrian (fast walking, running)
-Verify: cyclist at 6 m/s classified as cyclist → correct
-No configuration change needed → algorithm working correctly
-```
-
-**Case 76 — Park Assist: Sensor Blocked by Mud Flag**
-```
-DTC P2A19: Front Sensor 2 Response Rate < 50%
-22 [F2_Response_Rate DID] → 23% (spec > 80%)
-Physical: Mud packed in sensor 2 aperture
-Clean sensor → response rate 94% → P2A19 heals
-Self-diagnostic correctly identified blocked sensor
-```
-
-**Case 77 — RPA (Remote Parking Assist) Enable via UDS Feature Flag**
-```
-RPA feature not enabled on delivery vehicle
-22 [RPA_Feature DID] → 0x00 (not enabled)
-Customer purchases RPA via OTA feature unlock
-2E [RPA_Feature DID] 0x01 (after payment verification)
-11 03 → Remote parking becomes available on HMI
-Note: feature monetisation via UDS 2E write after OTA key provisioning
-```
-
-**Case 78 — Trailer Hitch Sensor Calibration**
-```
-New trailer hitch installed → trailer angle sensor requires zeroing
-31 01 [TrailerAngle_Cal RID] → with trailer straight
-71 01 [RID] 01 PASS → Zero angle = current position
-Test: turn trailer 30° left → 22 [Trailer_Angle DID] = −30° (correct)
-Test: 30° right → +30° (correct)
-Manoeuvre assist now correctly models trailer geometry
-```
-
-**Case 79 — Park Assist: DTC After Vehicle Wash (Pressure Washer Damage)**
-```
-P2A44: Front Sensor 4 Internal Fault
-22 [F4_Internal_Status DID] → Water ingress detected (0x01)
-High-pressure wash directly onto sensor
-Sensors rated for IPX4 (splash) not IPX6 (jet water)
-Replace sensor → clear DTC
-Customer advisory: avoid direct jet spray on ultrasonic sensors
-```
-
-**Case 80 — APA (Automatic Parking Assist) Abort Investigation**
-```
-APA aborted mid-manoeuvre. DTC B3A99: Parking Manoeuvre Aborted.
-19 04 [B3A99] 01 → Freeze frame:
-  AbortReason=0x04 (obstacle appeared during manoeuvre)
-  SteeringAngle=−220° (mid reverse)
-  Speed=0.8 km/h
-Obstacle: child on bicycle entered parking space
-APA safety function correctly aborted
-No fault — correct behaviour
-Inform customer: APA detects close obstacles and aborts if path unsafe
-```
-
-**Case 81 — Park Assist Activation Gate: Gear + Speed**
-```
-Customer: park assist activates at 15 km/h (seems too fast)
-22 [PA_Activate_Speed DID] → Max activation speed = 20 km/h
-Spec: activates below 20 km/h in R or D-low
-Customer wants 10 km/h limit for safety
-2E [PA_Activate_Speed DID] 0x0A (10 km/h)
-Note: Requires engineering session + security access (safety parameter)
-```
-
-**Case 82 — BSD: Night-time Sensitivity Increase**
-```
-BSD sensitivity lower at night (fewer false positives but misses fast motorcycles)
-22 [BSD_Night_Sens DID] → NightAmplification=0x01 (Level 1 of 3)
-Regulatory requirement for night sensitivity: Level 2
-2E [BSD_Night_Sens DID] 0x02 → Level 2
-Retest: motorcycle at 90 km/h from 30m → BSD correctly alerts at night
-```
-
-**Case 83 — Park Assist: Sensor Disable for Car Wash**
-```
-Car wash mode: disable PA sensors to prevent false activation during brushes
-2F [PA_Mode DID] 02 → freeze current state (sensors off)
-  OR
-2E [PA_Carwash_Mode DID] 0x01 → CarWash mode on
-Effect: PA sensors silent during wash
-After wash: 2F [PA_Mode DID] 00 / 2E [PA_Carwash_Mode DID] 0x00 → normal
-```
-
-**Case 84 — Ultrasonic: Zero-Distance False Read**
-```
-DTC P2A31: Sensor 1 reports 0cm distance continuously
-22 [Sensor1_Raw DID] → Distance=0x0000 (stuck at zero)
-Physical: Sensor damaged/cracked
-Compare: All other sensors read normally
-Replace sensor 1 → P2A31 clears
-Distance reading returns to normal
-```
-
-**Case 85 — HPA (Home Parking Assist) Location Write**
-```
-HPA learns preferred home parking position
-After learning:
-22 [HPA_HomePos DID] → Home_X=12.3m, Home_Y=−0.8m, Home_Angle=−3.2°
-Written by learning routine via 31/2E combination
-If position needs reset:
-2E [HPA_HomePos DID] [zeros] → Clear learned position
-Then re-learn from scratch: 31 01 [HPA_Learn RID]
-```
-
----
-
-### Cases 86–100 — ADAS Advanced Cases
-
-**Case 86 — DTC U3001 (DoIP Routing Not Active) on ADAS**
-```
-DoIP diagnostic attempt fails with no response
-Physical: Ethernet cable between gateway and ADAS ECU disconnected
-UDS over CAN still works (backup path)
-22 F1 89 via CAN → works
-Ethernet reconnected → DoIP routing activation:
-  DoIP header type 0x0005 with logical address → 0x0006 response code 0x10 (activated)
-U3001 → heals after routing re-established
-```
-
-**Case 87 — Feature Enable: Hands-Free Highway Driving (Level 2 Upgrade)**
-```
-Software-enabled feature: L2 automation (hands-on required → hands-free on highway)
-22 [L2_Feature DID] → 0x00 (disabled)
-Customer purchases upgrade
-2E [L2_Feature DID] 0x01 (after cryptographic token verified)
-11 01 → Reset
-Hands detection camera enabled
-HDA+ (Highway Driving Assist+) now available on HMI
-Monetisation: feature gated by UDS write behind crypto token
-```
-
-**Case 88 — Crash Recording Read (Event Data Recorder)**
-```
-After crash, police request EDR data:
-10 03 → 27 01/02 → security level (high security — forensic access)
-22 [EDR_Event_Count DID] → 3 events recorded
-19 04 [Crash_DTC] 01 → Freeze frames:
-  Event 1: Speed=127 km/h, Decel=12g, AEB_Active=0, Time-2s AEB_Alert=1
-  → AEB alerted but not activated (speed too high for AEB intervention)
-Data exported per EU EDR regulation
-```
-
-**Case 89 — Immobiliser Integration with ADAS (Anti-Theft)**
-```
-ADAS ECU requires VIN match with BCM immobiliser before enabling AEB
-22 [ADAS_VIN DID] → VIN: W0L000011T1234567
-22 F1 90 on BCM → VIN: W0L000011T1234567 (match)
-If mismatch: ADAS locks down with DTC P0A88 (VIN Mismatch — Anti-Tampering)
-Protect against stolen ADAS ECU swaps between vehicles
-```
-
-**Case 90 — CAN FD Bitrate Validation for ADAS Messages**
-```
-ADAS ECU upgraded to CAN FD (2 Mbit/s data phase)
-22 [CANFD_Config DID] → Nominal=500kbit/s, Data=2000kbit/s
-Link Control: 87 01 [2000kbit/s] → 87 03 → Switch to 2 Mbit/s data phase
-Verify: ECU responds at new rate
-Flash speed: 2MB file in 35 seconds (vs 4 minutes at 500kbit/s)
-After flash: 87 01 [500] → 87 03 → return to nominal rate
-```
-
-**Case 91 — ADAS ECU Active Diagnostic Session Verification**
-```
-22 F1 86 → Read activeSession
-In extended: Response = 62 F1 86 03 ← extendedDiagnosticSession
-In default: Response = 62 F1 86 01 ← defaultSession
-In programming: Response = 62 F1 86 02 ← programmingSession
-Use this to verify test sequence is in correct session before critical steps
-```
-
-**Case 92 — ECU Hardware Version Verification**
-```
-22 F1 91 → ECU HW Number: ADAS-HW-V3.0
-22 F1 93 → Supplier HW Version: 3.0.1
-22 F1 95 → Supplier SW Version: 2.14.0
-22 F1 8A → Supplier ID: 0x0042 (Bosch)
-Cross-check against SOP (Start Of Production) BOM:
-All match → correct hardware variant for this production order
-```
-
-**Case 93 — AEB Test Event Log Reset**
-```
-Before customer delivery, clear AEB test event log:
-31 01 [AEB_Log_Clear RID] → Clear testing data
-71 01 [RID] 01 PASS
-22 [AEB_Activation_Count DID] → 0 (cleared)
-22 [AEB_TestDrive_Distance DID] → 0 km (cleared)
-Ensures delivery vehicle shows no pre-delivery test events to customer
-```
-
-**Case 94 — DTC Suppression List Configuration**
-```
-Some OEMs configure DTC suppression lists (DTCs that are set but not reported to customer)
-22 [DTC_Suppress_List DID] → List of suppressed DTC codes
-Compare with current regulation: OBD emission DTCs cannot be suppressed
-Non-OBD safety DTCs can be temporarily suppressed in production test
-EOL: clear suppression list before delivery
-31 01 [DTC_Suppress_Clear RID] → Remove all suppressions
-```
-
-**Case 95 — ADAS ECU Date/Time Synchronisation**
-```
-ADAS ECU needs accurate timestamp for freeze frame and event log
-22 [ECU_DateTime DID] → 2024-01-15 08:23:01 (wrong — vehicle was sleeping)
-2E [ECU_DateTime DID] [current_time_encoded] → Sync to GPS time
-11 03 → Soft reset
-22 [ECU_DateTime DID] → Correct time
-Freeze frames now have accurate timestamps for event investigation
-```
-
-**Case 96 — Progressive AEB Braking: Configuration Validation**
-```
-AEB implements 3-stage braking: warning → partial (0.3g) → full (1.0g)
-22 [AEB_Stage1_Decel DID] → 0x03 = 0.3g (correct)
-22 [AEB_Stage2_Decel DID] → 0x0A = 1.0g (correct)
-22 [AEB_Stage1_TTC DID] → 2.5s trigger for warning
-22 [AEB_Stage2_TTC DID] → 1.5s trigger for full brake
-Verify all 4 DIDs match homologation document
-All match → PASS
-```
-
-**Case 97 — Dual-CPU ADAS ECU: Both Core Diagnostics**
-```
-Modern ADAS ECU has Main CPU + Safety Monitor CPU
-22 [Main_CPU_Status DID] → 0xA5 = healthy
-22 [Safety_CPU_Status DID] → 0xA5 = safe state healthy
-19 02 09 on Main: C0A00 radar temp
-19 02 09 on Safety Monitor (separate UDS address 0x7A1) → No DTCs
-Both CPU diagnostics independently confirm physical chain healthy
-```
-
-**Case 98 — ADAS Software Integrity Self-Check**
-```
-31 01 [SW_Integrity_RID] → Run SW CRC/hash self-check
-7F 31 78 (responsesPending × 2) → ~2 second runtime
-71 01 [RID] 01 [Hash: 8 bytes]
-Compare returned hash against golden reference hash from build server:
-Match → SW integrity confirmed
-Mismatch → SW corruption detected → reflash required
-Run at every service visit as security check
-```
-
-**Case 99 — ADAS ECU Sleep Current Measurement Support**
-```
-After key off, ADAS ECU should draw < 500μA (sleep current)
-Enter sleep quiescent diagnostics:
-10 01 → Default session
-3E 80 → Suppress tester present (let ECU time out and sleep)
-Wait S3 timeout (5s) → ECU drops to Default, then sleep
-Measure current consumption externally: 380μA (within 500μA spec)
-PASS: Sleep current within specification
-```
-
-**Case 100 — Full ADAS Build Verification: Automated 10-Step Check**
-```
-Automated EOL ADAS verification script:
-Step 1:  22 F1 89 → SW version matches build target ✓
-Step 2:  22 F1 90 → VIN matches vehicle build record ✓
-Step 3:  22 F1 8C → ECU serial matches tray manifest ✓
-Step 4:  19 02 09 → Zero confirmed DTCs ✓
-Step 5:  22 [AEB_Enable DID] → 0x01 enabled ✓
-Step 6:  22 [ACC_Enable DID] → 0x01 enabled ✓
-Step 7:  22 [LKA_Enable DID] → 0x01 enabled ✓
-Step 8:  22 [Market_Code DID] → correct market ✓
-Step 9:  31 01 [AEB_Full_Test RID] → Self-test PASS ✓
-Step 10: 22 F1 86 → Session = Default (01) at end ✓
-All 10 steps PASS → ADAS Build Verified → Print QC label
-Automated script runs in < 45 seconds per vehicle
-```
-
----
-*File: 02_adas_star_scenarios.md | 100 UDS ADAS Interview Scenarios | April 2026*
