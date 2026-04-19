@@ -1,0 +1,459 @@
+/*===========================================================================
+  FILE:    01_bms_cell_monitoring.capl
+  PURPOSE: BMS Cell Voltage & Temperature Monitoring
+           - Monitors all cell voltages and temperatures
+           - Detects Over-Voltage (OV), Under-Voltage (UV), Over-Temperature (OT)
+           - Logs faults with timestamps
+           - Sends alerts via CAN write() and panel output
+  AUTHOR:  BMS Validation Team
+  DATE:    2026-04-19
+===========================================================================*/
+
+includes
+{
+  // Include channel database if available
+}
+
+variables
+{
+  // -------------------------------------------------------------------------
+  // Cell Configuration
+  // -------------------------------------------------------------------------
+  const int  NUM_CELLS          = 96;     // Total cells in series
+  const int  NUM_MODULES        = 8;      // Number of battery modules
+  const int  CELLS_PER_MODULE   = 12;     // Cells per module
+
+  // -------------------------------------------------------------------------
+  // Cell Voltage Thresholds (Volts)
+  // -------------------------------------------------------------------------
+  const float CELL_OV2_THRESH   = 4.25;  // Critical over-voltage  → contactor open
+  const float CELL_OV1_THRESH   = 4.20;  // Warning over-voltage   → power derate
+  const float CELL_UV1_THRESH   = 3.00;  // Warning under-voltage  → power derate
+  const float CELL_UV2_THRESH   = 2.50;  // Critical under-voltage → contactor open
+  const float CELL_NOMINAL      = 3.65;  // Nominal cell voltage
+  const float CELL_BALANCE_DELTA= 0.010; // 10 mV balance activation threshold
+
+  // -------------------------------------------------------------------------
+  // Temperature Thresholds (°C)
+  // -------------------------------------------------------------------------
+  const float TEMP_OT2_THRESH   = 60.0;  // Critical over-temp → shutdown
+  const float TEMP_OT1_THRESH   = 50.0;  // Warning over-temp  → derate
+  const float TEMP_UT1_THRESH   = 0.0;   // Warning under-temp → limit charge
+  const float TEMP_UT2_THRESH   = -20.0; // Critical under-temp → block charge
+
+  // -------------------------------------------------------------------------
+  // Debounce Timers (ms)
+  // -------------------------------------------------------------------------
+  const int   OV2_DEBOUNCE_MS   = 20;    // 2 × 10 ms samples
+  const int   UV2_DEBOUNCE_MS   = 20;
+  const int   OT2_DEBOUNCE_MS   = 100;
+
+  // -------------------------------------------------------------------------
+  // Runtime State
+  // -------------------------------------------------------------------------
+  float g_cellVoltage[96];        // Per-cell voltage array [V]
+  float g_cellTemp[8];            // Per-module temperature [°C]
+  float g_packVoltage;            // Sum of all cell voltages [V]
+  float g_packCurrent;            // Pack current [A] (+ = discharge)
+  float g_soc;                    // State of Charge [%]
+  float g_maxCellV;               // Maximum cell voltage
+  float g_minCellV;               // Minimum cell voltage
+  float g_maxCellTemp;            // Maximum cell temperature
+  float g_cellDelta;              // Voltage delta (max - min)
+
+  // -------------------------------------------------------------------------
+  // Fault Counters (for debounce)
+  // -------------------------------------------------------------------------
+  int   g_ov2Counter;             // OV2 consecutive sample counter
+  int   g_uv2Counter;             // UV2 consecutive sample counter
+  int   g_ot2Counter;             // OT2 consecutive sample counter
+
+  // -------------------------------------------------------------------------
+  // Fault Flags
+  // -------------------------------------------------------------------------
+  int   g_ov1Active;              // Over-voltage Level 1 flag
+  int   g_ov2Active;              // Over-voltage Level 2 flag
+  int   g_uv1Active;              // Under-voltage Level 1 flag
+  int   g_uv2Active;              // Under-voltage Level 2 flag
+  int   g_ot1Active;              // Over-temperature Level 1 flag
+  int   g_ot2Active;              // Over-temperature Level 2 flag
+  int   g_balanceActive;          // Cell balancing active flag
+
+  // -------------------------------------------------------------------------
+  // Timers
+  // -------------------------------------------------------------------------
+  msTimer t_cellScan;             // Periodic cell voltage scan timer
+  msTimer t_statusReport;         // Periodic status report timer
+
+  // -------------------------------------------------------------------------
+  // CAN Message handles (matching DBC)
+  // -------------------------------------------------------------------------
+  message BMS_CellVoltage     g_msgCellVoltage     = {dlc=8, dir=Tx, id=0x3A1};
+  message BMS_Status          g_msgBmsStatus       = {dlc=8, dir=Tx, id=0x3A0};
+  message BMS_Temperature     g_msgTemperature     = {dlc=8, dir=Tx, id=0x3A3};
+  message BMS_Limits          g_msgLimits          = {dlc=8, dir=Tx, id=0x3A4};
+}
+
+/*===========================================================================
+  on start — CANoe measurement start hook
+===========================================================================*/
+on start
+{
+  int i;
+
+  write("=== BMS Cell Monitoring CAPL Script Started ===");
+  write("Configuration: %d cells | %d modules | %d cells/module",
+        NUM_CELLS, NUM_MODULES, CELLS_PER_MODULE);
+
+  // Initialise cell voltage array to nominal
+  for (i = 0; i < NUM_CELLS; i++) {
+    g_cellVoltage[i] = CELL_NOMINAL;
+  }
+
+  // Initialise temperature array
+  for (i = 0; i < NUM_MODULES; i++) {
+    g_cellTemp[i] = 25.0;
+  }
+
+  // Reset counters and flags
+  g_ov2Counter  = 0;
+  g_uv2Counter  = 0;
+  g_ot2Counter  = 0;
+  g_ov1Active   = 0;
+  g_ov2Active   = 0;
+  g_uv1Active   = 0;
+  g_uv2Active   = 0;
+  g_ot1Active   = 0;
+  g_ot2Active   = 0;
+  g_balanceActive = 0;
+
+  // Start periodic tasks
+  setTimer(t_cellScan,    10);   // 10 ms cell scan
+  setTimer(t_statusReport, 1000); // 1 s status report
+}
+
+/*===========================================================================
+  on timer t_cellScan — runs every 10 ms
+  Reads cell voltages from system variables (simulated or real AFE SPI data)
+===========================================================================*/
+on timer t_cellScan
+{
+  int   i;
+  float sumV;
+  float maxV, minV;
+
+  // ---- Read cell voltages from CANoe system variables ----
+  // In a real HIL setup these come from the simulated AFE SPI model
+  for (i = 0; i < NUM_CELLS; i++) {
+    g_cellVoltage[i] = @BMS_Sim::Cell_Voltage[i];
+  }
+
+  // ---- Read module temperatures ----
+  for (i = 0; i < NUM_MODULES; i++) {
+    g_cellTemp[i] = @BMS_Sim::Module_Temp[i];
+  }
+
+  // ---- Pack voltage: sum of all cells ----
+  sumV = 0.0;
+  for (i = 0; i < NUM_CELLS; i++) {
+    sumV = sumV + g_cellVoltage[i];
+  }
+  g_packVoltage = sumV;
+
+  // ---- Find max / min cell voltage ----
+  maxV = g_cellVoltage[0];
+  minV = g_cellVoltage[0];
+  for (i = 1; i < NUM_CELLS; i++) {
+    if (g_cellVoltage[i] > maxV) maxV = g_cellVoltage[i];
+    if (g_cellVoltage[i] < minV) minV = g_cellVoltage[i];
+  }
+  g_maxCellV    = maxV;
+  g_minCellV    = minV;
+  g_cellDelta   = maxV - minV;
+
+  // ---- Find max temperature ----
+  g_maxCellTemp = g_cellTemp[0];
+  for (i = 1; i < NUM_MODULES; i++) {
+    if (g_cellTemp[i] > g_maxCellTemp) g_maxCellTemp = g_cellTemp[i];
+  }
+
+  // ---- Run protection logic ----
+  BMS_CheckVoltageProtection();
+  BMS_CheckTemperatureProtection();
+  BMS_CheckBalanceActivation();
+
+  // ---- Transmit CAN messages ----
+  BMS_TransmitCellVoltage();
+
+  // Reschedule
+  setTimer(t_cellScan, 10);
+}
+
+/*===========================================================================
+  BMS_CheckVoltageProtection — Over/Under Voltage Logic with Debounce
+===========================================================================*/
+void BMS_CheckVoltageProtection()
+{
+  // ---- OV2: Critical Over-Voltage ----
+  if (g_maxCellV >= CELL_OV2_THRESH) {
+    g_ov2Counter++;
+    if (g_ov2Counter >= 2 && !g_ov2Active) {  // 2 consecutive samples = 20 ms
+      g_ov2Active = 1;
+      BMS_TriggerFault("OV2", g_maxCellV, "CONTACTOR_OPEN");
+      BMS_OpenContactors();
+      BMS_LogDTC(0xP0A0E, "Cell Voltage High Critical");
+    }
+  } else {
+    g_ov2Counter = 0;
+    if (g_ov2Active && g_maxCellV < (CELL_OV2_THRESH - 0.05)) {
+      g_ov2Active = 0;
+      write("[BMS][OV2] Cleared — Max cell: %.3f V", g_maxCellV);
+    }
+  }
+
+  // ---- OV1: Warning Over-Voltage ----
+  if (g_maxCellV >= CELL_OV1_THRESH && g_maxCellV < CELL_OV2_THRESH) {
+    if (!g_ov1Active) {
+      g_ov1Active = 1;
+      BMS_TriggerFault("OV1", g_maxCellV, "POWER_DERATE_20PCT");
+      BMS_LogDTC(0xP0A0D, "Cell Voltage High Warning");
+      BMS_SetPowerDerate(80.0);  // 80% of max power
+    }
+  } else if (g_maxCellV < (CELL_OV1_THRESH - 0.02)) {
+    if (g_ov1Active) {
+      g_ov1Active = 0;
+      BMS_SetPowerDerate(100.0);
+      write("[BMS][OV1] Cleared — Max cell: %.3f V", g_maxCellV);
+    }
+  }
+
+  // ---- UV2: Critical Under-Voltage ----
+  if (g_minCellV <= CELL_UV2_THRESH) {
+    g_uv2Counter++;
+    if (g_uv2Counter >= 2 && !g_uv2Active) {
+      g_uv2Active = 1;
+      BMS_TriggerFault("UV2", g_minCellV, "CONTACTOR_OPEN");
+      BMS_OpenContactors();
+      BMS_LogDTC(0xP0A0F, "Cell Voltage Low Critical");
+    }
+  } else {
+    g_uv2Counter = 0;
+  }
+
+  // ---- UV1: Warning Under-Voltage ----
+  if (g_minCellV <= CELL_UV1_THRESH && g_minCellV > CELL_UV2_THRESH) {
+    if (!g_uv1Active) {
+      g_uv1Active = 1;
+      BMS_TriggerFault("UV1", g_minCellV, "POWER_DERATE_50PCT");
+      BMS_SetPowerDerate(50.0);
+    }
+  }
+}
+
+/*===========================================================================
+  BMS_CheckTemperatureProtection — Thermal Protection Logic
+===========================================================================*/
+void BMS_CheckTemperatureProtection()
+{
+  // ---- OT2: Critical Over-Temperature ----
+  if (g_maxCellTemp >= TEMP_OT2_THRESH) {
+    g_ot2Counter++;
+    if (g_ot2Counter >= 10 && !g_ot2Active) {  // 10 × 10 ms = 100 ms
+      g_ot2Active = 1;
+      write("[BMS][OT2] CRITICAL OVER-TEMPERATURE: %.1f°C — SHUTDOWN", g_maxCellTemp);
+      BMS_OpenContactors();
+      BMS_LogDTC(0xP1A00, "Pack Over-Temperature Emergency");
+    }
+  } else {
+    g_ot2Counter = 0;
+  }
+
+  // ---- OT1: Warning Over-Temperature ----
+  if (g_maxCellTemp >= TEMP_OT1_THRESH && g_maxCellTemp < TEMP_OT2_THRESH) {
+    if (!g_ot1Active) {
+      g_ot1Active = 1;
+      write("[BMS][OT1] Over-Temperature Warning: %.1f°C — Requesting max cooling", g_maxCellTemp);
+      BMS_SetCoolingDutyCycle(100);  // 100% cooling
+      BMS_SetPowerDerate(50.0);
+      BMS_LogDTC(0xP0A1A, "Cell Temp High Warning");
+    }
+  } else if (g_maxCellTemp < (TEMP_OT1_THRESH - 5.0)) {
+    if (g_ot1Active) {
+      g_ot1Active = 0;
+      BMS_SetCoolingDutyCycle(50);
+      BMS_SetPowerDerate(100.0);
+      write("[BMS][OT1] Cleared");
+    }
+  }
+}
+
+/*===========================================================================
+  BMS_CheckBalanceActivation — Passive Balancing Logic
+===========================================================================*/
+void BMS_CheckBalanceActivation()
+{
+  if (g_cellDelta > CELL_BALANCE_DELTA) {
+    if (!g_balanceActive) {
+      g_balanceActive = 1;
+      write("[BMS][BAL] Cell balancing ACTIVATED — Delta: %.1f mV", g_cellDelta * 1000);
+    }
+    @BMS_Control::Balance_Enable = 1;
+    @BMS_Control::Balance_Target_V = g_minCellV + 0.002;  // Bleed to min + 2 mV
+  } else {
+    if (g_balanceActive) {
+      g_balanceActive = 0;
+      @BMS_Control::Balance_Enable = 0;
+      write("[BMS][BAL] Cell balancing DEACTIVATED — Delta: %.1f mV", g_cellDelta * 1000);
+    }
+  }
+}
+
+/*===========================================================================
+  BMS_TransmitCellVoltage — Transmit BMS_CellVoltage CAN frame (0x3A1)
+===========================================================================*/
+void BMS_TransmitCellVoltage()
+{
+  // Encode signals into 8-byte payload
+  // Signal encoding: 1 LSB = 1 mV, offset = 0
+  g_msgCellVoltage.PackVoltage     = (dword)(g_packVoltage * 10);   // 0.1 V resolution
+  g_msgCellVoltage.MaxCellVoltage  = (word)(g_maxCellV * 1000);     // 1 mV resolution
+  g_msgCellVoltage.MinCellVoltage  = (word)(g_minCellV * 1000);
+  g_msgCellVoltage.CellDelta_mV   = (word)(g_cellDelta * 1000);
+  output(g_msgCellVoltage);
+}
+
+/*===========================================================================
+  Helper: BMS_TriggerFault
+===========================================================================*/
+void BMS_TriggerFault(char faultName[], float faultValue, char reaction[])
+{
+  write("[BMS][FAULT] %s triggered | Value: %.3f | Reaction: %s | Time: %.3f s",
+        faultName, faultValue, reaction, timeNow() / 100000000.0);
+}
+
+/*===========================================================================
+  Helper: BMS_LogDTC — Simulate DTC storage
+===========================================================================*/
+void BMS_LogDTC(dword dtcCode, char description[])
+{
+  write("[BMS][DTC] DTC 0x%X STORED: %s | Timestamp: %.3f s",
+        dtcCode, description, timeNow() / 100000000.0);
+
+  // Set system variable to signal DTC to test framework
+  @BMS_DTC::LastDTC_Code = dtcCode;
+  @BMS_DTC::LastDTC_Time = timeNow() / 100000000.0;
+}
+
+/*===========================================================================
+  Helper: BMS_OpenContactors
+===========================================================================*/
+void BMS_OpenContactors()
+{
+  write("[BMS][CONTACTOR] Emergency contactor OPEN command issued");
+  @BMS_Control::MainPlus_Cmd  = 0;
+  @BMS_Control::MainMinus_Cmd = 0;
+  @BMS_Control::Precharge_Cmd = 0;
+}
+
+/*===========================================================================
+  Helper: BMS_SetPowerDerate
+===========================================================================*/
+void BMS_SetPowerDerate(float percent)
+{
+  write("[BMS][POWER] Power limit set to %.0f%%", percent);
+  @BMS_Control::Power_Derate_Pct = percent;
+}
+
+/*===========================================================================
+  Helper: BMS_SetCoolingDutyCycle
+===========================================================================*/
+void BMS_SetCoolingDutyCycle(int dutyCycle)
+{
+  write("[BMS][THERMAL] Cooling pump duty cycle: %d%%", dutyCycle);
+  @BMS_Control::Cooling_Duty_Pct = dutyCycle;
+}
+
+/*===========================================================================
+  on timer t_statusReport — every 1 second: print full pack status
+===========================================================================*/
+on timer t_statusReport
+{
+  write("--- BMS STATUS REPORT ---");
+  write("  Pack Voltage  : %.2f V", g_packVoltage);
+  write("  Max Cell V    : %.3f V", g_maxCellV);
+  write("  Min Cell V    : %.3f V", g_minCellV);
+  write("  Cell Delta    : %.1f mV", g_cellDelta * 1000);
+  write("  Max Temp      : %.1f °C", g_maxCellTemp);
+  write("  SoC           : %.1f %%", g_soc);
+  write("  OV1:%d OV2:%d UV1:%d UV2:%d OT1:%d OT2:%d BAL:%d",
+        g_ov1Active, g_ov2Active, g_uv1Active, g_uv2Active,
+        g_ot1Active, g_ot2Active, g_balanceActive);
+  write("-------------------------");
+
+  setTimer(t_statusReport, 1000);
+}
+
+/*===========================================================================
+  on message BMS_Status (RX from BMS ECU on CAN) — Monitor ECU response
+===========================================================================*/
+on message 0x3A0
+{
+  float soc, packV;
+  int   bmsState, faultLevel;
+
+  soc        = this.SoC * 0.5;           // 0.5% resolution
+  packV      = this.PackVoltage * 0.1;   // 0.1 V resolution
+  bmsState   = this.BMS_State;
+  faultLevel = this.Fault_Level;
+
+  // Sanity checks
+  if (soc < 0 || soc > 100) {
+    write("[BMS][CAN] INVALID SoC value: %.1f %% — check encoding!", soc);
+  }
+  if (packV < 200 || packV > 500) {
+    write("[BMS][CAN] SUSPICIOUS pack voltage: %.1f V", packV);
+  }
+  if (faultLevel > 0) {
+    write("[BMS][CAN] Fault Level %d received from BMS ECU", faultLevel);
+  }
+}
+
+/*===========================================================================
+  on key 'r' — Reset all fault flags (for test script control)
+===========================================================================*/
+on key 'r'
+{
+  write("[BMS] Manual fault flag reset triggered");
+  g_ov1Active = 0;  g_ov2Active = 0;
+  g_uv1Active = 0;  g_uv2Active = 0;
+  g_ot1Active = 0;  g_ot2Active = 0;
+  g_ov2Counter = 0; g_uv2Counter = 0; g_ot2Counter = 0;
+  BMS_SetPowerDerate(100.0);
+}
+
+/*===========================================================================
+  on key 'f' — Inject an OV2 fault for testing
+===========================================================================*/
+on key 'f'
+{
+  write("[BMS] Injecting OV2 fault on Cell 7 (4.26 V)");
+  @BMS_Sim::Cell_Voltage[6] = 4.26;
+}
+
+/*===========================================================================
+  on key 'u' — Inject a UV2 fault for testing
+===========================================================================*/
+on key 'u'
+{
+  write("[BMS] Injecting UV2 fault on Cell 50 (2.45 V)");
+  @BMS_Sim::Cell_Voltage[49] = 2.45;
+}
+
+/*===========================================================================
+  on stopMeasurement — Cleanup
+===========================================================================*/
+on stopMeasurement
+{
+  write("=== BMS Cell Monitoring Script Stopped ===");
+  write("Total OV1 events: session count not tracked individually");
+}

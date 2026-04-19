@@ -1,0 +1,340 @@
+/*===========================================================================
+  FILE:    02_bms_contactor_precharge.capl
+  PURPOSE: BMS Contactor Control & Precharge Sequence Validation
+           - Models the full HV ON / HV OFF state machine
+           - Measures precharge time and inrush current
+           - Tests contactor weld detection
+           - Tests emergency HV OFF (crash / inhibit signal)
+  AUTHOR:  BMS Validation Team
+  DATE:    2026-04-19
+===========================================================================*/
+
+variables
+{
+  // ---- Contactor FSM States ----
+  const int CTR_STATE_IDLE         = 0;  // All contactors open
+  const int CTR_STATE_MAIN_NEG     = 1;  // Main- closed
+  const int CTR_STATE_PRECHARGE    = 2;  // Main- + Precharge closed
+  const int CTR_STATE_MAIN_POS     = 3;  // Main- + Main+ closed (Precharge still closed briefly)
+  const int CTR_STATE_HV_READY     = 4;  // All main contactors closed, precharge open
+  const int CTR_STATE_FAULT        = 5;  // Fault — all open
+  const int CTR_STATE_HV_OFF       = 6;  // Normal HV OFF sequence
+
+  // ---- Contactor Parameters ----
+  const float PRECHARGE_RESISTOR   = 40.0;    // Precharge resistor [Ω]
+  const float DC_LINK_CAPACITANCE  = 0.003;   // DC link capacitor [F] = 3000 µF
+  const float PRECHARGE_RATIO      = 0.95;    // 95% of Vbatt
+  const int   PRECHARGE_TIMEOUT_MS = 2000;    // Max 2 s for precharge
+  const float MAX_INRUSH_CURRENT   = 50.0;    // Max allowed inrush [A]
+  const int   WELD_DETECT_DELAY_MS = 200;     // Delay to check weld
+  const int   EMERGENCY_OPEN_MS    = 50;      // Emergency open within 50 ms requirement
+
+  // ---- Runtime ----
+  int   g_ctrState;
+  float g_vDcLink;
+  float g_vBattery;
+  float g_inrushCurrent;
+  int   g_prechargeStartTime;
+  int   g_hvRequestActive;
+  int   g_emergencyOpenActive;
+  int   g_weldFaultActive;
+  float g_pcTimeConstant;        // τ = R × C
+
+  // ---- Timers ----
+  msTimer t_prechargeWatchdog;
+  msTimer t_contactorFSM;
+  msTimer t_weldDetect;
+  msTimer t_emergencyMeasure;
+
+  // ---- CAN Messages ----
+  message BMS_ContatcorStatus g_msgCtrlStatus = {dlc=4, dir=Tx, id=0x3A6};
+}
+
+/*===========================================================================
+  on start
+===========================================================================*/
+on start
+{
+  write("=== BMS Contactor & Precharge CAPL Started ===");
+
+  g_ctrState           = CTR_STATE_IDLE;
+  g_vDcLink            = 0.0;
+  g_vBattery           = 400.0;     // Simulated battery voltage
+  g_inrushCurrent      = 0.0;
+  g_hvRequestActive    = 0;
+  g_emergencyOpenActive= 0;
+  g_weldFaultActive    = 0;
+
+  // τ = R × C = 40 × 0.003 = 0.12 s
+  g_pcTimeConstant = PRECHARGE_RESISTOR * DC_LINK_CAPACITANCE;
+  write("Precharge time constant τ = %.3f s | t_95%% ≈ %.3f s",
+        g_pcTimeConstant, g_pcTimeConstant * 3.0);
+
+  // Set all contactors open initially
+  SetContactorState(0, 0, 0);  // Main+, Main-, Precharge
+
+  setTimer(t_contactorFSM, 10);
+}
+
+/*===========================================================================
+  on timer t_contactorFSM — 10 ms FSM execution cycle
+===========================================================================*/
+on timer t_contactorFSM
+{
+  FSM_Execute();
+  setTimer(t_contactorFSM, 10);
+}
+
+/*===========================================================================
+  FSM_Execute — Main contactor state machine
+===========================================================================*/
+void FSM_Execute()
+{
+  float ratio;
+  int   elapsedMs;
+
+  switch (g_ctrState) {
+
+    case CTR_STATE_IDLE:
+      // Wait for HV request from VCU
+      if (@VCU_Control::HV_Request == 1 && !g_weldFaultActive) {
+        write("[CTR][IDLE] HV request received — Starting HV ON sequence");
+        g_ctrState = CTR_STATE_MAIN_NEG;
+        SetContactorState(0, 1, 0);  // Close Main-
+        write("[CTR] Main- CLOSED");
+      }
+      break;
+
+    case CTR_STATE_MAIN_NEG:
+      // Short settling delay then open precharge
+      g_ctrState = CTR_STATE_PRECHARGE;
+      SetContactorState(0, 1, 1);    // Close Precharge
+      g_prechargeStartTime = (int)(timeNow() / 1000000);  // Store ms
+      write("[CTR] Precharge contactor CLOSED — Charging DC link...");
+      setTimer(t_prechargeWatchdog, PRECHARGE_TIMEOUT_MS);
+      break;
+
+    case CTR_STATE_PRECHARGE:
+      // Simulate Vdclink exponential rise: V(t) = Vbatt × (1 - e^(-t/τ))
+      SimulatePrechargeVoltage();
+      ratio = g_vDcLink / g_vBattery;
+
+      // Check: has voltage reached 95% threshold?
+      if (ratio >= PRECHARGE_RATIO) {
+        cancelTimer(t_prechargeWatchdog);
+        write("[CTR] DClink reached %.1f%% (%.1f V) — Closing Main+",
+              ratio * 100, g_vDcLink);
+        g_ctrState = CTR_STATE_MAIN_POS;
+        SetContactorState(1, 1, 1);  // Close Main+ (precharge still on briefly)
+      }
+      break;
+
+    case CTR_STATE_MAIN_POS:
+      // Measure inrush after Main+ closed
+      MeasureInrushCurrent();
+      if (g_inrushCurrent > MAX_INRUSH_CURRENT) {
+        write("[CTR][FAIL] Inrush current EXCEEDS limit: %.1f A > %.1f A",
+              g_inrushCurrent, MAX_INRUSH_CURRENT);
+        BMS_RaiseFault("INRUSH_OVERCURRENT");
+        g_ctrState = CTR_STATE_FAULT;
+      } else {
+        // Open precharge contactor
+        SetContactorState(1, 1, 0);  // Open precharge
+        g_ctrState = CTR_STATE_HV_READY;
+        write("[CTR] Precharge OPEN — HV READY | Inrush: %.1f A", g_inrushCurrent);
+
+        // Schedule weld detection
+        setTimer(t_weldDetect, WELD_DETECT_DELAY_MS);
+      }
+      break;
+
+    case CTR_STATE_HV_READY:
+      // Normal HV operation — monitor for HV off request or fault
+      if (@VCU_Control::HV_Request == 0) {
+        write("[CTR] HV OFF requested — Begin normal HV OFF sequence");
+        g_ctrState = CTR_STATE_HV_OFF;
+      }
+      if (@VCU_Control::Crash_Signal == 1) {
+        EmergencyHvOff();
+      }
+      break;
+
+    case CTR_STATE_HV_OFF:
+      // Normal HV OFF: open Main+ first, then wait, then open Main-
+      SetContactorState(0, 1, 0);    // Open Main+
+      write("[CTR] Main+ OPEN");
+      // Delay then open Main-
+      SetContactorState(0, 0, 0);    // Open Main-
+      write("[CTR] Main- OPEN — HV OFF complete");
+      g_vDcLink  = 0.0;
+      g_ctrState = CTR_STATE_IDLE;
+      break;
+
+    case CTR_STATE_FAULT:
+      SetContactorState(0, 0, 0);
+      write("[CTR][FAULT] All contactors OPEN — Fault state");
+      break;
+  }
+
+  TransmitContactorStatus();
+}
+
+/*===========================================================================
+  SimulatePrechargeVoltage — Exponential rise model
+===========================================================================*/
+void SimulatePrechargeVoltage()
+{
+  float t_sec;
+  int   nowMs, startMs;
+
+  nowMs   = (int)(timeNow() / 1000000);
+  startMs = g_prechargeStartTime;
+  t_sec   = (nowMs - startMs) / 1000.0;
+
+  // V(t) = Vbatt × (1 - e^(-t/τ))
+  g_vDcLink = g_vBattery * (1.0 - exp(-t_sec / g_pcTimeConstant));
+  @BMS_Sim::VDcLink = g_vDcLink;
+}
+
+/*===========================================================================
+  MeasureInrushCurrent — Simulated inrush at Main+ closure
+===========================================================================*/
+void MeasureInrushCurrent()
+{
+  float vDiff;
+  // At the moment Main+ closes, inrush = (Vbatt - Vdclink) / R_internal
+  // Where R_internal of Main+ contactor + busbar ≈ 0.5 mΩ
+  vDiff = g_vBattery - g_vDcLink;
+  g_inrushCurrent = vDiff / 0.1;  // 0.1 Ω equivalent impedance
+  write("[CTR] Inrush current at Main+ closure: %.2f A (ΔV=%.3f V)", g_inrushCurrent, vDiff);
+}
+
+/*===========================================================================
+  on timer t_prechargeWatchdog — Precharge timeout handler
+===========================================================================*/
+on timer t_prechargeWatchdog
+{
+  write("[CTR][FAULT] Precharge TIMEOUT after %d ms — VDcLink=%.1f V (%.1f%%)",
+        PRECHARGE_TIMEOUT_MS, g_vDcLink, (g_vDcLink / g_vBattery) * 100);
+  SetContactorState(0, 0, 0);
+  g_ctrState = CTR_STATE_FAULT;
+  BMS_LogDTC_Contactor(0x0A3B, "Precharge Failure — Timeout");
+}
+
+/*===========================================================================
+  on timer t_weldDetect — Contactor weld detection
+  Check if precharge current still flows despite precharge contactor commanded OFF
+===========================================================================*/
+on timer t_weldDetect
+{
+  float residualCurrent;
+  residualCurrent = @BMS_Sim::Precharge_Current;
+
+  if (residualCurrent > 0.5) {  // > 0.5 A residual = weld suspected
+    g_weldFaultActive = 1;
+    write("[CTR][WELD] Precharge contactor WELD detected! Residual current: %.3f A",
+          residualCurrent);
+    BMS_LogDTC_Contactor(0x0A3A, "Contactor Weld Detected");
+  } else {
+    write("[CTR][WELD] Weld detection PASS — Residual: %.3f A", residualCurrent);
+  }
+}
+
+/*===========================================================================
+  EmergencyHvOff — Opens all contactors within 50 ms requirement
+===========================================================================*/
+void EmergencyHvOff()
+{
+  long t_start, t_end;
+  long elapsed_us;
+
+  t_start = timeNow();
+  write("[CTR][EMERGENCY] Crash signal received — Emergency HV OFF!");
+
+  SetContactorState(0, 0, 0);    // All contactors OPEN
+
+  t_end      = timeNow();
+  elapsed_us = (t_end - t_start) / 100;   // Convert 100 ns ticks to µs
+
+  write("[CTR][EMERGENCY] All contactors opened in %ld µs (%ld ms)",
+        elapsed_us, elapsed_us / 1000);
+
+  if (elapsed_us / 1000 <= EMERGENCY_OPEN_MS) {
+    write("[CTR][EMERGENCY] PASS — Within %d ms requirement", EMERGENCY_OPEN_MS);
+  } else {
+    write("[CTR][EMERGENCY] FAIL — Exceeded %d ms! Actual: %ld ms",
+          EMERGENCY_OPEN_MS, elapsed_us / 1000);
+  }
+
+  g_ctrState = CTR_STATE_FAULT;
+  BMS_LogDTC_Contactor(0x0A3C, "Emergency HV OFF — Crash Signal");
+}
+
+/*===========================================================================
+  SetContactorState — Controls Main+, Main-, Precharge hardware
+===========================================================================*/
+void SetContactorState(int mainPlus, int mainMinus, int precharge)
+{
+  @BMS_Control::MainPlus_Cmd   = mainPlus;
+  @BMS_Control::MainMinus_Cmd  = mainMinus;
+  @BMS_Control::Precharge_Cmd  = precharge;
+}
+
+/*===========================================================================
+  TransmitContactorStatus — CAN message 0x3A6
+===========================================================================*/
+void TransmitContactorStatus()
+{
+  g_msgCtrlStatus.CTR_State       = g_ctrState;
+  g_msgCtrlStatus.VDcLink         = (word)(g_vDcLink * 10);
+  g_msgCtrlStatus.MainPlus_State  = @BMS_Control::MainPlus_Cmd;
+  g_msgCtrlStatus.MainMinus_State = @BMS_Control::MainMinus_Cmd;
+  output(g_msgCtrlStatus);
+}
+
+/*===========================================================================
+  Helpers
+===========================================================================*/
+void BMS_RaiseFault(char faultName[])
+{
+  write("[CTR][FAULT] Fault raised: %s | Time: %.3f s",
+        faultName, timeNow() / 100000000.0);
+}
+
+void BMS_LogDTC_Contactor(dword code, char desc[])
+{
+  write("[CTR][DTC] 0x%X: %s", code, desc);
+  @BMS_DTC::LastDTC_Code = code;
+}
+
+/*===========================================================================
+  Key Controls for Manual Testing
+===========================================================================*/
+on key 'h'
+{
+  write("[CTR] Manual HV ON request");
+  @VCU_Control::HV_Request = 1;
+}
+
+on key 'o'
+{
+  write("[CTR] Manual HV OFF request");
+  @VCU_Control::HV_Request = 0;
+}
+
+on key 'c'
+{
+  write("[CTR] Simulating CRASH signal — Emergency HV OFF");
+  @VCU_Control::Crash_Signal = 1;
+}
+
+on key 'w'
+{
+  write("[CTR] Simulating precharge contactor WELD (residual current = 2.0 A)");
+  @BMS_Sim::Precharge_Current = 2.0;
+}
+
+on stopMeasurement
+{
+  write("=== BMS Contactor Script Stopped | Final State: %d ===", g_ctrState);
+}

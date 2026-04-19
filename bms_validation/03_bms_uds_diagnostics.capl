@@ -1,0 +1,677 @@
+/*===========================================================================
+  FILE:    03_bms_uds_diagnostics.capl
+  PURPOSE: BMS UDS Diagnostics via ISO 14229 (UDS on CAN)
+           - Tester Present
+           - Security Access (Level 1 & Level 3)
+           - Read/Write Data By Identifier
+           - Read/Clear DTCs
+           - ECU Reset
+           - I/O Control (force contactor, cooling)
+           - Routine Control (self-test, balancing)
+           - Full BMS EOL parameter write sequence
+  AUTHOR:  BMS Validation Team
+  DATE:    2026-04-19
+===========================================================================*/
+
+includes
+{
+  // UDS helper library (custom implementation below)
+}
+
+variables
+{
+  // ---- UDS Transport (ISO 15765-2 / ISOTP) ----
+  const dword  BMS_REQUEST_ID    = 0x7E2;    // Physical request to BMS
+  const dword  BMS_RESPONSE_ID   = 0x7EA;    // Response from BMS
+  const dword  BMS_FUNC_REQ_ID   = 0x7DF;    // Functional request (broadcast)
+  const int    UDS_TIMEOUT_MS    = 500;       // P2 timeout
+
+  // ---- UDS Service IDs ----
+  const byte   SID_DIAG_SESSION  = 0x10;
+  const byte   SID_ECU_RESET     = 0x11;
+  const byte   SID_CLEAR_DTC     = 0x14;
+  const byte   SID_READ_DTC      = 0x19;
+  const byte   SID_READ_DATA     = 0x22;
+  const byte   SID_WRITE_DATA    = 0x2E;
+  const byte   SID_IO_CONTROL    = 0x2F;
+  const byte   SID_ROUTINE_CTRL  = 0x31;
+  const byte   SID_SECURITY_ACC  = 0x27;
+  const byte   SID_COMM_CONTROL  = 0x28;
+  const byte   SID_TESTER_PRES   = 0x3E;
+  const byte   SID_CTRL_DTC_SET  = 0x85;
+
+  // ---- Session Types ----
+  const byte   SESSION_DEFAULT   = 0x01;
+  const byte   SESSION_EXTENDED  = 0x03;
+  const byte   SESSION_PROGRAM   = 0x02;
+
+  // ---- BMS Data Identifiers (DIDs) ----
+  // Read DIDs
+  const word   DID_SOC           = 0xF190;   // State of Charge
+  const word   DID_SOH           = 0xF191;   // State of Health
+  const word   DID_PACK_VOLTAGE  = 0xF192;   // Pack voltage
+  const word   DID_PACK_CURRENT  = 0xF193;   // Pack current
+  const word   DID_MAX_CELL_V    = 0xF194;   // Max cell voltage
+  const word   DID_MIN_CELL_V    = 0xF195;   // Min cell voltage
+  const word   DID_MAX_TEMP      = 0xF196;   // Max temperature
+  const word   DID_MIN_TEMP      = 0xF197;   // Min temperature
+  const word   DID_CELL_DELTA    = 0xF198;   // Cell voltage delta
+  const word   DID_BMS_STATE     = 0xF199;   // BMS operating state
+  const word   DID_FAULT_LEVEL   = 0xF19A;   // Current fault level
+  const word   DID_CYCLE_COUNT   = 0xF19B;   // Charge cycle count
+  const word   DID_SERIAL_NUMBER = 0xF19C;   // Pack serial number
+  const word   DID_SW_VERSION    = 0xF19D;   // BMS software version
+  const word   DID_ISOLATION_R   = 0xF19E;   // Isolation resistance
+  const word   DID_ACTIVE_DTC_CT = 0xF19F;   // Active DTC count
+
+  // Write DIDs (require Security Access)
+  const word   DID_VIN           = 0xF17F;   // Vehicle Identification Number
+  const word   DID_CAPACITY_AH   = 0xF1A0;   // Pack nominal capacity [Ah]
+  const word   DID_SOC_INIT      = 0xF1A1;   // SoC initialisation value
+  const word   DID_CELL_CHEM     = 0xF1A2;   // Cell chemistry type
+  const word   DID_OV1_THRESH    = 0xF1A3;   // OV1 threshold (calibration)
+  const word   DID_OV2_THRESH    = 0xF1A4;   // OV2 threshold (calibration)
+  const word   DID_UV1_THRESH    = 0xF1A5;   // UV1 threshold
+  const word   DID_UV2_THRESH    = 0xF1A6;   // UV2 threshold
+  const word   DID_EOL_FLAG      = 0xF1FF;   // EOL completion flag
+
+  // ---- Routine Control IDs ----
+  const word   ROUTINE_SELF_TEST        = 0x0201;  // BMS self-test
+  const word   ROUTINE_CELL_BALANCE     = 0x0202;  // Force cell balancing
+  const word   ROUTINE_CONTACTOR_TEST   = 0x0203;  // Contactor self-test
+  const word   ROUTINE_IMD_TEST         = 0x0204;  // IMD self-test
+  const word   ROUTINE_RESET_CYCLE_CNT  = 0x0205;  // Reset cycle counter
+  const word   ROUTINE_OV_HW_SM_TEST   = 0x0206;  // OV HW safety mechanism test
+
+  // ---- Security Seed/Key ----
+  byte  g_seed[4];
+  byte  g_key[4];
+
+  // ---- State flags ----
+  int  g_sessionActive;
+  int  g_securityUnlocked;
+  int  g_udsWaitingResponse;
+  int  g_lastResponsePositive;
+  byte g_lastResponseData[64];
+  int  g_lastResponseLen;
+  int  g_lastNRC;              // Negative Response Code
+
+  // ---- Timers ----
+  msTimer t_udsTimeout;
+  msTimer t_testerPresent;
+
+  // ---- UDS Request/Response buffers ----
+  byte  g_requestBuf[64];
+  int   g_requestLen;
+
+  // ---- CAN message for raw UDS frame ----
+  message g_udsRequest  = {dlc=8, id=0x7E2, dir=Tx};
+}
+
+/*===========================================================================
+  on start
+===========================================================================*/
+on start
+{
+  write("=== BMS UDS Diagnostics CAPL Started ===");
+  write("Request ID : 0x%X", BMS_REQUEST_ID);
+  write("Response ID: 0x%X", BMS_RESPONSE_ID);
+
+  g_sessionActive       = 0;
+  g_securityUnlocked    = 0;
+  g_udsWaitingResponse  = 0;
+  g_lastResponsePositive= 0;
+  g_lastNRC             = 0;
+}
+
+/*===========================================================================
+  on message BMS_RESPONSE — Receive & decode UDS response from BMS
+===========================================================================*/
+on message 0x7EA
+{
+  byte  responseSID;
+  byte  nrc;
+  int   i;
+
+  cancelTimer(t_udsTimeout);
+  g_udsWaitingResponse = 0;
+
+  // Extract response bytes
+  for (i = 0; i < this.dlc && i < 64; i++) {
+    g_lastResponseData[i] = this.byte(i);
+  }
+  g_lastResponseLen = this.dlc;
+
+  responseSID = this.byte(0);
+
+  // ---- Positive Response ----
+  if (responseSID != 0x7F) {
+    g_lastResponsePositive = 1;
+    UDS_DecodePositiveResponse(responseSID);
+  }
+  // ---- Negative Response: 0x7F, Service, NRC ----
+  else {
+    g_lastResponsePositive = 0;
+    nrc = this.byte(2);
+    g_lastNRC = nrc;
+    UDS_DecodeNRC(this.byte(1), nrc);
+  }
+}
+
+/*===========================================================================
+  UDS_DecodePositiveResponse
+===========================================================================*/
+void UDS_DecodePositiveResponse(byte responseSID)
+{
+  byte  subFn;
+  word  did;
+  float val;
+
+  write("[UDS][+] Positive response for SID 0x%X", responseSID - 0x40);
+
+  switch (responseSID) {
+
+    case 0x50:  // DiagSession response
+      subFn = g_lastResponseData[1];
+      g_sessionActive = 1;
+      write("[UDS] Session 0x%X activated", subFn);
+      break;
+
+    case 0x62:  // ReadDataByID response
+      did = (g_lastResponseData[1] << 8) | g_lastResponseData[2];
+      UDS_ParseDIDResponse(did);
+      break;
+
+    case 0x6E:  // WriteDataByID response
+      did = (g_lastResponseData[1] << 8) | g_lastResponseData[2];
+      write("[UDS][WDBI] Write confirmed for DID 0x%04X", did);
+      break;
+
+    case 0x67:  // Security Access response
+      if (g_lastResponseData[1] == 0x01) {  // Seed
+        g_seed[0] = g_lastResponseData[2];
+        g_seed[1] = g_lastResponseData[3];
+        g_seed[2] = g_lastResponseData[4];
+        g_seed[3] = g_lastResponseData[5];
+        write("[UDS][SA] Seed received: 0x%02X%02X%02X%02X",
+              g_seed[0], g_seed[1], g_seed[2], g_seed[3]);
+        // Compute key and send
+        UDS_ComputeAndSendKey();
+      } else {  // Key accepted
+        g_securityUnlocked = 1;
+        write("[UDS][SA] Security UNLOCKED — Level 1");
+      }
+      break;
+
+    case 0x59:  // ReadDTC response
+      UDS_ParseDTCResponse();
+      break;
+
+    case 0x54:  // ClearDTC response
+      write("[UDS][DTC] All DTCs cleared successfully");
+      break;
+
+    case 0x71:  // RoutineControl response
+      write("[UDS][RC] Routine 0x%04X result received",
+            (g_lastResponseData[2] << 8) | g_lastResponseData[3]);
+      UDS_ParseRoutineResult();
+      break;
+
+    case 0x51:  // ECU Reset response
+      write("[UDS][RESET] ECU Reset acknowledged");
+      g_sessionActive    = 0;
+      g_securityUnlocked = 0;
+      break;
+  }
+}
+
+/*===========================================================================
+  UDS_ParseDIDResponse — Decode all BMS DIDs
+===========================================================================*/
+void UDS_ParseDIDResponse(word did)
+{
+  float fVal;
+  int   iVal;
+  char  strBuf[20];
+
+  switch (did) {
+
+    case 0xF190:  // SoC
+      fVal = g_lastResponseData[3] * 0.5;  // 0.5% per LSB
+      write("[UDS][DID:F190] SoC = %.1f %%", fVal);
+      @BMS_UDS::SoC = fVal;
+      break;
+
+    case 0xF191:  // SoH
+      fVal = g_lastResponseData[3] * 0.5;
+      write("[UDS][DID:F191] SoH = %.1f %%", fVal);
+      break;
+
+    case 0xF192:  // Pack Voltage
+      iVal = (g_lastResponseData[3] << 8) | g_lastResponseData[4];
+      fVal = iVal * 0.1;   // 0.1 V per LSB
+      write("[UDS][DID:F192] Pack Voltage = %.1f V", fVal);
+      @BMS_UDS::PackVoltage = fVal;
+      break;
+
+    case 0xF193:  // Pack Current
+      iVal = (g_lastResponseData[3] << 8) | g_lastResponseData[4];
+      fVal = (iVal - 32768) * 0.1;  // Signed, offset 32768
+      write("[UDS][DID:F193] Pack Current = %.1f A", fVal);
+      break;
+
+    case 0xF194:  // Max Cell Voltage
+      iVal = (g_lastResponseData[3] << 8) | g_lastResponseData[4];
+      fVal = iVal * 0.001;  // 1 mV per LSB
+      write("[UDS][DID:F194] Max Cell Voltage = %.3f V", fVal);
+      break;
+
+    case 0xF195:  // Min Cell Voltage
+      iVal = (g_lastResponseData[3] << 8) | g_lastResponseData[4];
+      fVal = iVal * 0.001;
+      write("[UDS][DID:F195] Min Cell Voltage = %.3f V", fVal);
+      break;
+
+    case 0xF196:  // Max Temperature
+      fVal = g_lastResponseData[3] - 40.0;  // -40 offset
+      write("[UDS][DID:F196] Max Cell Temp = %.1f °C", fVal);
+      break;
+
+    case 0xF197:  // Min Temperature
+      fVal = g_lastResponseData[3] - 40.0;
+      write("[UDS][DID:F197] Min Cell Temp = %.1f °C", fVal);
+      break;
+
+    case 0xF199:  // BMS State
+      write("[UDS][DID:F199] BMS State = 0x%02X", g_lastResponseData[3]);
+      break;
+
+    case 0xF19A:  // Fault Level
+      write("[UDS][DID:F19A] Fault Level = %d", g_lastResponseData[3]);
+      break;
+
+    case 0xF19B:  // Cycle Count
+      iVal = (g_lastResponseData[3] << 8) | g_lastResponseData[4];
+      write("[UDS][DID:F19B] Charge Cycle Count = %d", iVal);
+      break;
+
+    case 0xF19E:  // Isolation Resistance
+      iVal = (g_lastResponseData[3] << 8) | g_lastResponseData[4];
+      fVal = iVal * 10.0;  // 10 Ω per LSB
+      write("[UDS][DID:F19E] Isolation Resistance = %.0f Ω", fVal);
+      break;
+
+    case 0xF19D:  // SW Version
+      write("[UDS][DID:F19D] SW Version = %02X.%02X.%02X",
+            g_lastResponseData[3], g_lastResponseData[4], g_lastResponseData[5]);
+      break;
+
+    default:
+      write("[UDS][DID:0x%04X] Raw: 0x%02X 0x%02X 0x%02X",
+            did, g_lastResponseData[3], g_lastResponseData[4], g_lastResponseData[5]);
+      break;
+  }
+}
+
+/*===========================================================================
+  UDS_ParseDTCResponse — Decode ReadDTC (0x19) response
+===========================================================================*/
+void UDS_ParseDTCResponse()
+{
+  int  numDTCs;
+  int  i, offset;
+  byte highByte, midByte, lowByte, statusByte;
+  dword dtcCode;
+
+  numDTCs = (g_lastResponseLen - 3) / 4;  // Each DTC = 3 bytes code + 1 byte status
+  write("[UDS][DTC] %d DTC(s) found:", numDTCs);
+
+  for (i = 0; i < numDTCs; i++) {
+    offset     = 3 + (i * 4);
+    highByte   = g_lastResponseData[offset];
+    midByte    = g_lastResponseData[offset + 1];
+    lowByte    = g_lastResponseData[offset + 2];
+    statusByte = g_lastResponseData[offset + 3];
+    dtcCode    = ((dword)highByte << 16) | ((dword)midByte << 8) | lowByte;
+
+    write("  [%d] DTC: 0x%06X | Status: 0x%02X | %s",
+          i + 1, dtcCode, statusByte,
+          UDS_GetDTCDescription(dtcCode));
+  }
+}
+
+/*===========================================================================
+  UDS_GetDTCDescription — Return human-readable DTC description
+===========================================================================*/
+char[] UDS_GetDTCDescription(dword code)
+{
+  switch (code) {
+    case 0x0A0D: return "Cell Voltage High — Warning";
+    case 0x0A0E: return "Cell Voltage High — Critical";
+    case 0x0A0F: return "Cell Voltage Low — Critical";
+    case 0x0A10: return "OV HW Safety Mechanism Failure";
+    case 0x0A1A: return "Cell Temp High — Warning";
+    case 0x0A1B: return "Cell Temp High — Critical";
+    case 0x0A1C: return "Temperature Sensor Open Circuit";
+    case 0x0A2D: return "SoC Out of Range";
+    case 0x0A3A: return "Contactor Weld Detected";
+    case 0x0A3B: return "Precharge Failure";
+    case 0x1A00: return "Pack Over-Temperature Emergency";
+    case 0x1B00: return "Isolation Resistance Low — Warning";
+    case 0x1B01: return "Isolation Resistance Low — Critical";
+    case 0x1B02: return "Isolation Resistance Emergency";
+    case 0x1C00: return "CAN Communication Timeout";
+    case 0x1D00: return "IMD Self-Test Failure";
+    default:     return "Unknown DTC";
+  }
+}
+
+/*===========================================================================
+  UDS_ParseRoutineResult — Interpret Routine Control result
+===========================================================================*/
+void UDS_ParseRoutineResult()
+{
+  word routineID;
+  byte result;
+
+  routineID = (g_lastResponseData[2] << 8) | g_lastResponseData[3];
+  result    = g_lastResponseData[4];
+
+  switch (routineID) {
+    case 0x0201:
+      write("[UDS][RC] Self-Test result: %s", result == 0x00 ? "PASS" : "FAIL");
+      break;
+    case 0x0203:
+      write("[UDS][RC] Contactor Test result: %s | Details: 0x%02X",
+            result == 0x00 ? "PASS" : "FAIL", g_lastResponseData[5]);
+      break;
+    case 0x0204:
+      write("[UDS][RC] IMD Test result: %s", result == 0x00 ? "PASS" : "FAIL");
+      break;
+    case 0x0206:
+      write("[UDS][RC] OV HW SM Test result: %s", result == 0x00 ? "PASS" : "FAIL");
+      break;
+  }
+}
+
+/*===========================================================================
+  Security Access — Compute key from seed
+  Algorithm: XOR with secret mask + left rotate by 1 bit
+===========================================================================*/
+void UDS_ComputeAndSendKey()
+{
+  byte  secretMask[4] = {0xA5, 0x3C, 0xF0, 0x69};
+  long  seed32, key32;
+  int   i;
+
+  seed32 = ((long)g_seed[0] << 24) | ((long)g_seed[1] << 16) |
+           ((long)g_seed[2] << 8)  | g_seed[3];
+
+  key32  = seed32 ^ 0xA53CF069;    // XOR with secret constant
+  key32  = (key32 << 1) | (key32 >> 31);  // Left rotate 1 bit
+
+  g_key[0] = (byte)(key32 >> 24) & 0xFF;
+  g_key[1] = (byte)(key32 >> 16) & 0xFF;
+  g_key[2] = (byte)(key32 >> 8)  & 0xFF;
+  g_key[3] = (byte)(key32)       & 0xFF;
+
+  write("[UDS][SA] Computed key: 0x%02X%02X%02X%02X",
+        g_key[0], g_key[1], g_key[2], g_key[3]);
+
+  // Send key response
+  UDS_SendRaw(6, SID_SECURITY_ACC, 0x02, g_key[0], g_key[1], g_key[2], g_key[3], 0x00);
+}
+
+/*===========================================================================
+  UDS_DecodeNRC — Decode Negative Response Code
+===========================================================================*/
+void UDS_DecodeNRC(byte service, byte nrc)
+{
+  char nrcDesc[80];
+
+  switch (nrc) {
+    case 0x10: snprintf(nrcDesc, 80, "General Reject"); break;
+    case 0x11: snprintf(nrcDesc, 80, "Service Not Supported"); break;
+    case 0x12: snprintf(nrcDesc, 80, "SubFunction Not Supported"); break;
+    case 0x13: snprintf(nrcDesc, 80, "Incorrect Message Length"); break;
+    case 0x22: snprintf(nrcDesc, 80, "Conditions Not Correct"); break;
+    case 0x24: snprintf(nrcDesc, 80, "Request Sequence Error"); break;
+    case 0x25: snprintf(nrcDesc, 80, "No Response From Sub-Net Component"); break;
+    case 0x31: snprintf(nrcDesc, 80, "Request Out Of Range"); break;
+    case 0x33: snprintf(nrcDesc, 80, "Security Access Denied"); break;
+    case 0x35: snprintf(nrcDesc, 80, "Invalid Key"); break;
+    case 0x36: snprintf(nrcDesc, 80, "Exceeded Number Of Attempts"); break;
+    case 0x37: snprintf(nrcDesc, 80, "Required Time Delay Not Expired"); break;
+    case 0x70: snprintf(nrcDesc, 80, "Upload Download Not Accepted"); break;
+    case 0x78: snprintf(nrcDesc, 80, "Response Pending"); break;
+    case 0x7E: snprintf(nrcDesc, 80, "SubFunction Not Supported In Active Session"); break;
+    case 0x7F: snprintf(nrcDesc, 80, "Service Not Supported In Active Session"); break;
+    default:   snprintf(nrcDesc, 80, "Unknown NRC 0x%02X", nrc); break;
+  }
+
+  write("[UDS][-] NRC for SID 0x%X: 0x%02X — %s", service, nrc, nrcDesc);
+}
+
+/*===========================================================================
+  High-Level UDS Request Functions
+===========================================================================*/
+
+// Open Default Session
+void UDS_OpenDefaultSession()
+{
+  write("[UDS] Opening Default Session");
+  UDS_SendRaw(2, SID_DIAG_SESSION, SESSION_DEFAULT, 0,0,0,0,0);
+}
+
+// Open Extended Diagnostic Session
+void UDS_OpenExtendedSession()
+{
+  write("[UDS] Opening Extended Diagnostic Session");
+  UDS_SendRaw(2, SID_DIAG_SESSION, SESSION_EXTENDED, 0,0,0,0,0);
+}
+
+// Request Security Access (Level 1 — seed request)
+void UDS_SecurityAccessRequestSeed()
+{
+  write("[UDS] Requesting Security Seed (Level 1)");
+  UDS_SendRaw(2, SID_SECURITY_ACC, 0x01, 0,0,0,0,0);
+}
+
+// Read Single DID
+void UDS_ReadDID(word did)
+{
+  write("[UDS] Reading DID 0x%04X", did);
+  UDS_SendRaw(3, SID_READ_DATA, (byte)(did >> 8), (byte)(did & 0xFF), 0,0,0,0);
+}
+
+// Write DID (requires security unlock)
+void UDS_WriteDID_Word(word did, word value)
+{
+  if (!g_securityUnlocked) {
+    write("[UDS][WARN] Security not unlocked — write may be rejected");
+  }
+  write("[UDS] Writing DID 0x%04X = 0x%04X", did, value);
+  UDS_SendRaw(5, SID_WRITE_DATA,
+              (byte)(did >> 8), (byte)(did & 0xFF),
+              (byte)(value >> 8), (byte)(value & 0xFF),
+              0, 0);
+}
+
+// Clear all DTCs
+void UDS_ClearAllDTCs()
+{
+  write("[UDS] Clearing all DTCs (0xFFFFFF mask)");
+  UDS_SendRaw(4, SID_CLEAR_DTC, 0xFF, 0xFF, 0xFF, 0,0,0);
+}
+
+// Read all active DTCs (0x19 0x02 0xFF — reportDTCByStatusMask)
+void UDS_ReadAllActiveDTCs()
+{
+  write("[UDS] Reading all DTCs with status 0xFF");
+  UDS_SendRaw(3, SID_READ_DTC, 0x02, 0xFF, 0,0,0,0);
+}
+
+// ECU Hard Reset
+void UDS_ECUReset_Hard()
+{
+  write("[UDS] Sending Hard Reset (0x01)");
+  UDS_SendRaw(2, SID_ECU_RESET, 0x01, 0,0,0,0,0);
+}
+
+// Tester Present (suppress positive response)
+void UDS_SendTesterPresent()
+{
+  UDS_SendRaw(2, SID_TESTER_PRES, 0x80, 0,0,0,0,0);
+}
+
+// Start Routine
+void UDS_StartRoutine(word routineID)
+{
+  write("[UDS] Starting Routine 0x%04X", routineID);
+  UDS_SendRaw(4, SID_ROUTINE_CTRL, 0x01,
+              (byte)(routineID >> 8), (byte)(routineID & 0xFF),
+              0,0,0);
+}
+
+// Stop Routine
+void UDS_StopRoutine(word routineID)
+{
+  write("[UDS] Stopping Routine 0x%04X", routineID);
+  UDS_SendRaw(4, SID_ROUTINE_CTRL, 0x02,
+              (byte)(routineID >> 8), (byte)(routineID & 0xFF),
+              0,0,0);
+}
+
+// I/O Control — Force output
+void UDS_IOControl(word dataID, byte controlParam, byte controlValue)
+{
+  write("[UDS] I/O Control DID 0x%04X: param=0x%02X value=0x%02X",
+        dataID, controlParam, controlValue);
+  UDS_SendRaw(6, SID_IO_CONTROL,
+              (byte)(dataID >> 8), (byte)(dataID & 0xFF),
+              controlParam, controlValue,
+              0, 0);
+}
+
+/*===========================================================================
+  EOL Full Sequence — Used during End-of-Line programming
+===========================================================================*/
+void UDS_RunEOLSequence(char vin[], word capacityAh, byte socInitPct)
+{
+  write("=== [UDS][EOL] Starting BMS EOL Programming Sequence ===");
+
+  // Step 1: Open Programming Session
+  UDS_OpenExtendedSession();
+  UDS_WaitResponse(500);
+
+  // Step 2: Security Access
+  UDS_SecurityAccessRequestSeed();
+  UDS_WaitResponse(1000);  // Seed + key exchange handled in response handler
+
+  // Step 3: Disable DTC logging during write
+  write("[UDS][EOL] Disabling DTC setting");
+  UDS_SendRaw(2, SID_CTRL_DTC_SET, 0x02, 0,0,0,0,0);  // 0x02 = disable
+  UDS_WaitResponse(300);
+
+  // Step 4: Write VIN (DID 0xF17F, 17 bytes — here we write 2 bytes for demo)
+  write("[UDS][EOL] Writing VIN");
+  UDS_SendRaw(5, SID_WRITE_DATA, 0xF1, 0x7F, vin[0], vin[1], vin[2], vin[3]);
+  UDS_WaitResponse(500);
+
+  // Step 5: Write capacity
+  write("[UDS][EOL] Writing capacity = %d Ah", capacityAh);
+  UDS_WriteDID_Word(DID_CAPACITY_AH, capacityAh);
+  UDS_WaitResponse(300);
+
+  // Step 6: Write SoC init
+  write("[UDS][EOL] Writing SoC init = %d %%", socInitPct);
+  UDS_SendRaw(4, SID_WRITE_DATA, 0xF1, 0xA1, socInitPct, 0,0,0);
+  UDS_WaitResponse(300);
+
+  // Step 7: Run contactor self-test
+  write("[UDS][EOL] Running contactor self-test");
+  UDS_StartRoutine(ROUTINE_CONTACTOR_TEST);
+  UDS_WaitResponse(3000);
+
+  // Step 8: Re-enable DTC logging
+  write("[UDS][EOL] Re-enabling DTC setting");
+  UDS_SendRaw(2, SID_CTRL_DTC_SET, 0x01, 0,0,0,0,0);  // 0x01 = enable
+  UDS_WaitResponse(300);
+
+  // Step 9: Write EOL completion flag
+  write("[UDS][EOL] Writing EOL completion flag");
+  UDS_WriteDID_Word(DID_EOL_FLAG, 0x0001);
+  UDS_WaitResponse(300);
+
+  // Step 10: Clear DTCs
+  UDS_ClearAllDTCs();
+  UDS_WaitResponse(300);
+
+  // Step 11: ECU Reset
+  UDS_ECUReset_Hard();
+
+  write("=== [UDS][EOL] EOL Sequence Complete ===");
+}
+
+/*===========================================================================
+  UDS_SendRaw — Low-level CAN frame transmit
+===========================================================================*/
+void UDS_SendRaw(int len, byte b0, byte b1, byte b2, byte b3, byte b4, byte b5, byte b6)
+{
+  g_udsRequest.dlc    = 8;
+  g_udsRequest.byte(0) = (byte)len;
+  g_udsRequest.byte(1) = b0;
+  g_udsRequest.byte(2) = b1;
+  g_udsRequest.byte(3) = b2;
+  g_udsRequest.byte(4) = b3;
+  g_udsRequest.byte(5) = b4;
+  g_udsRequest.byte(6) = b5;
+  g_udsRequest.byte(7) = b6;
+
+  output(g_udsRequest);
+  g_udsWaitingResponse = 1;
+  setTimer(t_udsTimeout, UDS_TIMEOUT_MS);
+}
+
+/*===========================================================================
+  UDS_WaitResponse — Blocking wait for response (up to timeoutMs)
+===========================================================================*/
+void UDS_WaitResponse(int timeoutMs)
+{
+  long t_start, t_now;
+  t_start = timeNow();
+  while (g_udsWaitingResponse && ((timeNow() - t_start) < (timeoutMs * 100000LL))) {
+    // busy wait — in real CAPL use event-driven approach
+  }
+}
+
+/*===========================================================================
+  on timer t_udsTimeout — No response received within P2 timeout
+===========================================================================*/
+on timer t_udsTimeout
+{
+  g_udsWaitingResponse = 0;
+  write("[UDS][TIMEOUT] No response within %d ms!", UDS_TIMEOUT_MS);
+}
+
+/*===========================================================================
+  Keyboard shortcuts for quick UDS operations
+===========================================================================*/
+on key '1' { UDS_OpenDefaultSession(); }
+on key '2' { UDS_OpenExtendedSession(); }
+on key '3' { UDS_SecurityAccessRequestSeed(); }
+on key '4' { UDS_ReadDID(DID_SOC); }
+on key '5' { UDS_ReadDID(DID_PACK_VOLTAGE); }
+on key '6' { UDS_ReadDID(DID_MAX_CELL_V); }
+on key '7' { UDS_ReadDID(DID_MAX_TEMP); }
+on key '8' { UDS_ReadAllActiveDTCs(); }
+on key '9' { UDS_ClearAllDTCs(); }
+on key '0' { UDS_ECUReset_Hard(); }
+on key 's' { UDS_StartRoutine(ROUTINE_SELF_TEST); }
+on key 'b' { UDS_StartRoutine(ROUTINE_CELL_BALANCE); }
+on key 'i' { UDS_StartRoutine(ROUTINE_IMD_TEST); }
+
+on stopMeasurement
+{
+  write("=== BMS UDS Diagnostics Script Stopped ===");
+}
