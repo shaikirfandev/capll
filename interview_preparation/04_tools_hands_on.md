@@ -1424,3 +1424,739 @@ if __name__ == "__main__":
 > **Interview tip:** "In my BYD project, I used CAPL for real-time in-loop testing inside CANoe,
 > and Python scripts for nightly regression runs on the CI server — same diagnostic logic,
 > different execution environments."
+
+---
+
+## 8. ECU Flashing Scripts — CAPL & Python (Full UDS Sequence)
+
+> These scripts implement the complete 13-step UDS flash sequence from Scenario 9.
+> They read a binary firmware file and transfer it block by block to the ECU.
+
+---
+
+### CAPL Script: Full UDS ECU Flashing (Raw CAN — no ODX needed)
+
+> CAPL does not have native file I/O for binary files, so the firmware is stored as
+> a byte array (simulating a loaded `.hex` / `.bin`). In real projects, the firmware
+> is pre-loaded into a CAPL byte buffer by a wrapper or test environment.
+
+```capl
+/*
+ * UDS ECU Flash Script — CAPL (Raw CAN, no ODX)
+ * ══════════════════════════════════════════════
+ * Implements full ISO 14229 flash sequence:
+ *   0x10 02 → Programming Session
+ *   0x27 01/02 → Security Access (Seed/Key)
+ *   0x28 03 → Disable Comm
+ *   0x85 02 → Disable DTC storage
+ *   0x31 FF 00 → Erase Flash
+ *   0x34 → Request Download
+ *   0x36 xx → Transfer Data (looped)
+ *   0x37 → Transfer Exit
+ *   0x31 FF 01 → Checksum Verify
+ *   0x11 01 → ECU Reset
+ *   0x22 F1 95 → Read SW Version
+ *   0x19 02 0F → Read DTCs
+ *
+ * CAN IDs: Tester→ECU = 0x7E0 | ECU→Tester = 0x7E8
+ */
+
+variables {
+  message 0x7E0 req;          // tester request frame
+  msTimer tTimeout;           // response timeout guard
+
+  // ── Flash state machine ──────────────────────────────
+  int  flashStep    = 0;      // current step (0 = idle)
+  int  blockIndex   = 1;      // 0x36 block sequence counter (1..255)
+  int  fwOffset     = 0;      // byte offset into fwData[]
+  int  fwTotalBytes = 0;      // total firmware size in bytes
+  int  blockSize    = 128;    // negotiated max block size (bytes per 0x36)
+
+  // ── Simulated firmware buffer (replace with real data load) ──
+  // In real use: load from file or receive via test framework.
+  // Here: 384 bytes of dummy data (3 blocks × 128 bytes).
+  byte fwData[384];
+
+  // ── Result flags ─────────────────────────────────────
+  char newSwVersion[32];
+  int  flashResult = 0;   // 1 = success
+}
+
+/* ════════════════════════════════════════════════════════════
+   HELPERS
+   ════════════════════════════════════════════════════════════ */
+void sendRaw(byte b0, byte b1, byte b2, byte b3,
+             byte b4, byte b5, byte b6, byte b7) {
+  req.dlc     = 8;
+  req.byte(0) = b0;
+  req.byte(1) = b1;
+  req.byte(2) = b2;
+  req.byte(3) = b3;
+  req.byte(4) = b4;
+  req.byte(5) = b5;
+  req.byte(6) = b6;
+  req.byte(7) = b7;
+  output(req);
+  setTimer(tTimeout, 5000);   // 5s timeout per step
+}
+
+/* ════════════════════════════════════════════════════════════
+   START — initialise firmware buffer and begin sequence
+   ════════════════════════════════════════════════════════════ */
+on start {
+  int i;
+  // Fill dummy firmware with pattern 0x00..0xFF repeating
+  fwTotalBytes = 384;
+  for (i = 0; i < fwTotalBytes; i++) fwData[i] = (byte)(i & 0xFF);
+
+  write("╔══════════════════════════════════════════╗");
+  write("║  ECU FLASH START                         ║");
+  write("║  Firmware size : %d bytes              ║", fwTotalBytes);
+  write("╚══════════════════════════════════════════╝");
+
+  // Step 1: Enter Programming Session (0x10 02)
+  flashStep = 1;
+  write("[FLASH] Step 1 → Programming Session (0x10 02)");
+  sendRaw(0x02, 0x10, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00);
+}
+
+/* ════════════════════════════════════════════════════════════
+   RECEIVE — all ECU responses arrive on 0x7E8
+   ════════════════════════════════════════════════════════════ */
+on message 0x7E8 {
+  byte sid = this.byte(1);
+  byte sub = this.byte(2);
+  byte nrc = this.byte(3);
+  int  i;
+  byte blk[8];
+  int  remaining, chunkLen;
+  dword seed, key;
+
+  cancelTimer(tTimeout);
+
+  // ── Negative Response ──────────────────────────────────────
+  if (sid == 0x7F) {
+    write("[FLASH] ✗ NEGATIVE RESPONSE at step %d — SID:0x%02X NRC:0x%02X",
+          flashStep, sub, nrc);
+    write("        NRC meaning: %s", nrcToString(nrc));
+    return;
+  }
+
+  // ── Step 1 response: 0x50 02 — Programming Session active ──
+  if (sid == 0x50 && flashStep == 1) {
+    write("[FLASH] ✓ Step 1 PASS — Programming Session active");
+
+    // Step 2: Request Seed (0x27 01)
+    flashStep = 2;
+    write("[FLASH] Step 2 → Request Seed (0x27 01)");
+    sendRaw(0x02, 0x27, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00);
+  }
+
+  // ── Step 2 response: 0x67 01 + 4-byte seed ─────────────────
+  else if (sid == 0x67 && sub == 0x01 && flashStep == 2) {
+    seed = ((dword)this.byte(2) << 24) | ((dword)this.byte(3) << 16) |
+           ((dword)this.byte(4) <<  8) |  (dword)this.byte(5);
+    key  = seed ^ 0xCAFEBABE;   // ← Replace with project algorithm
+    write("[FLASH] ✓ Step 2a — Seed: 0x%08X → Key: 0x%08X", seed, key);
+
+    // Step 3: Send Key (0x27 02)
+    flashStep = 3;
+    write("[FLASH] Step 3 → Send Key (0x27 02)");
+    sendRaw(0x06, 0x27, 0x02,
+            (byte)(key >> 24), (byte)(key >> 16),
+            (byte)(key >>  8), (byte)(key),
+            0x00);
+  }
+
+  // ── Step 3 response: 0x67 02 — Key accepted ────────────────
+  else if (sid == 0x67 && sub == 0x02 && flashStep == 3) {
+    write("[FLASH] ✓ Step 3 PASS — Security Access granted");
+
+    // Step 4: Disable Normal Communication (0x28 03)
+    flashStep = 4;
+    write("[FLASH] Step 4 → Disable Communication (0x28 03)");
+    sendRaw(0x02, 0x28, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00);
+  }
+
+  // ── Step 4 response: 0x68 ──────────────────────────────────
+  else if (sid == 0x68 && flashStep == 4) {
+    write("[FLASH] ✓ Step 4 PASS — Communication disabled");
+
+    // Step 5: Disable DTC Storage (0x85 02)
+    flashStep = 5;
+    write("[FLASH] Step 5 → Disable DTC Storage (0x85 02)");
+    sendRaw(0x02, 0x85, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00);
+  }
+
+  // ── Step 5 response: 0xC5 ──────────────────────────────────
+  else if (sid == 0xC5 && flashStep == 5) {
+    write("[FLASH] ✓ Step 5 PASS — DTC storage disabled");
+
+    // Step 6: Erase Flash (0x31 01 FF 00)
+    flashStep = 6;
+    write("[FLASH] Step 6 → Erase Flash (0x31 01 FF 00) — may take up to 10s...");
+    sendRaw(0x04, 0x31, 0x01, 0xFF, 0x00, 0x00, 0x00, 0x00);
+    setTimer(tTimeout, 15000);   // erase can take longer
+  }
+
+  // ── Step 6 response: 0x71 01 FF 00 — Erase complete ────────
+  else if (sid == 0x71 && flashStep == 6) {
+    write("[FLASH] ✓ Step 6 PASS — Flash erased");
+
+    // Step 7: Request Download (0x34)
+    // Byte layout: 0x34 | dataFormatId | addrAndLenFormat | memAddr(4) | memSize(4)
+    // addrAndLenFormat = 0x44 → 4-byte address, 4-byte size
+    // Memory address: 0x08000000 (example — adjust for target ECU)
+    flashStep = 7;
+    write("[FLASH] Step 7 → Request Download (0x34) — addr=0x08000000 size=%d", fwTotalBytes);
+    req.dlc     = 8;
+    req.byte(0) = 0x0A;   // PCI: 10 payload bytes → use multi-frame in real ISO-TP
+    req.byte(1) = 0x34;   // Service ID
+    req.byte(2) = 0x00;   // dataFormatIdentifier (no compression)
+    req.byte(3) = 0x44;   // addrAndLenFormat: 4+4 bytes
+    req.byte(4) = 0x08;   // memory address byte 1 (0x08000000)
+    req.byte(5) = 0x00;
+    req.byte(6) = 0x00;
+    req.byte(7) = 0x00;
+    output(req);
+    // Note: Real impl needs ISO-TP multi-frame; simplified here for concept.
+    setTimer(tTimeout, 5000);
+  }
+
+  // ── Step 7 response: 0x74 — Download accepted, block size given ──
+  else if (sid == 0x74 && flashStep == 7) {
+    // Byte 2 = lengthFormatId, Bytes 3-4 = maxBlockSize
+    blockSize = (this.byte(3) << 8) | this.byte(4);
+    if (blockSize == 0) blockSize = 128;   // fallback
+    write("[FLASH] ✓ Step 7 PASS — ECU ready, maxBlockSize = %d bytes", blockSize);
+
+    // Step 8: Transfer Data — first block
+    flashStep  = 8;
+    blockIndex = 1;
+    fwOffset   = 0;
+    write("[FLASH] Step 8 → Transfer Data (0x36) — sending %d blocks...",
+          (fwTotalBytes + blockSize - 1) / blockSize);
+    sendNextBlock();
+  }
+
+  // ── Step 8 response: 0x76 xx — Block received ──────────────
+  else if (sid == 0x76 && flashStep == 8) {
+    fwOffset += blockSize;
+    write("[FLASH]   Block %d ✓ (%d / %d bytes transferred)",
+          blockIndex, fwOffset > fwTotalBytes ? fwTotalBytes : fwOffset, fwTotalBytes);
+    blockIndex++;
+
+    if (fwOffset < fwTotalBytes) {
+      sendNextBlock();   // send next block
+    } else {
+      write("[FLASH] ✓ Step 8 PASS — All data transferred");
+
+      // Step 9: Transfer Exit (0x37)
+      flashStep = 9;
+      write("[FLASH] Step 9 → Transfer Exit (0x37)");
+      sendRaw(0x01, 0x37, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
+    }
+  }
+
+  // ── Step 9 response: 0x77 — Transfer complete ──────────────
+  else if (sid == 0x77 && flashStep == 9) {
+    write("[FLASH] ✓ Step 9 PASS — Transfer exit confirmed");
+
+    // Step 10: Checksum Verify (0x31 01 FF 01)
+    flashStep = 10;
+    write("[FLASH] Step 10 → Checksum Verify (0x31 01 FF 01)");
+    sendRaw(0x04, 0x31, 0x01, 0xFF, 0x01, 0x00, 0x00, 0x00);
+  }
+
+  // ── Step 10 response: 0x71 01 FF 01 — Checksum OK ──────────
+  else if (sid == 0x71 && flashStep == 10) {
+    if (this.byte(4) == 0x00) {   // result byte 0x00 = PASS
+      write("[FLASH] ✓ Step 10 PASS — Checksum verified OK");
+    } else {
+      write("[FLASH] ✗ Step 10 FAIL — Checksum ERROR (result=0x%02X)", this.byte(4));
+      return;
+    }
+
+    // Step 11: ECU Reset (0x11 01)
+    flashStep = 11;
+    write("[FLASH] Step 11 → ECU Reset (0x11 01)");
+    sendRaw(0x02, 0x11, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00);
+  }
+
+  // ── Step 11 response: 0x51 01 — Reset acknowledged ─────────
+  else if (sid == 0x51 && flashStep == 11) {
+    write("[FLASH] ✓ Step 11 PASS — ECU rebooting...");
+    write("[FLASH]   Waiting 3 seconds for ECU boot...");
+    flashStep = 12;
+    setTimer(tTimeout, 3000);   // wait for ECU to boot up
+  }
+
+  // ── Step 12: After reset — Read SW Version (0x22 F1 95) ─────
+  else if (sid == 0x62 && flashStep == 12) {
+    // 0x62 = positive response to 0x22
+    int len, i;
+    for (i = 0; i < 16 && this.byte(4 + i) != 0x00; i++)
+      newSwVersion[i] = this.byte(4 + i);
+    newSwVersion[i] = 0x00;
+    write("[FLASH] ✓ Step 12 PASS — New SW Version: %s", newSwVersion);
+
+    // Step 13: Read DTCs (0x19 02 0F)
+    flashStep = 13;
+    write("[FLASH] Step 13 → Read DTCs after flash (0x19 02 0F)");
+    sendRaw(0x03, 0x19, 0x02, 0x0F, 0x00, 0x00, 0x00, 0x00);
+  }
+
+  // ── Step 13: DTC response (0x59 02) ─────────────────────────
+  else if (sid == 0x59 && flashStep == 13) {
+    int numDTCs = (this.dlc - 4) / 4;
+    if (numDTCs == 0) {
+      write("[FLASH] ✓ Step 13 PASS — 0 DTCs after flash ✓");
+      flashResult = 1;
+    } else {
+      write("[FLASH] ⚠ Step 13 WARNING — %d DTC(s) found after flash!", numDTCs);
+    }
+    printFlashSummary();
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   SEND NEXT DATA BLOCK (0x36)
+   ════════════════════════════════════════════════════════════ */
+void sendNextBlock() {
+  int i, remaining, chunkLen;
+
+  remaining = fwTotalBytes - fwOffset;
+  chunkLen  = (remaining < blockSize) ? remaining : blockSize;
+
+  // For interview/demo: send first 6 bytes of the block (simplified single CAN frame)
+  // Real implementation requires ISO-TP multi-frame for chunks > 6 bytes.
+  req.dlc     = 8;
+  req.byte(0) = (byte)(chunkLen + 2);   // PCI length
+  req.byte(1) = 0x36;                    // TransferData
+  req.byte(2) = (byte)(blockIndex & 0xFF);  // block sequence counter
+  // Bytes 3-7: first 5 bytes of this block chunk
+  for (i = 0; i < 5 && i < chunkLen; i++)
+    req.byte(3 + i) = fwData[fwOffset + i];
+
+  output(req);
+  setTimer(tTimeout, 2000);
+}
+
+/* ════════════════════════════════════════════════════════════
+   TIMEOUT — no response from ECU
+   ════════════════════════════════════════════════════════════ */
+on timer tTimeout {
+  if (flashStep == 12) {
+    // Boot wait complete — now read SW version
+    write("[FLASH] ECU boot wait done → reading SW version (0x22 F1 95)");
+    sendRaw(0x03, 0x22, 0xF1, 0x95, 0x00, 0x00, 0x00, 0x00);
+  } else {
+    write("[FLASH] ✗ TIMEOUT at step %d — no ECU response within limit", flashStep);
+    printFlashSummary();
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   FINAL SUMMARY
+   ════════════════════════════════════════════════════════════ */
+void printFlashSummary() {
+  write("╔══════════════════════════════════════════════╗");
+  write("║  ECU FLASH SUMMARY                           ║");
+  write("║  Steps completed : %-3d / 13                 ║", flashStep);
+  write("║  New SW Version  : %-26s ║", newSwVersion);
+  write("║  Result          : %-26s ║",
+        flashResult ? "SUCCESS ✓" : "FAILED ✗ — check log");
+  write("╚══════════════════════════════════════════════╝");
+}
+
+/* ════════════════════════════════════════════════════════════
+   NRC HELPER — translate NRC byte to readable string
+   ════════════════════════════════════════════════════════════ */
+char nrcToString(byte nrc)[] {
+  switch(nrc) {
+    case 0x10: return "generalReject";
+    case 0x11: return "serviceNotSupported";
+    case 0x12: return "subFunctionNotSupported";
+    case 0x13: return "incorrectMessageLengthOrInvalidFormat";
+    case 0x22: return "conditionsNotCorrect";
+    case 0x24: return "requestSequenceError";
+    case 0x25: return "noResponseFromSubnetComponent";
+    case 0x31: return "requestOutOfRange";
+    case 0x33: return "securityAccessDenied";
+    case 0x35: return "invalidKey";
+    case 0x36: return "exceededNumberOfAttempts";
+    case 0x37: return "requiredTimeDelayNotExpired";
+    case 0x70: return "uploadDownloadNotAccepted";
+    case 0x71: return "transferDataSuspended";
+    case 0x72: return "generalProgrammingFailure";
+    case 0x73: return "wrongBlockSequenceCounter";
+    case 0x78: return "requestCorrectlyReceivedResponsePending";
+    default:   return "unknownNRC";
+  }
+}
+```
+
+---
+
+### Python Script: Full UDS ECU Flashing (python-can + udsoncan)
+
+> Reads a real `.bin` firmware file from disk and flashes it block by block.
+> Handles multi-frame ISO-TP automatically via the `isotp` library.
+
+**Libraries needed:**
+```bash
+pip install python-can udsoncan isotp
+```
+
+```python
+"""
+UDS ECU Flash Script — Python (python-can + udsoncan)
+══════════════════════════════════════════════════════
+Full ISO 14229 flash sequence:
+  Step 1 : Programming Session  (0x10 02)
+  Step 2 : Security Access      (0x27 01/02)
+  Step 3 : Disable Comm         (0x28 03)
+  Step 4 : Disable DTC Storage  (0x85 02)
+  Step 5 : Erase Flash          (0x31 01 FF 00)
+  Step 6 : Request Download     (0x34)
+  Step 7 : Transfer Data        (0x36 — looped)
+  Step 8 : Transfer Exit        (0x37)
+  Step 9 : Checksum Verify      (0x31 01 FF 01)
+  Step 10: ECU Reset            (0x11 01)
+  Step 11: Read SW Version      (0x22 F1 95)
+  Step 12: Read DTCs            (0x19 02 0F)
+
+Usage:
+  python uds_flash.py firmware.bin
+
+Install:
+  pip install python-can udsoncan isotp
+"""
+
+import can
+import isotp
+import udsoncan
+from udsoncan.connections import PythonIsoTpConnection
+from udsoncan.client      import Client
+from udsoncan             import configs, services, MemoryLocation, DataFormatIdentifier
+import sys
+import time
+import os
+
+# ─────────────────────────────────────────────────────────────
+# 1. Configuration — adjust for your project
+# ─────────────────────────────────────────────────────────────
+CAN_INTERFACE   = "vector"          # "pcan" | "socketcan" | "vector" | "kvaser"
+CAN_CHANNEL     = "PCAN_USBBUS1"    # "can0" for SocketCAN
+CAN_BITRATE     = 500_000           # 500 kbps
+
+ECU_TX_ID       = 0x7E0             # Tester → ECU
+ECU_RX_ID       = 0x7E8             # ECU → Tester
+
+FLASH_MEM_ADDR  = 0x08000000        # ECU flash start address
+BLOCK_SIZE      = 128               # bytes per transfer block (ECU may negotiate higher)
+SECURITY_LEVEL  = 0x01              # programming security level
+
+FIRMWARE_FILE   = sys.argv[1] if len(sys.argv) > 1 else "firmware.bin"
+
+
+# ─────────────────────────────────────────────────────────────
+# 2. Security key algorithm
+# ─────────────────────────────────────────────────────────────
+def compute_key(seed: int, params: dict) -> int:
+    """Replace with your project's real seed→key algorithm."""
+    return seed ^ 0xCAFEBABE
+
+
+# ─────────────────────────────────────────────────────────────
+# 3. CAN + ISO-TP transport setup
+# ─────────────────────────────────────────────────────────────
+def create_client() -> Client:
+    bus = can.Bus(interface=CAN_INTERFACE, channel=CAN_CHANNEL, bitrate=CAN_BITRATE)
+    tp_addr = isotp.Address(
+        isotp.AddressingMode.Normal_11bits,
+        txid=ECU_TX_ID,
+        rxid=ECU_RX_ID,
+    )
+    stack = isotp.CanStack(bus=bus, address=tp_addr)
+    conn  = PythonIsoTpConnection(stack)
+
+    cfg = configs.default_client_config.copy()
+    cfg["security_algo"]           = compute_key
+    cfg["security_algo_extra_args"] = {}
+    cfg["request_timeout"]         = 10.0   # longer for flash operations
+    cfg["p2_timeout"]              = 5.0
+
+    return Client(conn, config=cfg), bus
+
+
+# ─────────────────────────────────────────────────────────────
+# 4. Flash helper: load firmware
+# ─────────────────────────────────────────────────────────────
+def load_firmware(path: str) -> bytes:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Firmware file not found: {path}")
+    with open(path, "rb") as f:
+        data = f.read()
+    print(f"[FLASH] Firmware loaded: {path} ({len(data):,} bytes)")
+    return data
+
+
+# ─────────────────────────────────────────────────────────────
+# 5. Main flash sequence
+# ─────────────────────────────────────────────────────────────
+def flash_ecu(firmware: bytes):
+    client, bus = create_client()
+
+    try:
+        with client:
+
+            # ── Step 1: Programming Session ──────────────────────
+            print("\n[FLASH] ━━━ Step 1: Enter Programming Session (0x10 02) ━━━")
+            resp = client.change_session(
+                services.DiagnosticSessionControl.Session.programmingSession
+            )
+            _check(resp, "Programming Session")
+
+            # ── Step 2: Security Access ───────────────────────────
+            print("[FLASH] ━━━ Step 2: Security Access (0x27 01/02) ━━━")
+            client.unlock_security_access(level=SECURITY_LEVEL)
+            print("[FLASH] ✓ Security Access granted")
+
+            # ── Step 3: Disable Normal Communication ─────────────
+            print("[FLASH] ━━━ Step 3: Disable Communication (0x28 03) ━━━")
+            resp = client.communication_control(
+                control_type=services.CommunicationControl.ControlType.disableRxAndTx,
+                communication_type=services.CommunicationControl.CommunicationType(
+                    subnet=0xF, nm_msg=False, app_msg=True
+                )
+            )
+            _check(resp, "Disable Communication")
+
+            # ── Step 4: Disable DTC Storage ───────────────────────
+            print("[FLASH] ━━━ Step 4: Disable DTC Storage (0x85 02) ━━━")
+            resp = client.control_dtc_setting(
+                setting_type=services.ControlDTCSetting.SettingType.off
+            )
+            _check(resp, "Disable DTC Storage")
+
+            # ── Step 5: Erase Flash ───────────────────────────────
+            print("[FLASH] ━━━ Step 5: Erase Flash (0x31 01 FF 00) ━━━")
+            print("[FLASH]   Erasing... (may take up to 10 seconds)")
+            resp = client.start_routine(
+                routine_id=0xFF00,
+                # memory address + size as routine option record
+                routine_option_record=bytes([
+                    (FLASH_MEM_ADDR >> 24) & 0xFF,
+                    (FLASH_MEM_ADDR >> 16) & 0xFF,
+                    (FLASH_MEM_ADDR >>  8) & 0xFF,
+                     FLASH_MEM_ADDR        & 0xFF,
+                    (len(firmware) >> 24) & 0xFF,
+                    (len(firmware) >> 16) & 0xFF,
+                    (len(firmware) >>  8) & 0xFF,
+                     len(firmware)        & 0xFF,
+                ])
+            )
+            _check(resp, "Erase Flash")
+            print("[FLASH] ✓ Flash erased")
+
+            # ── Step 6: Request Download (0x34) ──────────────────
+            print("[FLASH] ━━━ Step 6: Request Download (0x34) ━━━")
+            mem_location = MemoryLocation(
+                address=FLASH_MEM_ADDR,
+                length=len(firmware),
+                address_format=32,   # 4-byte address
+                length_format=32,    # 4-byte length
+            )
+            resp = client.request_download(
+                memory_location=mem_location,
+                dfi=DataFormatIdentifier(compression_method=0, encrypting_method=0),
+            )
+            _check(resp, "Request Download")
+            # ECU may return a max block size — use it
+            if hasattr(resp.service_data, 'max_length'):
+                negotiated = resp.service_data.max_length
+                if negotiated and negotiated > 0:
+                    global BLOCK_SIZE
+                    BLOCK_SIZE = negotiated
+            print(f"[FLASH] ✓ Download accepted — block size: {BLOCK_SIZE} bytes")
+
+            # ── Step 7: Transfer Data (0x36) — loop ──────────────
+            print(f"[FLASH] ━━━ Step 7: Transfer Data (0x36) ━━━")
+            total_blocks = (len(firmware) + BLOCK_SIZE - 1) // BLOCK_SIZE
+            print(f"[FLASH]   Sending {len(firmware):,} bytes in {total_blocks} blocks...")
+
+            for block_num in range(total_blocks):
+                offset     = block_num * BLOCK_SIZE
+                chunk      = firmware[offset : offset + BLOCK_SIZE]
+                sequence   = (block_num + 1) & 0xFF   # wraps at 255
+
+                resp = client.transfer_data(sequence_number=sequence, data=chunk)
+                _check(resp, f"TransferData block {sequence}")
+
+                # Progress bar
+                pct = int((block_num + 1) / total_blocks * 40)
+                bar = "█" * pct + "░" * (40 - pct)
+                print(f"\r[FLASH]   [{bar}] {block_num+1}/{total_blocks}", end="", flush=True)
+
+            print()   # newline after progress bar
+            print("[FLASH] ✓ All blocks transferred")
+
+            # ── Step 8: Transfer Exit (0x37) ─────────────────────
+            print("[FLASH] ━━━ Step 8: Transfer Exit (0x37) ━━━")
+            resp = client.request_transfer_exit()
+            _check(resp, "Transfer Exit")
+
+            # ── Step 9: Checksum Verify (0x31 01 FF 01) ──────────
+            print("[FLASH] ━━━ Step 9: Checksum Verify (0x31 01 FF 01) ━━━")
+            resp = client.start_routine(routine_id=0xFF01)
+            _check(resp, "Checksum Verification")
+            result_byte = resp.service_data.routine_status_record[0] \
+                          if resp.service_data.routine_status_record else 0x00
+            if result_byte != 0x00:
+                raise RuntimeError(f"Checksum FAILED — result byte: 0x{result_byte:02X}")
+            print("[FLASH] ✓ Checksum verified — data integrity confirmed")
+
+            # ── Step 10: ECU Reset (0x11 01) ─────────────────────
+            print("[FLASH] ━━━ Step 10: ECU Reset (0x11 01) ━━━")
+            resp = client.ecu_reset(
+                reset_type=services.ECUReset.ResetType.hardReset
+            )
+            _check(resp, "ECU Reset")
+            print("[FLASH] ✓ ECU reset initiated — waiting 5s for boot...")
+            time.sleep(5)
+
+            # ── Step 11: Read SW Version (0x22 F1 95) ────────────
+            print("[FLASH] ━━━ Step 11: Read SW Version (0x22 F1 95) ━━━")
+            # After reset ECU is back in default session
+            resp = client.read_data_by_identifier(
+                [udsoncan.DataIdentifier(0xF195)]
+            )
+            sw_version = "UNKNOWN"
+            if resp.positive:
+                raw = resp.service_data.values.get(0xF195, b"")
+                sw_version = raw.decode("ascii", errors="replace").strip()
+            print(f"[FLASH] ✓ New SW Version: {sw_version}")
+
+            # ── Step 12: Read DTCs (0x19 02 0F) ──────────────────
+            print("[FLASH] ━━━ Step 12: Read DTCs after flash (0x19 02 0F) ━━━")
+            resp = client.get_dtc_by_status_mask(status_mask=0x0F)
+            dtc_count = 0
+            if resp.positive:
+                dtc_count = len(resp.service_data.dtcs)
+            status = "CLEAN ✓" if dtc_count == 0 else f"⚠ {dtc_count} DTC(s) found!"
+            print(f"[FLASH] ✓ Post-flash DTC check: {status}")
+
+            # ── Final Report ──────────────────────────────────────
+            print_summary(sw_version, dtc_count, len(firmware), total_blocks)
+
+    finally:
+        bus.shutdown()
+
+
+# ─────────────────────────────────────────────────────────────
+# 6. Helper: check response, raise on negative
+# ─────────────────────────────────────────────────────────────
+def _check(resp, label: str):
+    if not resp.positive:
+        raise RuntimeError(f"[FLASH] ✗ {label} FAILED — NRC: {resp.code_name}")
+    print(f"[FLASH] ✓ {label} — OK")
+
+
+# ─────────────────────────────────────────────────────────────
+# 7. Print final summary
+# ─────────────────────────────────────────────────────────────
+def print_summary(sw_version, dtc_count, fw_size, total_blocks):
+    border = "═" * 52
+    result = "FLASH SUCCESS ✓" if dtc_count == 0 else "FLASH DONE — CHECK DTCs"
+    print(f"\n╔{border}╗")
+    print(f"║  ECU FLASH COMPLETE                                  ║")
+    print(f"║  Firmware size  : {fw_size:>8,} bytes                    ║")
+    print(f"║  Blocks sent    : {total_blocks:>8}                          ║")
+    print(f"║  New SW Version : {sw_version:<33}║")
+    print(f"║  Post-flash DTCs: {dtc_count:<33}║")
+    print(f"║  Result         : {result:<33}║")
+    print(f"╚{border}╝\n")
+
+
+# ─────────────────────────────────────────────────────────────
+# 8. Entry point
+# ─────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    try:
+        fw = load_firmware(FIRMWARE_FILE)
+        flash_ecu(fw)
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}")
+        sys.exit(1)
+    except RuntimeError as e:
+        print(f"\n{e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\n[FLASH] Aborted by user.")
+        sys.exit(1)
+```
+
+**Example terminal output:**
+```
+[FLASH] Firmware loaded: firmware.bin (524,288 bytes)
+
+[FLASH] ━━━ Step 1: Enter Programming Session (0x10 02) ━━━
+[FLASH] ✓ Programming Session — OK
+[FLASH] ━━━ Step 2: Security Access (0x27 01/02) ━━━
+[FLASH] ✓ Security Access granted
+[FLASH] ━━━ Step 3: Disable Communication (0x28 03) ━━━
+[FLASH] ✓ Disable Communication — OK
+[FLASH] ━━━ Step 4: Disable DTC Storage (0x85 02) ━━━
+[FLASH] ✓ Disable DTC Storage — OK
+[FLASH] ━━━ Step 5: Erase Flash (0x31 01 FF 00) ━━━
+[FLASH]   Erasing... (may take up to 10 seconds)
+[FLASH] ✓ Flash erased
+[FLASH] ━━━ Step 6: Request Download (0x34) ━━━
+[FLASH] ✓ Download accepted — block size: 256 bytes
+[FLASH] ━━━ Step 7: Transfer Data (0x36) ━━━
+[FLASH]   Sending 524,288 bytes in 2048 blocks...
+[FLASH]   [████████████████████████████████████████] 2048/2048
+[FLASH] ✓ All blocks transferred
+[FLASH] ━━━ Step 8: Transfer Exit (0x37) ━━━
+[FLASH] ✓ Transfer Exit — OK
+[FLASH] ━━━ Step 9: Checksum Verify (0x31 01 FF 01) ━━━
+[FLASH] ✓ Checksum verified — data integrity confirmed
+[FLASH] ━━━ Step 10: ECU Reset (0x11 01) ━━━
+[FLASH] ✓ ECU reset initiated — waiting 5s for boot...
+[FLASH] ━━━ Step 11: Read SW Version (0x22 F1 95) ━━━
+[FLASH] ✓ New SW Version: v2.5.0_20260419
+[FLASH] ━━━ Step 12: Read DTCs after flash (0x19 02 0F) ━━━
+[FLASH] ✓ Post-flash DTC check: CLEAN ✓
+
+╔════════════════════════════════════════════════════╗
+║  ECU FLASH COMPLETE                                  ║
+║  Firmware size  :  524,288 bytes                    ║
+║  Blocks sent    :     2048                          ║
+║  New SW Version : v2.5.0_20260419                   ║
+║  Post-flash DTCs: 0                                 ║
+║  Result         : FLASH SUCCESS ✓                   ║
+╚════════════════════════════════════════════════════╝
+```
+
+**UDS Flash step mapping — CAPL vs Python:**
+
+| Step | UDS Hex | CAPL (raw CAN) | Python (udsoncan) |
+|------|---------|----------------|-------------------|
+| Programming Session | `0x10 02` | `sendRaw(0x02, 0x10, 0x02, ...)` | `client.change_session(programmingSession)` |
+| Request Seed | `0x27 01` | `sendRaw(0x02, 0x27, 0x01, ...)` | `client.unlock_security_access(level=0x01)` |
+| Disable Comm | `0x28 03` | `sendRaw(0x02, 0x28, 0x03, ...)` | `client.communication_control(disableRxAndTx)` |
+| Disable DTC | `0x85 02` | `sendRaw(0x02, 0x85, 0x02, ...)` | `client.control_dtc_setting(off)` |
+| Erase Flash | `0x31 01 FF 00` | `sendRaw(0x04, 0x31, 0x01, 0xFF, 0x00, ...)` | `client.start_routine(0xFF00, ...)` |
+| Request Download | `0x34` | `sendRaw + manual bytes` | `client.request_download(memory_location, dfi)` |
+| Transfer Data | `0x36 xx [data]` | `output(req)` in loop | `client.transfer_data(sequence_number, data)` |
+| Transfer Exit | `0x37` | `sendRaw(0x01, 0x37, ...)` | `client.request_transfer_exit()` |
+| Checksum Verify | `0x31 01 FF 01` | `sendRaw(0x04, 0x31, 0x01, 0xFF, 0x01, ...)` | `client.start_routine(0xFF01)` |
+| ECU Reset | `0x11 01` | `sendRaw(0x02, 0x11, 0x01, ...)` | `client.ecu_reset(hardReset)` |
+| Read SW Version | `0x22 F1 95` | `sendRaw(0x03, 0x22, 0xF1, 0x95, ...)` | `client.read_data_by_identifier([0xF195])` |
+| Read DTCs | `0x19 02 0F` | `sendRaw(0x03, 0x19, 0x02, 0x0F, ...)` | `client.get_dtc_by_status_mask(0x0F)` |
+
+> **Interview tip:** "In the CAPL script I handle the state machine with `flashStep` variable and
+> respond to each 0x7E8 frame at the right step. In Python, `udsoncan` handles ISO-TP framing
+> automatically — so multi-frame transfer of large blocks (>7 bytes) works out of the box,
+> which is critical for the 0x36 data transfer loop."
