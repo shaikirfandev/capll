@@ -219,7 +219,7 @@ on diagResponse ECU.ReadDTCInformation_reportDTCByStatusMask {
 
 ---
 
-## 3. dSPACE HIL — Interview Walkthrough
+## 3. dSPACE HIL + CANoe — Interview Walkthrough
 
 ### Scenario 7: "Explain how you set up a HIL test for ADAS"
 
@@ -231,12 +231,14 @@ Hardware:
   - dSPACE SCALEXIO real-time processor
   - VT Studio for signal routing and I/O configuration
   - ADAS ECU connected via CAN and Ethernet interfaces
+  - Vector VN5640 interface card — bridges dSPACE CAN channels to CANoe
 
 Setup steps:
   1. Load the ADAS ECU plant model (Simulink model compiled for dSPACE)
   2. Map ECU CAN inputs to dSPACE CAN channels (e.g., RadarObject → CAN1, CameraLane → CAN2)
   3. Configure sensor simulation: inject radar targets with distance, velocity, RCS
   4. Configure vehicle model: speed, yaw rate, steering angle
+  5. Connect CANoe to the same CAN bus via VN interface — CANoe monitors all traffic in real-time
 
 Test execution:
   1. Define driving scenario in dSPACE (e.g., 'follow lead vehicle at 80 km/h, 40m gap')
@@ -249,6 +251,197 @@ Result analysis:
   - Was the response time < 500ms?
   - Were any DTCs logged unexpectedly?"
 ```
+
+---
+
+### Scenario 7b: "How exactly do you use CANoe alongside dSPACE HIL?"
+
+**Your walkthrough — CANoe role in HIL:**
+
+```
+"CANoe runs in parallel with dSPACE during HIL testing. dSPACE handles the real-time
+plant model (vehicle physics, sensor simulation), while CANoe handles:
+
+  1. CAN bus monitoring — real-time trace of all ECU messages
+  2. CAPL-based signal injection — supplement or override dSPACE signals
+  3. Diagnostic console — read/clear DTCs without stopping the HIL run
+  4. Logging — .blf file capturing every frame for post-test analysis
+  5. Pass/fail evaluation — CAPL scripts assert expected signal values
+  6. Fault injection — stop specific messages to test ECU error handling
+
+The two tools connect via a shared CAN bus — dSPACE writes sensor data,
+ECU responds on the bus, CANoe reads everything."
+```
+
+**Step-by-step CANoe setup for ADAS HIL:**
+
+```
+Step 1: Hardware connection
+  CANoe (VN5640 interface) → connected to same CAN channel as ECU and dSPACE
+  Channel assignment in CANoe: CAN 1 = ADAS bus (250kbps or 500kbps)
+
+Step 2: Load DBC file
+  File → Databases → Add → select project .dbc
+  Now all signals on the ADAS bus are named and decoded in the Trace window
+
+Step 3: Configure Trace window
+  Filter: show only relevant message IDs (e.g., 0x300 Radar, 0x320 Camera, 0x500 ACC output)
+  Columns: ID, Name, Data (decoded), Cycle time, DLC
+
+Step 4: Configure Graphics window
+  Add signals:
+    - RadarTarget_Distance   (dSPACE output → ECU input)
+    - VehicleSpeed           (dSPACE output → ECU input)
+    - ACC_BrakeRequest_mbar  (ECU output — what we verify)
+    - LKA_TorqueRequest_Nm   (ECU output — what we verify)
+    - AEB_Active             (ECU output — critical safety signal)
+  Set Y-axis limits per signal for clear visualisation
+
+Step 5: Load CAPL evaluation script
+  Simulation Setup → Add CAPL node → assign validation script
+  The script monitors ECU outputs and logs PASS/FAIL automatically
+
+Step 6: Configure Logging
+  Measurement → Logging → New configuration
+  File format: .blf (Binary Logging Format — all channels)
+  Trigger: start on measurement start, split file every 500MB
+  Naming: ADAS_HIL_<feature>_<date>_<run>.blf
+
+Step 7: Open Diagnostic Console
+  Load ODX/PDX file into CANoe diagnostic config
+  During test: use Diagnostic Console to:
+    - Read active DTCs mid-run (0x19 01)
+    - Clear DTCs between test cases (0x14 FF FF FF)
+    - Read ECU SW version (0x22 F189/F195)
+
+Step 8: Start measurement
+  Press F9 (Start) → CANoe begins logging
+  dSPACE scenario runs in parallel
+  Watch Graphics window for ECU response curves
+  CAPL script logs PASS/FAIL in Write window
+```
+
+**CAPL Script — HIL ADAS Evaluation (used alongside dSPACE)**
+
+```capl
+/*
+ * HIL ADAS Evaluation Script
+ * Runs alongside dSPACE — monitors ECU outputs and logs PASS/FAIL
+ * Covers: ACC braking latency, LKA torque response, AEB trigger
+ */
+variables {
+  // ── ACC evaluation ──────────────────────────────────────────────
+  dword tDistanceCrossed = 0;     // when radar distance < 2000cm
+  int   aebExpected      = 0;
+  int   aebVerified      = 0;
+
+  // ── LKA evaluation ──────────────────────────────────────────────
+  dword tLaneDriftStart  = 0;
+  int   lkaTorqueSeen    = 0;
+
+  // ── Counters ─────────────────────────────────────────────────────
+  int   passTotal = 0;
+  int   failTotal = 0;
+}
+
+/* ── Monitor radar distance (dSPACE injects 0x300) ── */
+on message 0x300 {
+  int dist = (this.byte(0) << 8) | this.byte(1);   // cm
+
+  // threshold: < 2000cm (20m) → ACC should decelerate
+  if (dist < 2000 && dist > 0 && tDistanceCrossed == 0) {
+    tDistanceCrossed = timeNow() / 100000;          // ms
+    write("[HIL-ACC] Distance threshold crossed at %d ms", tDistanceCrossed);
+  }
+
+  // threshold: < 600cm (6m) → AEB should fire
+  if (dist < 600 && dist > 0 && !aebExpected) {
+    aebExpected = 1;
+    write("[HIL-AEB] Critical zone entered (%d cm) — AEB expected within 150ms", dist);
+  }
+}
+
+/* ── Monitor ACC brake output (ECU writes 0x501) ── */
+on message 0x501 {
+  int brake = (this.byte(0) << 8) | this.byte(1);   // mbar
+
+  if (tDistanceCrossed > 0 && brake > 500) {
+    dword latency = (timeNow() / 100000) - tDistanceCrossed;
+    if (latency <= 500) {
+      write("[HIL-ACC] PASS: BrakeRequest = %d mbar | latency = %d ms ✓", brake, latency);
+      passTotal++;
+    } else {
+      write("[HIL-ACC] FAIL: BrakeRequest latency = %d ms > 500ms spec!", latency);
+      failTotal++;
+    }
+    tDistanceCrossed = 0;   // reset for next event
+  }
+}
+
+/* ── Monitor AEB activation (ECU writes 0x502 bit0) ── */
+on message 0x502 {
+  if ((this.byte(0) & 0x01) && aebExpected && !aebVerified) {
+    write("[HIL-AEB] PASS: AEB activated ✓");
+    aebVerified = 1;
+    passTotal++;
+  }
+}
+
+/* ── Monitor LKA lane data (dSPACE injects 0x320) ── */
+on message 0x320 {
+  int offset = (this.byte(0) << 8) | this.byte(1);   // mm, signed
+
+  // signed 16-bit decode
+  if (offset > 32767) offset -= 65536;
+
+  if (offset < -150 && tLaneDriftStart == 0) {
+    tLaneDriftStart = timeNow() / 100000;
+    write("[HIL-LKA] Drift threshold (-150mm) crossed @ %d ms", tLaneDriftStart);
+  }
+}
+
+/* ── Monitor LKA torque output (ECU writes 0x510) ── */
+on message 0x510 {
+  int torque = (this.byte(0) << 8) | this.byte(1);
+  if (torque > 32767) torque -= 65536;   // signed
+
+  if (tLaneDriftStart > 0 && torque > 20 && !lkaTorqueSeen) {
+    dword latency = (timeNow() / 100000) - tLaneDriftStart;
+    if (latency <= 100) {
+      write("[HIL-LKA] PASS: Correction torque = %d (×0.1Nm) | latency = %d ms ✓",
+            torque, latency);
+      passTotal++;
+    } else {
+      write("[HIL-LKA] FAIL: LKA torque latency = %d ms > 100ms!", latency);
+      failTotal++;
+    }
+    lkaTorqueSeen = 1;
+  }
+}
+
+/* ── End of test summary ── */
+on stopMeasurement {
+  write("╔══════════════════════════════════════╗");
+  write("║  HIL ADAS TEST SUMMARY               ║");
+  write("║  PASS: %-3d  FAIL: %-3d               ║", passTotal, failTotal);
+  write("║  RESULT: %-26s ║",
+        (failTotal == 0) ? "OVERALL PASS ✓" : "OVERALL FAIL ✗ — review log");
+  write("╚══════════════════════════════════════╝");
+}
+```
+
+**CANoe windows to open during an ADAS HIL session:**
+
+| Window | Purpose | Key setting |
+|--------|---------|-------------|
+| Trace | Real-time frame monitor | Filter: ADAS bus only; decoded signal names |
+| Graphics | Signal waveform plot | Add: radar distance, brake pressure, torque request, AEB_Active |
+| Write | CAPL PASS/FAIL log | Auto-scrolls during test — save after run |
+| Statistics | Cycle time & bus load | Flag: messages missing their cycle time |
+| Diagnostic Console | Live DTC read/clear | Load ODX; read 0x19 02 0F after each scenario |
+| Data Replay | Replay vehicle CAN log on HIL | Compare HIL result vs real vehicle capture |
+
+---
 
 ### Scenario 8: "How do you handle a test that passes on HIL but fails in vehicle?"
 
