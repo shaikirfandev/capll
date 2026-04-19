@@ -1038,3 +1038,389 @@ on timer tWaitForResp {
 | **When to use** | Production test automation with full ODX | Quick debugging, bench tests, unknown ECU, no database available |
 
 > **Interview tip:** Mention both approaches — "I prefer ODX symbolic for production scripts because it's readable and maintainable. But I also know how to write raw UDS hex scripts for bench debugging when no database is available."
+
+---
+
+## 7. Full Script Examples — CAPL & Python
+
+### CAPL Script: Complete UDS Diagnostic Sequence (ODX Symbolic)
+
+> Full workflow — session switch → security access → read SW version → read DTCs → print report
+
+```capl
+/*
+ * Full UDS Diagnostic Sequence — ODX Symbolic version
+ * ──────────────────────────────────────────────────
+ * Step 1: Enter Extended Diagnostic Session
+ * Step 2: Security Access (Seed → Key)
+ * Step 3: Read SW version (DID F195)
+ * Step 4: Read all confirmed DTCs (0x19 02 08)
+ * Step 5: Print summary report
+ *
+ * Requires: ODX/PDX loaded in CANoe, ECU node named "ECU"
+ */
+
+variables {
+  char  swVersion[32];
+  byte  dtcRaw[256];
+  int   dtcCount   = 0;
+  int   stepNumber = 0;
+
+  // Security key algorithm: Simple XOR with 0xCA (replace with real algo)
+  dword seed       = 0;
+  dword key        = 0;
+}
+
+/* ════════════════════════════════════════════════════
+   STEP 1 — Enter Extended Diagnostic Session
+   ════════════════════════════════════════════════════ */
+on start {
+  diagRequest ECU.DiagnosticSessionControl_extendedDiagnosticSession req;
+  stepNumber = 1;
+  write("[DIAG] ── Step 1: Requesting Extended Session...");
+  diagSendRequest(req);
+}
+
+on diagResponse ECU.DiagnosticSessionControl_extendedDiagnosticSession {
+  if (diagGetLastResponseCode(this) < 0) {
+    write("[DIAG] ✓ Extended Session active");
+
+    /* ── Step 2: Request Seed ── */
+    diagRequest ECU.SecurityAccess_requestSeed seedReq;
+    stepNumber = 2;
+    write("[DIAG] ── Step 2: Requesting Security Seed...");
+    diagSendRequest(seedReq);
+  } else {
+    write("[DIAG] ✗ Session switch FAILED — NRC: 0x%02X",
+          diagGetLastResponseCode(this));
+  }
+}
+
+/* ════════════════════════════════════════════════════
+   STEP 2a — Receive Seed
+   ════════════════════════════════════════════════════ */
+on diagResponse ECU.SecurityAccess_requestSeed {
+  if (diagGetLastResponseCode(this) < 0) {
+    // Extract seed (4 bytes) and compute key
+    seed  = (dword)diagGetParameter(this, "SecurityAccessDataRecord");
+    key   = seed ^ 0xCAFEBABE;   // ← Replace with your project's real algorithm
+
+    write("[DIAG] ✓ Seed received: 0x%08X  →  Computed key: 0x%08X", seed, key);
+
+    /* ── Step 2b: Send Key ── */
+    diagRequest ECU.SecurityAccess_sendKey keyReq;
+    diagSetParameter(keyReq, "SecurityAccessDataRecord", key);
+    stepNumber = 3;
+    write("[DIAG] ── Step 2b: Sending Security Key...");
+    diagSendRequest(keyReq);
+  } else {
+    write("[DIAG] ✗ Seed request FAILED — NRC: 0x%02X",
+          diagGetLastResponseCode(this));
+  }
+}
+
+/* ════════════════════════════════════════════════════
+   STEP 2b — Key accepted → Read SW Version
+   ════════════════════════════════════════════════════ */
+on diagResponse ECU.SecurityAccess_sendKey {
+  if (diagGetLastResponseCode(this) < 0) {
+    write("[DIAG] ✓ Security Access GRANTED");
+
+    /* ── Step 3: Read SW Version (DID F195) ── */
+    diagRequest ECU.ReadDataByIdentifier req;
+    diagSetParameter(req, "DataIdentifier", 0xF195);
+    stepNumber = 4;
+    write("[DIAG] ── Step 3: Reading SW Version (DID 0xF195)...");
+    diagSendRequest(req);
+  } else {
+    write("[DIAG] ✗ Key REJECTED — NRC: 0x%02X.  Wrong algorithm?",
+          diagGetLastResponseCode(this));
+  }
+}
+
+/* ════════════════════════════════════════════════════
+   STEP 3 — Receive SW Version → Read DTCs
+   ════════════════════════════════════════════════════ */
+on diagResponse ECU.ReadDataByIdentifier {
+  if (diagGetLastResponseCode(this) < 0) {
+    diagGetParameterString(this, "ECU_SoftwareVersionNumber", swVersion, 32);
+    write("[DIAG] ✓ SW Version: %s", swVersion);
+
+    /* ── Step 4: Read confirmed DTCs ── */
+    diagRequest ECU.ReadDTCInformation_reportDTCByStatusMask dtcReq;
+    diagSetParameter(dtcReq, "DTCStatusMask", 0x08);   // 0x08 = confirmed
+    stepNumber = 5;
+    write("[DIAG] ── Step 4: Reading confirmed DTCs (mask 0x08)...");
+    diagSendRequest(dtcReq);
+  } else {
+    write("[DIAG] ✗ ReadDataByIdentifier FAILED — NRC: 0x%02X",
+          diagGetLastResponseCode(this));
+  }
+}
+
+/* ════════════════════════════════════════════════════
+   STEP 4 — Receive DTC list → Print Report
+   ════════════════════════════════════════════════════ */
+on diagResponse ECU.ReadDTCInformation_reportDTCByStatusMask {
+  int len, i;
+  byte h, m, l, s;
+
+  if (diagGetLastResponseCode(this) < 0) {
+    len      = diagGetParameterRaw(this, "DTCAndStatusRecord", dtcRaw, 256);
+    dtcCount = len / 4;
+
+    write("╔══════════════════════════════════════════════╗");
+    write("║  UDS DIAGNOSTIC REPORT                       ║");
+    write("║  ECU SW Version : %-26s ║", swVersion);
+    write("║  Confirmed DTCs : %-3d                        ║", dtcCount);
+    write("╠══════════════════════════════════════════════╣");
+
+    if (dtcCount == 0) {
+      write("║  No DTCs — ECU is CLEAN ✓                    ║");
+    } else {
+      for (i = 0; i < dtcCount; i++) {
+        h = dtcRaw[i*4];
+        m = dtcRaw[i*4 + 1];
+        l = dtcRaw[i*4 + 2];
+        s = dtcRaw[i*4 + 3];
+        write("║  DTC[%02d]: %02X %02X %02X  Status: 0x%02X           ║",
+              i+1, h, m, l, s);
+      }
+    }
+
+    write("╚══════════════════════════════════════════════╝");
+  } else {
+    write("[DIAG] ✗ ReadDTCInformation FAILED — NRC: 0x%02X",
+          diagGetLastResponseCode(this));
+  }
+}
+```
+
+---
+
+### Python Script: Complete UDS Diagnostic Sequence (Raw CAN via python-can + udsoncan)
+
+> Same workflow in Python — useful for CI pipelines, automated nightly tests, or when no CANoe licence is available.
+
+**Libraries needed:**
+```bash
+pip install python-can udsoncan
+```
+
+```python
+"""
+Full UDS Diagnostic Sequence — Python version
+──────────────────────────────────────────────
+Connects to a real CAN interface (e.g., Vector XL, PEAK PCAN, or SocketCAN).
+Performs:
+  Step 1 : Enter Extended Diagnostic Session
+  Step 2 : Security Access  (Seed → Key)
+  Step 3 : Read SW Version  (DID 0xF195)
+  Step 4 : Read confirmed DTCs  (0x19 02 08)
+  Step 5 : Print report + save to CSV
+
+Install : pip install python-can udsoncan
+"""
+
+import can
+import udsoncan
+from udsoncan.connections import PythonIsoTpConnection
+from udsoncan.client    import Client
+from udsoncan           import configs, services
+import isotp
+import csv
+import datetime
+import sys
+
+# ─────────────────────────────────────────────────────────────
+# 1. Configuration
+# ─────────────────────────────────────────────────────────────
+CAN_INTERFACE  = "vector"          # "pcan" | "socketcan" | "vector" | "kvaser"
+CAN_CHANNEL    = "PCAN_USBBUS1"    # e.g. "can0" for SocketCAN
+CAN_BITRATE    = 500000            # 500 kbps
+
+ECU_TX_ID      = 0x7E0             # Tester → ECU (physical request)
+ECU_RX_ID      = 0x7E8             # ECU → Tester (response)
+
+OUTPUT_CSV     = "dtc_report.csv"
+
+
+def compute_key(seed: int) -> int:
+    """
+    Security key algorithm — replace with your project's real formula.
+    Example here: XOR with fixed secret.
+    """
+    return seed ^ 0xCAFEBABE
+
+
+# ─────────────────────────────────────────────────────────────
+# 2. CAN + ISO-TP transport layer setup
+# ─────────────────────────────────────────────────────────────
+bus = can.Bus(
+    interface=CAN_INTERFACE,
+    channel=CAN_CHANNEL,
+    bitrate=CAN_BITRATE,
+)
+
+tp_addr = isotp.Address(
+    isotp.AddressingMode.Normal_11bits,
+    txid=ECU_TX_ID,
+    rxid=ECU_RX_ID,
+)
+
+stack = isotp.CanStack(bus=bus, address=tp_addr)
+conn  = PythonIsoTpConnection(stack)
+
+# udsoncan client config
+client_config = configs.default_client_config.copy()
+client_config["security_algo"]      = compute_key          # hook our key function
+client_config["security_algo_extra_args"] = {}
+client_config["request_timeout"]    = 2.0
+client_config["p2_timeout"]         = 1.0
+
+
+# ─────────────────────────────────────────────────────────────
+# 3. Main diagnostic sequence
+# ─────────────────────────────────────────────────────────────
+def run_diagnostics():
+    dtc_results  = []
+    sw_version   = "UNKNOWN"
+
+    with Client(conn, config=client_config) as client:
+
+        # ── Step 1: Extended Diagnostic Session ──────────────
+        print("[DIAG] Step 1: Entering Extended Diagnostic Session...")
+        resp = client.change_session(
+            services.DiagnosticSessionControl.Session.extendedDiagnosticSession
+        )
+        if not resp.positive:
+            print(f"[DIAG] ✗ Session switch FAILED — NRC: {resp.code_name}")
+            sys.exit(1)
+        print("[DIAG] ✓ Extended Session active")
+
+        # ── Step 2: Security Access ───────────────────────────
+        print("[DIAG] Step 2: Requesting security access...")
+        client.unlock_security_access(level=0x01)   # level 0x01 → subfunction 0x01/0x02
+        print("[DIAG] ✓ Security Access granted")
+
+        # ── Step 3: Read SW Version (DID 0xF195) ─────────────
+        print("[DIAG] Step 3: Reading SW Version (DID 0xF195)...")
+        resp = client.read_data_by_identifier(
+            [udsoncan.DataIdentifier(0xF195)]
+        )
+        if resp.positive:
+            raw_val = resp.service_data.values.get(0xF195, b"")
+            sw_version = raw_val.decode("ascii", errors="replace").strip()
+            print(f"[DIAG] ✓ SW Version: {sw_version}")
+        else:
+            print(f"[DIAG] ✗ ReadDataByIdentifier FAILED — NRC: {resp.code_name}")
+
+        # ── Step 4: Read Confirmed DTCs (status mask 0x08) ───
+        print("[DIAG] Step 4: Reading confirmed DTCs (mask 0x08)...")
+        resp = client.get_dtc_by_status_mask(status_mask=0x08)
+
+        if resp.positive:
+            dtcs = resp.service_data.dtcs
+            print(f"[DIAG] ✓ {len(dtcs)} confirmed DTC(s) found")
+            for dtc in dtcs:
+                dtc_results.append({
+                    "dtc_id":     f"{dtc.id:06X}",
+                    "status":     f"0x{dtc.status.byte:02X}",
+                    "severity":   str(dtc.severity),
+                    "functional_unit": str(dtc.functional_unit),
+                })
+        else:
+            print(f"[DIAG] ✗ ReadDTCInformation FAILED — NRC: {resp.code_name}")
+
+    return sw_version, dtc_results
+
+
+# ─────────────────────────────────────────────────────────────
+# 4. Print report + save CSV
+# ─────────────────────────────────────────────────────────────
+def print_report(sw_version: str, dtcs: list):
+    border = "═" * 50
+    print(f"\n╔{border}╗")
+    print(f"║  UDS DIAGNOSTIC REPORT{' ' * 27}║")
+    print(f"║  Date       : {datetime.datetime.now():%Y-%m-%d %H:%M:%S}{' ' * 12}║")
+    print(f"║  SW Version : {sw_version:<35}║")
+    print(f"║  DTCs Found : {len(dtcs):<35}║")
+    print(f"╠{border}╣")
+
+    if not dtcs:
+        print(f"║  No DTCs — ECU is CLEAN ✓{' ' * 24}║")
+    else:
+        print(f"║  {'#':<4} {'DTC ID':<10} {'Status':<10} {'Severity':<15}║")
+        print(f"╠{border}╣")
+        for i, d in enumerate(dtcs, 1):
+            print(f"║  {i:<4} {d['dtc_id']:<10} {d['status']:<10} {d['severity']:<15}║")
+
+    print(f"╚{border}╝\n")
+
+
+def save_csv(sw_version: str, dtcs: list, filename: str):
+    with open(filename, "w", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["dtc_id", "status", "severity", "functional_unit"]
+        )
+        writer.writeheader()
+        writer.writerows(dtcs)
+    print(f"[CSV] Report saved → {filename}")
+
+
+# ─────────────────────────────────────────────────────────────
+# 5. Entry point
+# ─────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    try:
+        sw, dtc_list = run_diagnostics()
+        print_report(sw, dtc_list)
+        save_csv(sw, dtc_list, OUTPUT_CSV)
+    except Exception as e:
+        print(f"[ERROR] {e}")
+    finally:
+        bus.shutdown()
+```
+
+**Output example:**
+```
+[DIAG] Step 1: Entering Extended Diagnostic Session...
+[DIAG] ✓ Extended Session active
+[DIAG] Step 2: Requesting security access...
+[DIAG] ✓ Security Access granted
+[DIAG] Step 3: Reading SW Version (DID 0xF195)...
+[DIAG] ✓ SW Version: v2.5.0_20260419
+[DIAG] Step 4: Reading confirmed DTCs (mask 0x08)...
+[DIAG] ✓ 2 confirmed DTC(s) found
+
+╔══════════════════════════════════════════════════╗
+║  UDS DIAGNOSTIC REPORT                           ║
+║  Date       : 2026-04-19 14:32:07                ║
+║  SW Version : v2.5.0_20260419                    ║
+║  DTCs Found : 2                                  ║
+╠══════════════════════════════════════════════════╣
+║  #    DTC ID     Status     Severity            ║
+╠══════════════════════════════════════════════════╣
+║  1    C0200A     0x08       warning             ║
+║  2    B1003F     0x08       warning             ║
+╚══════════════════════════════════════════════════╝
+
+[CSV] Report saved → dtc_report.csv
+```
+
+**Key library mapping (Python ↔ CAPL):**
+
+| CAPL (CANoe) | Python (udsoncan) |
+|---|---|
+| `diagRequest ECU.DiagnosticSessionControl_extendedDiagnosticSession` | `client.change_session(Session.extendedDiagnosticSession)` |
+| `diagRequest ECU.SecurityAccess_requestSeed` | `client.unlock_security_access(level=0x01)` |
+| `diagRequest ECU.ReadDataByIdentifier` | `client.read_data_by_identifier([DataIdentifier(0xF195)])` |
+| `diagRequest ECU.ReadDTCInformation_reportDTCByStatusMask` | `client.get_dtc_by_status_mask(status_mask=0x08)` |
+| `diagGetLastResponseCode(this) < 0` | `resp.positive == True` |
+| `diagGetParameterRaw(this, "DTCAndStatusRecord", buf, 256)` | `resp.service_data.dtcs` |
+| `write("...")` | `print("...")` |
+
+> **Interview tip:** "In my BYD project, I used CAPL for real-time in-loop testing inside CANoe,
+> and Python scripts for nightly regression runs on the CI server — same diagnostic logic,
+> different execution environments."
