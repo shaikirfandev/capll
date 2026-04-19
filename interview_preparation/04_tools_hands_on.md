@@ -374,3 +374,193 @@ Key principles:
 
 > **Tip**: Never say 10/10 for anything — it invites tough follow-up questions.
 > Never say below 5/10 — for tools on your CV, show working proficiency.
+
+---
+
+## 6. CAPL Diagnostic Syntax — Deep Explanation
+
+### "What does `on diagResponse ECU.ReadDTCInformation_reportDTCByStatusMask` mean?"
+
+This is a common interview question when you write or explain Scenario 6. Break it down part by part:
+
+```
+on diagResponse   ECU   .   ReadDTCInformation_reportDTCByStatusMask
+│                 │              │
+│                 │              └─ Service name + subfunction name
+│                 │                 (auto-generated from the diagnostic database)
+│                 │
+│                 └─ The ECU node name as configured in CANoe's
+│                    diagnostic setup (ODX / .cdd file)
+│
+└─ CAPL predefined event keyword — fires when a diagnostic
+   response frame is received from that ECU
+```
+
+| Part | Type | Where it comes from |
+|------|------|---------------------|
+| `on diagResponse` | CAPL predefined event keyword | Built into CAPL — fires when a diagnostic response arrives |
+| `ECU` | Diagnostic node name | Defined in your CANoe diagnostic configuration (ODX/PDX or `.cdd` file) — the name you gave the ECU under test |
+| `ReadDTCInformation_reportDTCByStatusMask` | Service + subfunction name | Auto-generated from the diagnostic database — `ReadDTCInformation` = UDS service `0x19`, `reportDTCByStatusMask` = subfunction `0x02` |
+
+**How the name is constructed from UDS:**
+
+```
+UDS Service  0x19  →  ReadDTCInformation
+Sub-function 0x02  →  reportDTCByStatusMask
+
+Combined:  ReadDTCInformation_reportDTCByStatusMask
+```
+
+**If your ECU has a different name** (e.g., `EngineECU`), the exact same handler becomes:
+
+```capl
+on diagResponse EngineECU.ReadDTCInformation_reportDTCByStatusMask {
+```
+
+**Where to find these names in CANoe:**
+> Open Diagnostic Console → expand the ECU node in the service tree → every service and subfunction shown there matches exactly the identifier you use in CAPL.
+
+**More examples of the same pattern:**
+
+```capl
+on diagResponse ECU.DiagnosticSessionControl_defaultSession        // 0x10 01
+on diagResponse ECU.DiagnosticSessionControl_extendedDiagnosticSession  // 0x10 03
+on diagResponse ECU.SecurityAccess_requestSeed                     // 0x27 01
+on diagResponse ECU.SecurityAccess_sendKey                         // 0x27 02
+on diagResponse ECU.ReadDataByIdentifier                           // 0x22 (no subfunction)
+on diagResponse ECU.WriteDataByIdentifier                          // 0x2E
+on diagResponse ECU.RoutineControl_startRoutine                    // 0x31 01
+on diagResponse ECU.RoutineControl_requestRoutineResults           // 0x31 03
+on diagResponse ECU.ECUReset_hardReset                             // 0x11 01
+```
+
+**Key rule:** If a UDS service has subfunctions (like 0x19, 0x27, 0x31), the name is `ServiceName_subfunctionName`. If it has no subfunctions (like 0x22, 0x2E), it's just `ServiceName`.
+
+---
+
+### Alternative: Without ODX — Direct UDS Hex Codes (Raw CAN)
+
+When no ODX/diagnostic database is loaded, you cannot use `diagRequest`/`diagResponse`. Instead, you manually construct UDS byte frames and send them as raw CAN messages on the physical CAN ID.
+
+**How UDS over CAN works (ISO 15765-2 Single Frame):**
+
+```
+Byte 0: PCI (Protocol Control Info) — 0x0N where N = payload length
+Byte 1: UDS Service ID
+Byte 2+: Parameters / subfunction / data
+```
+
+**Example: Read all confirmed DTCs — raw UDS CAN frames**
+
+```capl
+/*
+ * UDS Diagnostic WITHOUT ODX — direct hex codes
+ * Target ECU physical request ID : 0x7E0
+ * Target ECU physical response ID: 0x7E8
+ *
+ * Sequence:
+ *   1. Enter Extended Diagnostic Session  → 0x10 03
+ *   2. Read DTC by Status Mask            → 0x19 02 08
+ *   3. Parse raw response bytes manually
+ */
+
+variables {
+  message 0x7E0 udsReq;       // Physical request  CAN ID
+  msTimer tWaitForResp;
+  int step = 0;
+}
+
+/* ── Step 1: Start measurement → send Extended Session request ── */
+on start {
+  step = 1;
+
+  udsReq.dlc = 8;
+  udsReq.byte(0) = 0x02;   // PCI: Single Frame, 2 payload bytes
+  udsReq.byte(1) = 0x10;   // Service ID: DiagnosticSessionControl
+  udsReq.byte(2) = 0x03;   // SubFunction: extendedDiagnosticSession
+  udsReq.byte(3) = 0x00;   // padding
+  udsReq.byte(4) = 0x00;
+  udsReq.byte(5) = 0x00;
+  udsReq.byte(6) = 0x00;
+  udsReq.byte(7) = 0x00;
+
+  output(udsReq);
+  write("[UDS TX] 0x7E0 → DiagnosticSessionControl extendedSession (0x10 03)");
+  setTimer(tWaitForResp, 500);   // timeout guard
+}
+
+/* ── Receive all frames on the ECU response ID ── */
+on message 0x7E8 {
+  byte sid    = this.byte(1);   // Service ID in response = request SID + 0x40
+  byte nrc    = this.byte(2);   // NRC if SID == 0x7F
+  int  i, numDTCs;
+  byte dtcHigh, dtcMid, dtcLow, status;
+
+  /* ── Negative Response ── */
+  if (sid == 0x7F) {
+    write("[UDS RX] NEGATIVE RESPONSE — Request SID: 0x%02X  NRC: 0x%02X", nrc, this.byte(3));
+    return;
+  }
+
+  /* ── Positive response: Extended Session (0x50 03) ── */
+  if (sid == 0x50 && step == 1) {
+    cancelTimer(tWaitForResp);
+    write("[UDS RX] Extended Session active ✓");
+
+    // Step 2: Send ReadDTCInformation — reportDTCByStatusMask
+    step = 2;
+    udsReq.byte(0) = 0x03;   // PCI: 3 payload bytes
+    udsReq.byte(1) = 0x19;   // Service ID: ReadDTCInformation
+    udsReq.byte(2) = 0x02;   // SubFunction: reportDTCByStatusMask
+    udsReq.byte(3) = 0x08;   // StatusMask:  0x08 = confirmed DTC
+    udsReq.byte(4) = 0x00;
+    udsReq.byte(5) = 0x00;
+    udsReq.byte(6) = 0x00;
+    udsReq.byte(7) = 0x00;
+
+    output(udsReq);
+    write("[UDS TX] 0x7E0 → ReadDTCInformation reportDTCByStatusMask (0x19 02 08)");
+    setTimer(tWaitForResp, 500);
+  }
+
+  /* ── Positive response: ReadDTCInformation (0x59 02) ── */
+  if (sid == 0x59 && step == 2) {
+    cancelTimer(tWaitForResp);
+
+    // Byte 0 = PCI, Byte 1 = 0x59, Byte 2 = 0x02 (subfunction echo),
+    // Byte 3 = DTCStatusAvailabilityMask
+    // Byte 4 onwards: [DTC high][DTC mid][DTC low][Status] × N
+    numDTCs = (this.dlc - 4) / 4;
+    write("[UDS RX] ReadDTCInformation ✓ — %d confirmed DTC(s)", numDTCs);
+
+    for (i = 0; i < numDTCs; i++) {
+      dtcHigh = this.byte(4 + i*4);
+      dtcMid  = this.byte(5 + i*4);
+      dtcLow  = this.byte(6 + i*4);
+      status  = this.byte(7 + i*4);
+      write("  DTC[%d]: %02X %02X %02X  Status: 0x%02X", i+1, dtcHigh, dtcMid, dtcLow, status);
+    }
+  }
+}
+
+/* ── Timeout guard ── */
+on timer tWaitForResp {
+  write("[UDS] TIMEOUT — no response from ECU (step %d)", step);
+}
+```
+
+---
+
+### ODX Symbolic vs Raw UDS — Side-by-Side Comparison
+
+| Aspect | ODX Symbolic (with database) | Raw UDS Hex (no database) |
+|--------|------------------------------|---------------------------|
+| **Requires** | ODX / PDX / `.cdd` file loaded in CANoe | No database needed |
+| **Send request** | `diagRequest ECU.ReadDTCInformation_reportDTCByStatusMask` | `udsReq.byte(1) = 0x19; udsReq.byte(2) = 0x02; ...` |
+| **Receive event** | `on diagResponse ECU.ReadDTCInformation_reportDTCByStatusMask` | `on message 0x7E8` → check `this.byte(1) == 0x59` |
+| **Response decode** | `diagGetParameterRaw()` — auto-named fields | Manual byte indexing (`this.byte(4)`, `this.byte(5)`, ...) |
+| **Portability** | Tied to the specific ODX database version | Works on any ECU with UDS — no config file needed |
+| **Readability** | High — service names are self-documenting | Lower — must know UDS spec to read the code |
+| **When to use** | Production test automation with full ODX | Quick debugging, bench tests, unknown ECU, no database available |
+
+> **Interview tip:** Mention both approaches — "I prefer ODX symbolic for production scripts because it's readable and maintainable. But I also know how to write raw UDS hex scripts for bench debugging when no database is available."
