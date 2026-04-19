@@ -1,0 +1,203 @@
+/*
+ * Script 23: LIN Bus in CAPL
+ * Demonstrates LIN master scheduling, frame transmission,
+ * slave response handling, and LIN-specific event handlers.
+ *
+ * Requires CANoe with LIN option and LDF network database loaded.
+ */
+
+includes { }
+
+variables
+{
+  // LIN message objects (matched to LDF frame names)
+  // Frame ID 0x01 — Master sends: light switch command
+  // Frame ID 0x11 — Slave responds: light status feedback
+
+  msTimer gScheduleTimer;   // drives the LIN schedule table manually
+  msTimer gTimeoutTimer;    // slave response timeout
+
+  int gScheduleIndex  = 0;  // which schedule slot we are in
+  int gLightCmd       = 0;  // 0=OFF 1=ON 2=DIM
+  int gSlaveRespCount = 0;
+  int gTimeoutCount   = 0;
+
+  // LIN schedule: list of frame IDs to send in round-robin
+  // Slot 0: 0x01 (master → slave: command)
+  // Slot 1: 0x11 (slave → master: status, master sends header only)
+  // Slot 2: 0x21 (diagnostic master request, optional)
+  const int SCHED_IDS[3] = {0x01, 0x11, 0x21};
+  const int SCHED_LEN    = 3;
+  const int SCHED_CYCLE_MS = 10;  // 10ms per slot = 30ms full schedule
+}
+
+/*────────────────────────────────────────────────────────────
+  on start – begin LIN schedule
+────────────────────────────────────────────────────────────*/
+on start
+{
+  write("=== Script 23: LIN Bus Demo ===");
+  write("Schedule: %d slots, %dms per slot", SCHED_LEN, SCHED_CYCLE_MS);
+  setTimer(gScheduleTimer, SCHED_CYCLE_MS);
+}
+
+/*────────────────────────────────────────────────────────────
+  Schedule Timer – manually drive LIN master schedule
+  (In real CANoe, use LIN schedule config; this shows the logic)
+────────────────────────────────────────────────────────────*/
+on timer gScheduleTimer
+{
+  int currentId;
+  currentId = SCHED_IDS[gScheduleIndex];
+
+  if (currentId == 0x01)
+    SendLightCommand();
+  else if (currentId == 0x11)
+    RequestSlaveStatus();
+  else if (currentId == 0x21)
+    SendDiagnosticHeader();
+
+  gScheduleIndex = (gScheduleIndex + 1) % SCHED_LEN;
+  setTimer(gScheduleTimer, SCHED_CYCLE_MS);
+}
+
+/*────────────────────────────────────────────────────────────
+  Send LIN master frame: Light Command (ID 0x01)
+  8 bytes: [LightCmd, Brightness, Reserved x6]
+────────────────────────────────────────────────────────────*/
+void SendLightCommand()
+{
+  linFrame 0x01 cmdFrame;
+  cmdFrame.byte(0) = gLightCmd;    // 0=OFF, 1=ON, 2=DIM
+  cmdFrame.byte(1) = (gLightCmd == 2) ? 0x80 : 0xFF;  // brightness
+  cmdFrame.byte(2) = 0x00;
+  cmdFrame.byte(3) = 0x00;
+
+  // Send LIN frame header + response (master is publisher)
+  output(cmdFrame);
+
+  // Start timeout: slave should confirm within 5ms
+  setTimer(gTimeoutTimer, 5);
+}
+
+/*────────────────────────────────────────────────────────────
+  Send LIN header only — slave (ID 0x11) will respond
+────────────────────────────────────────────────────────────*/
+void RequestSlaveStatus()
+{
+  linFrame 0x11 statusReq;
+  // Master sends header (ID byte) only — slave fills response bytes
+  // In CANoe: set frame as "slave response" type in LDF
+  output(statusReq);
+  setTimer(gTimeoutTimer, 5);
+}
+
+/*────────────────────────────────────────────────────────────
+  Send LIN diagnostic master request (ID 0x3C = 60)
+────────────────────────────────────────────────────────────*/
+void SendDiagnosticHeader()
+{
+  linFrame 0x3C diagReq;
+  // LIN diagnostic: NAD=0x01, PCI=0x06, SID=0xB2 (ReadByIdentifier)
+  diagReq.byte(0) = 0x01;  // NAD
+  diagReq.byte(1) = 0x06;  // PCI: single frame, length 6
+  diagReq.byte(2) = 0xB2;  // SID: ReadByIdentifier
+  diagReq.byte(3) = 0x00;  // Identifier[0]
+  diagReq.byte(4) = 0x00;  // Identifier[1]
+  diagReq.byte(5) = 0x00;
+  diagReq.byte(6) = 0x00;
+  diagReq.byte(7) = 0xFF;  // padding
+  output(diagReq);
+}
+
+/*────────────────────────────────────────────────────────────
+  on linFrame 0x11 — receive slave status response
+────────────────────────────────────────────────────────────*/
+on linFrame 0x11
+{
+  cancelTimer(gTimeoutTimer);
+  gSlaveRespCount++;
+
+  byte actualLight = this.byte(0);   // 0=OFF, 1=ON, 2=DIM
+  byte faultFlag   = this.byte(1);   // bit 0 = bulb fault
+
+  write("LIN RX [0x11] LightStatus=%d FaultFlag=0x%02X",
+        actualLight, faultFlag);
+
+  if (faultFlag & 0x01)
+    write("!! BULB FAULT reported by slave");
+
+  if (actualLight != gLightCmd)
+    write("!! State mismatch: cmd=%d actual=%d", gLightCmd, actualLight);
+}
+
+/*────────────────────────────────────────────────────────────
+  on linFrame 0x3D — LIN diagnostic slave response (ID=0x7D=125)
+────────────────────────────────────────────────────────────*/
+on linFrame 0x3D
+{
+  write("LIN Diag Response: NAD=0x%02X PCI=0x%02X RSID=0x%02X",
+        this.byte(0), this.byte(1), this.byte(2));
+}
+
+/*────────────────────────────────────────────────────────────
+  on linFrame *  — catch all LIN frames (for monitoring)
+────────────────────────────────────────────────────────────*/
+on linFrame *
+{
+  // Log all LIN frames with ID and first byte
+  write("LIN frame: ID=0x%02X DLC=%d byte[0]=0x%02X",
+        this.id, this.dlc, this.byte(0));
+}
+
+/*────────────────────────────────────────────────────────────
+  Timeout: slave did not respond in time
+────────────────────────────────────────────────────────────*/
+on timer gTimeoutTimer
+{
+  gTimeoutCount++;
+  write("!! LIN Slave Timeout #%d for schedule slot %d",
+        gTimeoutCount, (gScheduleIndex + SCHED_LEN - 1) % SCHED_LEN);
+}
+
+/*────────────────────────────────────────────────────────────
+  LIN error event handlers
+────────────────────────────────────────────────────────────*/
+on linSchedulerModeChange
+{
+  write("LIN Scheduler mode changed");
+}
+
+/*────────────────────────────────────────────────────────────
+  Key handlers
+────────────────────────────────────────────────────────────*/
+on key '1'
+{
+  gLightCmd = 1;
+  write("Light command: ON");
+}
+
+on key '0'
+{
+  gLightCmd = 0;
+  write("Light command: OFF");
+}
+
+on key '2'
+{
+  gLightCmd = 2;
+  write("Light command: DIM");
+}
+
+on key 's'
+{
+  write("Stats: Slave responses=%d  Timeouts=%d  Schedule cycles=%d",
+        gSlaveRespCount, gTimeoutCount, gScheduleIndex);
+}
+
+on stopMeasurement
+{
+  write("=== LIN Demo Done ===");
+  write("Slave responses: %d | Timeouts: %d",
+        gSlaveRespCount, gTimeoutCount);
+}

@@ -1,0 +1,315 @@
+/*
+ * Script 17: UDS Diagnostics in CAPL
+ * Demonstrates sending UDS service requests over CAN:
+ *   - 0x10 DiagnosticSessionControl
+ *   - 0x22 ReadDataByIdentifier
+ *   - 0x27 SecurityAccess
+ *   - 0x2E WriteDataByIdentifier
+ *   - 0x19 ReadDTCInformation
+ *   - 0x14 ClearDiagnosticInformation
+ * Requires a CAN channel with a UDS-capable ECU or simulation.
+ */
+
+includes
+{
+}
+
+variables
+{
+  msTimer udsTimer;
+  msTimer responseTimer;
+
+  message 0x7DF diagRequest;   // OBD functional request ID
+  message 0x700 ecuRequest;    // Physical request to ECU (example: 0x700)
+
+  // Expected ECU response ID (0x700 + 8 = 0x708, typical pattern)
+  const long ECU_RESPONSE_ID = 0x708;
+
+  byte gSeed[4];
+  byte gKey[4];
+
+  int gState = 0;
+  // States:
+  // 0 = Idle
+  // 1 = Awaiting DiagSession response
+  // 2 = Awaiting SecurityAccess seed
+  // 3 = Awaiting SecurityAccess key response
+  // 4 = Awaiting RDBI response
+  // 5 = Awaiting WDBI response
+  // 6 = Awaiting ReadDTC response
+  // 7 = Awaiting ClearDTC response
+}
+
+/* -------------------------------------------------------
+   on start: kick off session control
+------------------------------------------------------- */
+on start
+{
+  write("=== Script 17: UDS Diagnostics ===");
+  write("Sending DiagnosticSessionControl (0x10) - Extended Session");
+  sendDiagnosticSession(0x03); // 0x03 = extendedDiagnosticSession
+}
+
+/* -------------------------------------------------------
+   Send DiagnosticSessionControl (SID 0x10)
+------------------------------------------------------- */
+void sendDiagnosticSession(byte sessionType)
+{
+  ecuRequest.dlc = 8;
+  ecuRequest.byte(0) = 0x02;       // length
+  ecuRequest.byte(1) = 0x10;       // SID
+  ecuRequest.byte(2) = sessionType;
+  ecuRequest.byte(3) = 0x00;
+  ecuRequest.byte(4) = 0x00;
+  ecuRequest.byte(5) = 0x00;
+  ecuRequest.byte(6) = 0x00;
+  ecuRequest.byte(7) = 0x00;
+
+  output(ecuRequest);
+  gState = 1;
+  setTimer(responseTimer, 1000);
+  write(">> DiagnosticSessionControl sent, sessionType=0x%02X", sessionType);
+}
+
+/* -------------------------------------------------------
+   Send ReadDataByIdentifier (SID 0x22)
+   Example: DID 0xF190 = VIN
+------------------------------------------------------- */
+void sendReadDataByIdentifier(word did)
+{
+  ecuRequest.dlc = 8;
+  ecuRequest.byte(0) = 0x03;              // length
+  ecuRequest.byte(1) = 0x22;             // SID
+  ecuRequest.byte(2) = (byte)(did >> 8); // DID high byte
+  ecuRequest.byte(3) = (byte)(did & 0xFF); // DID low byte
+  ecuRequest.byte(4) = 0x00;
+  ecuRequest.byte(5) = 0x00;
+  ecuRequest.byte(6) = 0x00;
+  ecuRequest.byte(7) = 0x00;
+
+  output(ecuRequest);
+  gState = 4;
+  setTimer(responseTimer, 1000);
+  write(">> ReadDataByIdentifier sent, DID=0x%04X", did);
+}
+
+/* -------------------------------------------------------
+   Send SecurityAccess - Request Seed (SID 0x27, subFunc 0x01)
+------------------------------------------------------- */
+void sendSecurityAccessRequestSeed()
+{
+  ecuRequest.dlc = 8;
+  ecuRequest.byte(0) = 0x02;
+  ecuRequest.byte(1) = 0x27;  // SID
+  ecuRequest.byte(2) = 0x01;  // requestSeed
+  ecuRequest.byte(3) = 0x00;
+  ecuRequest.byte(4) = 0x00;
+  ecuRequest.byte(5) = 0x00;
+  ecuRequest.byte(6) = 0x00;
+  ecuRequest.byte(7) = 0x00;
+
+  output(ecuRequest);
+  gState = 2;
+  setTimer(responseTimer, 1000);
+  write(">> SecurityAccess RequestSeed sent");
+}
+
+/* -------------------------------------------------------
+   Send SecurityAccess - Send Key (SID 0x27, subFunc 0x02)
+------------------------------------------------------- */
+void sendSecurityAccessSendKey(byte key0, byte key1, byte key2, byte key3)
+{
+  ecuRequest.dlc = 8;
+  ecuRequest.byte(0) = 0x06;  // length: SID + subFunc + 4 key bytes
+  ecuRequest.byte(1) = 0x27;  // SID
+  ecuRequest.byte(2) = 0x02;  // sendKey
+  ecuRequest.byte(3) = key0;
+  ecuRequest.byte(4) = key1;
+  ecuRequest.byte(5) = key2;
+  ecuRequest.byte(6) = key3;
+  ecuRequest.byte(7) = 0x00;
+
+  output(ecuRequest);
+  gState = 3;
+  setTimer(responseTimer, 1000);
+  write(">> SecurityAccess SendKey sent: %02X %02X %02X %02X", key0, key1, key2, key3);
+}
+
+/* -------------------------------------------------------
+   Send WriteDataByIdentifier (SID 0x2E)
+   Example: write 2 bytes to DID 0x0100
+------------------------------------------------------- */
+void sendWriteDataByIdentifier(word did, byte val0, byte val1)
+{
+  ecuRequest.dlc = 8;
+  ecuRequest.byte(0) = 0x05;
+  ecuRequest.byte(1) = 0x2E;             // SID
+  ecuRequest.byte(2) = (byte)(did >> 8);
+  ecuRequest.byte(3) = (byte)(did & 0xFF);
+  ecuRequest.byte(4) = val0;
+  ecuRequest.byte(5) = val1;
+  ecuRequest.byte(6) = 0x00;
+  ecuRequest.byte(7) = 0x00;
+
+  output(ecuRequest);
+  gState = 5;
+  setTimer(responseTimer, 1000);
+  write(">> WriteDataByIdentifier sent, DID=0x%04X, data=%02X %02X", did, val0, val1);
+}
+
+/* -------------------------------------------------------
+   Send ReadDTCInformation (SID 0x19, subFunc 0x02 = reportDTCByStatusMask)
+------------------------------------------------------- */
+void sendReadDTCByStatusMask(byte statusMask)
+{
+  ecuRequest.dlc = 8;
+  ecuRequest.byte(0) = 0x03;
+  ecuRequest.byte(1) = 0x19;   // SID
+  ecuRequest.byte(2) = 0x02;   // subFunction
+  ecuRequest.byte(3) = statusMask;
+  ecuRequest.byte(4) = 0x00;
+  ecuRequest.byte(5) = 0x00;
+  ecuRequest.byte(6) = 0x00;
+  ecuRequest.byte(7) = 0x00;
+
+  output(ecuRequest);
+  gState = 6;
+  setTimer(responseTimer, 1000);
+  write(">> ReadDTCInformation sent, statusMask=0x%02X", statusMask);
+}
+
+/* -------------------------------------------------------
+   Send ClearDiagnosticInformation (SID 0x14)
+   groupOfDTC = 0xFFFFFF clears all DTCs
+------------------------------------------------------- */
+void sendClearDTC()
+{
+  ecuRequest.dlc = 8;
+  ecuRequest.byte(0) = 0x04;
+  ecuRequest.byte(1) = 0x14;   // SID
+  ecuRequest.byte(2) = 0xFF;   // groupOfDTC high
+  ecuRequest.byte(3) = 0xFF;   // groupOfDTC mid
+  ecuRequest.byte(4) = 0xFF;   // groupOfDTC low
+  ecuRequest.byte(5) = 0x00;
+  ecuRequest.byte(6) = 0x00;
+  ecuRequest.byte(7) = 0x00;
+
+  output(ecuRequest);
+  gState = 7;
+  setTimer(responseTimer, 1000);
+  write(">> ClearDiagnosticInformation sent (all DTCs)");
+}
+
+/* -------------------------------------------------------
+   Receive ECU response
+------------------------------------------------------- */
+on message ECU_RESPONSE_ID
+{
+  byte sid      = this.byte(1);
+  byte positive = sid - 0x40; // positive response SID check
+
+  cancelTimer(responseTimer);
+
+  // Negative Response Check
+  if (sid == 0x7F)
+  {
+    byte reqSID = this.byte(2);
+    byte nrc    = this.byte(3);
+    write("<< Negative Response for SID=0x%02X, NRC=0x%02X", reqSID, nrc);
+    interpretNRC(nrc);
+    gState = 0;
+    return;
+  }
+
+  write("<< Positive Response: SID=0x%02X", sid);
+
+  switch (gState)
+  {
+    case 1: // DiagnosticSessionControl response (0x50)
+      write("   DiagnosticSession accepted. Proceeding to SecurityAccess...");
+      sendSecurityAccessRequestSeed();
+      break;
+
+    case 2: // SecurityAccess seed response (0x67 subFunc 0x01)
+      gSeed[0] = this.byte(3);
+      gSeed[1] = this.byte(4);
+      gSeed[2] = this.byte(5);
+      gSeed[3] = this.byte(6);
+      write("   Seed received: %02X %02X %02X %02X", gSeed[0], gSeed[1], gSeed[2], gSeed[3]);
+      // Simple XOR-based key algorithm (replace with actual algo)
+      gKey[0] = gSeed[0] ^ 0xA5;
+      gKey[1] = gSeed[1] ^ 0xA5;
+      gKey[2] = gSeed[2] ^ 0xA5;
+      gKey[3] = gSeed[3] ^ 0xA5;
+      sendSecurityAccessSendKey(gKey[0], gKey[1], gKey[2], gKey[3]);
+      break;
+
+    case 3: // SecurityAccess key accepted (0x67 subFunc 0x02)
+      write("   Security unlocked! Reading VIN (DID 0xF190)...");
+      sendReadDataByIdentifier(0xF190);
+      break;
+
+    case 4: // ReadDataByIdentifier response (0x62)
+      write("   RDBI data bytes: %02X %02X %02X %02X ...",
+            this.byte(4), this.byte(5), this.byte(6), this.byte(7));
+      // Next: write data
+      sendWriteDataByIdentifier(0x0100, 0xAB, 0xCD);
+      break;
+
+    case 5: // WriteDataByIdentifier response (0x6E)
+      write("   WDBI write accepted. Reading DTCs...");
+      sendReadDTCByStatusMask(0x08); // confirmed DTC
+      break;
+
+    case 6: // ReadDTCInformation response (0x59)
+      write("   DTCStatusAvailabilityMask=0x%02X", this.byte(3));
+      write("   Clearing all DTCs...");
+      sendClearDTC();
+      break;
+
+    case 7: // ClearDTC response (0x54)
+      write("   DTCs cleared successfully. UDS sequence complete.");
+      gState = 0;
+      break;
+
+    default:
+      write("   Unhandled response in state %d", gState);
+      break;
+  }
+}
+
+/* -------------------------------------------------------
+   NRC Interpreter
+------------------------------------------------------- */
+void interpretNRC(byte nrc)
+{
+  switch(nrc)
+  {
+    case 0x10: write("   NRC: generalReject"); break;
+    case 0x11: write("   NRC: serviceNotSupported"); break;
+    case 0x12: write("   NRC: subFunctionNotSupported"); break;
+    case 0x13: write("   NRC: incorrectMessageLengthOrInvalidFormat"); break;
+    case 0x22: write("   NRC: conditionsNotCorrect"); break;
+    case 0x24: write("   NRC: requestSequenceError"); break;
+    case 0x31: write("   NRC: requestOutOfRange"); break;
+    case 0x33: write("   NRC: securityAccessDenied"); break;
+    case 0x35: write("   NRC: invalidKey"); break;
+    case 0x36: write("   NRC: exceededNumberOfAttempts"); break;
+    case 0x37: write("   NRC: requiredTimeDelayNotExpired"); break;
+    default:   write("   NRC: unknown (0x%02X)", nrc); break;
+  }
+}
+
+/* -------------------------------------------------------
+   Response timeout handling
+------------------------------------------------------- */
+on timer responseTimer
+{
+  write("!! Response timeout in state %d - aborting", gState);
+  gState = 0;
+}
+
+on stopMeasurement
+{
+  write("=== UDS Diagnostics script stopped ===");
+}

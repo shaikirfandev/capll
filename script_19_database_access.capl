@@ -1,0 +1,216 @@
+/*
+ * Script 19: DBC Database Symbol & Signal Access
+ * Demonstrates:
+ *   - Accessing signals by symbolic name (DBC-based)
+ *   - Reading signal values from received messages
+ *   - Writing signal values when sending messages
+ *   - Using environment variables linked to signals
+ *   - Iterating signals in a message
+ *
+ * NOTE: Signal names below match a typical powertrain DBC.
+ *       Adjust names to match your loaded database.
+ *       Example DBC signals used:
+ *         EngineSpeed      (in message EngineData, ID 0x100)
+ *         VehicleSpeed     (in message VehicleData, ID 0x200)
+ *         ThrottlePosition (in message EngineData)
+ *         GearPosition     (in message TransmissionData, ID 0x300)
+ *         BrakePressure    (in message BrakeData, ID 0x400)
+ */
+
+includes
+{
+}
+
+variables
+{
+  // Symbolic message variables (DBC names)
+  message EngineData       msgEngine;
+  message VehicleData      msgVehicle;
+  message TransmissionData msgTrans;
+  message BrakeData        msgBrake;
+
+  // Periodic send timer
+  msTimer sendTimer;
+
+  // Simulated values
+  float gEngineRPM    = 800.0;   // idle RPM
+  float gVehicleSpeed = 0.0;
+  float gThrottle     = 0.0;
+  int   gGear         = 0;       // 0=Park, 1-6=Drive gears
+  float gBrakePressure = 0.0;
+
+  // Signal range limits (from DBC or spec)
+  const float MAX_RPM    = 8000.0;
+  const float MAX_SPEED  = 250.0;  // km/h
+  const float MAX_BRAKE  = 200.0;  // bar
+}
+
+/* -------------------------------------------------------
+   on start
+------------------------------------------------------- */
+on start
+{
+  write("=== Script 19: DBC Database Signal Access ===");
+  write("Using symbolic signal names from loaded DBC database.");
+  setTimer(sendTimer, 100); // send at 10 Hz
+}
+
+/* -------------------------------------------------------
+   Periodic: update and transmit all symbolic messages
+------------------------------------------------------- */
+on timer sendTimer
+{
+  // Simulate engine RPM ramp-up
+  gEngineRPM += 50.0;
+  if (gEngineRPM > MAX_RPM)  gEngineRPM = 800.0;
+
+  // Simulate vehicle speed (proportional to RPM with gear ratio)
+  if (gGear > 0)
+    gVehicleSpeed = (gEngineRPM / 1000.0) * gGear * 5.0;
+  else
+    gVehicleSpeed = 0.0;
+
+  if (gVehicleSpeed > MAX_SPEED) gVehicleSpeed = MAX_SPEED;
+
+  // Simulate throttle
+  gThrottle = (gEngineRPM / MAX_RPM) * 100.0;
+
+  // --- Write signals by symbolic name ---
+  msgEngine.EngineSpeed      = gEngineRPM;
+  msgEngine.ThrottlePosition = gThrottle;
+  output(msgEngine);
+
+  msgVehicle.VehicleSpeed    = gVehicleSpeed;
+  output(msgVehicle);
+
+  msgTrans.GearPosition      = gGear;
+  output(msgTrans);
+
+  msgBrake.BrakePressure     = gBrakePressure;
+  output(msgBrake);
+
+  setTimer(sendTimer, 100);
+}
+
+/* -------------------------------------------------------
+   Receive EngineData and read signals symbolically
+------------------------------------------------------- */
+on message EngineData
+{
+  float rpm      = this.EngineSpeed;
+  float throttle = this.ThrottlePosition;
+
+  // Signal validation
+  if (rpm < 0 || rpm > MAX_RPM)
+    write("!! EngineSpeed out of range: %.1f RPM", rpm);
+
+  if (throttle < 0.0 || throttle > 100.0)
+    write("!! ThrottlePosition out of range: %.1f%%", throttle);
+
+  // Log at 1 Hz (every 10th message at 10 Hz)
+  static int counter = 0;
+  counter++;
+  if ((counter % 10) == 0)
+    write("  EngineSpeed=%.1f RPM | Throttle=%.1f%%", rpm, throttle);
+}
+
+/* -------------------------------------------------------
+   Receive VehicleData
+------------------------------------------------------- */
+on message VehicleData
+{
+  float speed = this.VehicleSpeed;
+
+  // Overspeed warning
+  if (speed > 180.0)
+    write("!! OVERSPEED WARNING: %.1f km/h", speed);
+}
+
+/* -------------------------------------------------------
+   Receive TransmissionData
+------------------------------------------------------- */
+on message TransmissionData
+{
+  int gear = (int)this.GearPosition;
+
+  // Validate gear range
+  if (gear < 0 || gear > 6)
+    write("!! Invalid gear position: %d", gear);
+  else
+  {
+    if (gear == 0)      write("  Gear: Park/Neutral");
+    else                write("  Gear: %d", gear);
+  }
+}
+
+/* -------------------------------------------------------
+   Receive BrakeData
+------------------------------------------------------- */
+on message BrakeData
+{
+  float pressure = this.BrakePressure;
+
+  if (pressure > MAX_BRAKE)
+    write("!! BrakePressure exceeds maximum: %.1f bar", pressure);
+
+  // Detect hard braking
+  if (pressure > 100.0)
+    write("  Hard braking detected: %.1f bar", pressure);
+}
+
+/* -------------------------------------------------------
+   Keyboard: change gear
+------------------------------------------------------- */
+on key '+'
+{
+  if (gGear < 6)
+  {
+    gGear++;
+    write(">> Upshift to gear %d", gGear);
+  }
+  else
+    write(">> Already in top gear (6)");
+}
+
+on key '-'
+{
+  if (gGear > 0)
+  {
+    gGear--;
+    write(">> Downshift to gear %d", gGear);
+  }
+  else
+    write(">> Already in Park/Neutral");
+}
+
+on key 'b'
+{
+  // Simulate brake press
+  gBrakePressure = 80.0;
+  write(">> Brake applied: %.1f bar", gBrakePressure);
+}
+
+on key 'r'
+{
+  // Release brake
+  gBrakePressure = 0.0;
+  write(">> Brake released");
+}
+
+/* -------------------------------------------------------
+   Demonstrate raw byte access vs signal access
+------------------------------------------------------- */
+on key 'd'
+{
+  write("--- Raw vs Signal comparison for EngineData ---");
+  write("  Signal (symbolic): EngineSpeed = %.1f RPM", msgEngine.EngineSpeed);
+  // Raw bytes - signal is typically encoded in bytes 0-1 (depends on DBC)
+  write("  Raw Byte[0]=0x%02X, Byte[1]=0x%02X",
+        msgEngine.byte(0), msgEngine.byte(1));
+  write("  DBC handles byte order, factor, offset automatically.");
+}
+
+on stopMeasurement
+{
+  write("=== Script 19 stopped. Total output cycles completed. ===");
+}

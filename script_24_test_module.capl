@@ -1,0 +1,297 @@
+/*
+ * Script 24: CAPL Test Module (vTESTstudio style)
+ * Demonstrates testcase, testgroup, testWaitFor* functions,
+ * verdict reporting, and structured test case execution.
+ *
+ * This script runs inside a vTESTstudio Test Module node.
+ * Functions prefixed with 'testcase' are auto-discovered.
+ */
+
+includes { }
+
+variables
+{
+  msTimer gWatchdog;
+  int gLastRPM      = -1;
+  int gLastSpeed    = -1;
+  int gTestsPassed  = 0;
+  int gTestsFailed  = 0;
+
+  // Test configuration
+  const int ENGINE_RPM_MIN   = 0;
+  const int ENGINE_RPM_MAX   = 8000;
+  const int VEHICLE_SPD_MAX  = 260;
+  const int MSG_TX_PERIOD_MS = 20;
+
+  // Message IDs under test
+  const long ENGINE_MSG_ID  = 0x100;
+  const long VEHICLE_MSG_ID = 0x200;
+}
+
+/*════════════════════════════════════════════════════════════
+  TEST GROUP 1: Engine Data Validation
+════════════════════════════════════════════════════════════*/
+testgroup EngineDataTests()
+{
+  TC_EngineRPM_Range();
+  TC_EngineRPM_AtIdle();
+  TC_EngineRPM_AtRedline();
+  TC_EngineTemp_NominalRange();
+}
+
+/*────────────────────────────────────────────────────────────
+  TC: Engine RPM stays within spec range 0-8000 for 5 seconds
+────────────────────────────────────────────────────────────*/
+testcase TC_EngineRPM_Range()
+{
+  float rpm;
+  long  startTime;
+  long  elapsed;
+
+  testStep("TC_EngineRPM_Range", "Monitor EngineRPM for 5s, validate 0-8000 range");
+
+  startTime = timeNow();
+  elapsed   = 0;
+
+  while (elapsed < 5000)  // 5 seconds
+  {
+    // Wait up to 100ms for next engine message
+    if (testWaitForMessage(ENGINE_MSG_ID, 100) == 0)
+    {
+      testStepFail("TC_EngineRPM_Range", "EngineData message timeout (>100ms)");
+      return;
+    }
+
+    rpm = getValue(EngineData::EngineSpeed);
+    elapsed = (timeNow() - startTime) / 100000;  // 100ns → ms
+
+    if (rpm < ENGINE_RPM_MIN || rpm > ENGINE_RPM_MAX)
+    {
+      testStepFail("TC_EngineRPM_Range",
+        "RPM out of range: %.1f (allowed: %d-%d)", rpm, ENGINE_RPM_MIN, ENGINE_RPM_MAX);
+      gTestsFailed++;
+      return;
+    }
+  }
+
+  testStepPass("TC_EngineRPM_Range", "RPM in range [0-8000] for 5s. Last value: %.1f", rpm);
+  gTestsPassed++;
+}
+
+/*────────────────────────────────────────────────────────────
+  TC: Engine RPM at idle must be 700-900 RPM
+────────────────────────────────────────────────────────────*/
+testcase TC_EngineRPM_AtIdle()
+{
+  float rpm;
+
+  testStep("TC_EngineRPM_AtIdle", "Verify idle RPM is 700-900");
+
+  // Request idle state via environment variable
+  putValue(EnvDriveMode, 0);   // 0 = IDLE mode
+  testWaitForTimeout(500);     // allow ECU to settle
+
+  if (testWaitForMessage(ENGINE_MSG_ID, 200) == 0)
+  {
+    testStepFail("TC_EngineRPM_AtIdle", "No engine message received");
+    gTestsFailed++;
+    return;
+  }
+
+  rpm = getValue(EngineData::EngineSpeed);
+  write("  Idle RPM measured: %.1f", rpm);
+
+  if (rpm >= 700.0 && rpm <= 900.0)
+  {
+    testStepPass("TC_EngineRPM_AtIdle", "Idle RPM=%.1f is in [700-900]", rpm);
+    gTestsPassed++;
+  }
+  else
+  {
+    testStepFail("TC_EngineRPM_AtIdle", "Idle RPM=%.1f outside [700-900]", rpm);
+    gTestsFailed++;
+  }
+}
+
+/*────────────────────────────────────────────────────────────
+  TC: Engine RPM at redline — must trigger warning signal
+────────────────────────────────────────────────────────────*/
+testcase TC_EngineRPM_AtRedline()
+{
+  float rpm;
+  int   warnActive;
+
+  testStep("TC_EngineRPM_AtRedline", "Set RPM=7800 and verify redline warning activates");
+
+  // Simulate high RPM by writing signal (requires writable signal in CANoe)
+  setValue(EngineData::EngineSpeed, 7800.0);
+  testWaitForTimeout(200);
+
+  // Wait for warning message
+  if (testWaitForSignal(EngineData::RedlineWarning, 1, 1000) == 0)
+  {
+    testStepFail("TC_EngineRPM_AtRedline", "RedlineWarning not activated within 1s");
+    gTestsFailed++;
+  }
+  else
+  {
+    testStepPass("TC_EngineRPM_AtRedline", "RedlineWarning activated at RPM=7800");
+    gTestsPassed++;
+  }
+
+  // Restore normal RPM
+  setValue(EngineData::EngineSpeed, 800.0);
+  testWaitForTimeout(100);
+}
+
+/*────────────────────────────────────────────────────────────
+  TC: Engine temp nominal (70-100°C) during normal operation
+────────────────────────────────────────────────────────────*/
+testcase TC_EngineTemp_NominalRange()
+{
+  float temp;
+
+  testStep("TC_EngineTemp_NominalRange", "Wait for engine to reach operating temp 70-100C");
+
+  // Wait until temp signal enters nominal range (timeout 30s)
+  if (testWaitForSignalInRange(EngineData::EngineTemp, 70.0, 100.0, 30000) == 0)
+  {
+    temp = getValue(EngineData::EngineTemp);
+    testStepFail("TC_EngineTemp_NominalRange",
+      "Engine temp %.1f not in [70-100] within 30s", temp);
+    gTestsFailed++;
+  }
+  else
+  {
+    temp = getValue(EngineData::EngineTemp);
+    testStepPass("TC_EngineTemp_NominalRange",
+      "Engine temp %.1f in nominal range [70-100]", temp);
+    gTestsPassed++;
+  }
+}
+
+/*════════════════════════════════════════════════════════════
+  TEST GROUP 2: Vehicle Speed and Transmission
+════════════════════════════════════════════════════════════*/
+testgroup VehicleSpeedTests()
+{
+  TC_VehicleSpeed_Range();
+  TC_GearDisplay_Validity();
+  TC_SpeedMessage_Cycle_Time();
+}
+
+/*────────────────────────────────────────────────────────────
+  TC: Vehicle speed stays in 0-260 range during test
+────────────────────────────────────────────────────────────*/
+testcase TC_VehicleSpeed_Range()
+{
+  float speed;
+
+  testStep("TC_VehicleSpeed_Range", "Validate VehicleSpeed 0-260 km/h for 3s");
+
+  long start = timeNow();
+  while ((timeNow() - start) / 100000 < 3000)
+  {
+    if (testWaitForMessage(VEHICLE_MSG_ID, 100) == 0)
+    {
+      testStepFail("TC_VehicleSpeed_Range", "VehicleData message timeout");
+      gTestsFailed++;
+      return;
+    }
+    speed = getValue(VehicleData::VehicleSpeed);
+    if (speed < 0.0 || speed > VEHICLE_SPD_MAX)
+    {
+      testStepFail("TC_VehicleSpeed_Range", "Speed %.1f out of range [0-%d]",
+                   speed, VEHICLE_SPD_MAX);
+      gTestsFailed++;
+      return;
+    }
+  }
+  testStepPass("TC_VehicleSpeed_Range", "Speed in [0-260] for 3s");
+  gTestsPassed++;
+}
+
+/*────────────────────────────────────────────────────────────
+  TC: Gear position must be P/R/N/D only (0-3)
+────────────────────────────────────────────────────────────*/
+testcase TC_GearDisplay_Validity()
+{
+  int gear;
+
+  testStep("TC_GearDisplay_Validity", "Verify gear position is valid (0=P,1=R,2=N,3=D)");
+
+  if (testWaitForMessage(VEHICLE_MSG_ID, 200) == 0)
+  {
+    testStepFail("TC_GearDisplay_Validity", "No VehicleData message received");
+    gTestsFailed++;
+    return;
+  }
+
+  gear = getValue(VehicleData::GearPosition);
+
+  if (gear >= 0 && gear <= 3)
+  {
+    testStepPass("TC_GearDisplay_Validity", "GearPosition=%d is valid", gear);
+    gTestsPassed++;
+  }
+  else
+  {
+    testStepFail("TC_GearDisplay_Validity", "GearPosition=%d is invalid (expected 0-3)", gear);
+    gTestsFailed++;
+  }
+}
+
+/*────────────────────────────────────────────────────────────
+  TC: VehicleData message cycle time must be 20ms ± 5ms
+────────────────────────────────────────────────────────────*/
+testcase TC_SpeedMessage_Cycle_Time()
+{
+  long t1, t2, cycleMs;
+
+  testStep("TC_SpeedMessage_Cycle_Time", "Measure VehicleData 0x200 cycle time (expected 20ms)");
+
+  testWaitForMessage(VEHICLE_MSG_ID, 200);
+  t1 = timeNow();
+  testWaitForMessage(VEHICLE_MSG_ID, 200);
+  t2 = timeNow();
+
+  cycleMs = (t2 - t1) / 100000;  // 100ns → ms
+
+  if (cycleMs >= 15 && cycleMs <= 25)
+  {
+    testStepPass("TC_SpeedMessage_Cycle_Time", "Cycle time = %d ms (target 20±5 ms)", cycleMs);
+    gTestsPassed++;
+  }
+  else
+  {
+    testStepFail("TC_SpeedMessage_Cycle_Time", "Cycle time = %d ms — outside 15-25ms window", cycleMs);
+    gTestsFailed++;
+  }
+}
+
+/*════════════════════════════════════════════════════════════
+  Main test entry point (called by vTESTstudio)
+════════════════════════════════════════════════════════════*/
+void MainTest()
+{
+  write("============================");
+  write("  CAPL Test Module START    ");
+  write("============================");
+
+  EngineDataTests();
+  VehicleSpeedTests();
+
+  write("============================");
+  write("  Results: PASS=%d  FAIL=%d ", gTestsPassed, gTestsFailed);
+  write("============================");
+}
+
+on start
+{
+  write("Test Module loaded. Call MainTest() or run via vTESTstudio.");
+}
+
+on key 'r'
+{
+  MainTest();
+}

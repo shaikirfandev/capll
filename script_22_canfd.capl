@@ -1,0 +1,178 @@
+/*
+ * Script 22: CAN FD (Flexible Data-rate) in CAPL
+ * Demonstrates sending/receiving CAN FD frames, DLC mapping,
+ * BRS (Bit Rate Switch), and payload handling > 8 bytes.
+ *
+ * CANoe 10+ required for CAN FD support.
+ */
+
+includes { }
+
+variables
+{
+  // CAN FD message objects — use 'message' keyword with FD channel
+  message 0x100 gFD_TxMsg;   // will be sent as CAN FD
+  msTimer gFD_Timer;
+
+  // CAN FD DLC to payload length mapping
+  // DLC 0-8 → same as classical CAN
+  // DLC 9 →12, 10→16, 11→20, 12→24, 13→32, 14→48, 15→64
+  const int DLC_TABLE[16] = {0,1,2,3,4,5,6,7,8,12,16,20,24,32,48,64};
+
+  int  gSequence    = 0;
+  long gRxCount     = 0;
+  long gErrorCount  = 0;
+}
+
+/*────────────────────────────────────────────────────────────
+  on start – configure and begin periodic CAN FD transmission
+────────────────────────────────────────────────────────────*/
+on start
+{
+  write("=== Script 22: CAN FD Demo ===");
+
+  // Set the FD flag and DLC on the message object
+  // CANoe: set dlc to 15 = 64-byte payload
+  gFD_TxMsg.dlc = 15;   // 64 bytes
+
+  // Fill payload with a known pattern
+  ResetFDPayload();
+
+  write("CAN FD Tx message: ID=0x%X  DLC=%d (%d bytes)",
+        gFD_TxMsg.id, gFD_TxMsg.dlc, DLC_TABLE[gFD_TxMsg.dlc]);
+
+  setTimer(gFD_Timer, 100);  // 10 Hz
+}
+
+/*────────────────────────────────────────────────────────────
+  Helper: fill 64-byte payload with incrementing sequence
+────────────────────────────────────────────────────────────*/
+void ResetFDPayload()
+{
+  int i;
+  // Bytes 0-3: 32-bit sequence counter (big-endian)
+  gFD_TxMsg.byte(0) = (gSequence >> 24) & 0xFF;
+  gFD_TxMsg.byte(1) = (gSequence >> 16) & 0xFF;
+  gFD_TxMsg.byte(2) = (gSequence >>  8) & 0xFF;
+  gFD_TxMsg.byte(3) =  gSequence        & 0xFF;
+
+  // Bytes 4-63: fill with byte index value
+  for (i = 4; i < 64; i++)
+    gFD_TxMsg.byte(i) = i & 0xFF;
+}
+
+/*────────────────────────────────────────────────────────────
+  Timer: transmit CAN FD frame every 100ms
+────────────────────────────────────────────────────────────*/
+on timer gFD_Timer
+{
+  gSequence++;
+  ResetFDPayload();
+
+  // output() sends the frame — CANoe handles FD flag from channel config
+  output(gFD_TxMsg);
+
+  setTimer(gFD_Timer, 100);
+}
+
+/*────────────────────────────────────────────────────────────
+  Receive CAN FD response from ECU (0x101)
+────────────────────────────────────────────────────────────*/
+on message 0x101
+{
+  int i;
+  int payloadLen;
+  int dlc;
+
+  gRxCount++;
+  dlc = this.dlc;
+
+  // Resolve actual byte count from DLC
+  if (dlc <= 8)
+    payloadLen = dlc;
+  else if (dlc == 9)  payloadLen = 12;
+  else if (dlc == 10) payloadLen = 16;
+  else if (dlc == 11) payloadLen = 20;
+  else if (dlc == 12) payloadLen = 24;
+  else if (dlc == 13) payloadLen = 32;
+  else if (dlc == 14) payloadLen = 48;
+  else                payloadLen = 64;
+
+  write("RX [0x101] DLC=%d (%d bytes) | byte[0]=0x%02X byte[1]=0x%02X ... byte[%d]=0x%02X",
+        dlc, payloadLen,
+        this.byte(0), this.byte(1),
+        payloadLen - 1, this.byte(payloadLen - 1));
+
+  // Validate payload checksum (last byte = XOR of all previous bytes)
+  ValidateFDChecksum(payloadLen);
+}
+
+/*────────────────────────────────────────────────────────────
+  Validate XOR checksum across payload
+────────────────────────────────────────────────────────────*/
+void ValidateFDChecksum(int len)
+{
+  // Not applicable for message keyword — illustrative only
+  // In practice read all bytes via this.byte(i) in a loop
+  write("  Payload length validated: %d bytes", len);
+}
+
+/*────────────────────────────────────────────────────────────
+  Receive ALL messages — log if CAN FD (DLC > 8)
+────────────────────────────────────────────────────────────*/
+on message *
+{
+  if (this.dlc > 8)
+  {
+    write("FD Frame detected: ID=0x%X DLC=%d ch=%d dir=%s",
+          this.id, this.dlc, this.channel,
+          (this.dir == RX) ? "RX" : "TX");
+  }
+}
+
+/*────────────────────────────────────────────────────────────
+  Demo: send a short (8-byte) CAN FD frame — no BRS needed
+────────────────────────────────────────────────────────────*/
+void SendShortFDFrame()
+{
+  message 0x200 shortMsg;
+  shortMsg.dlc     = 8;
+  shortMsg.byte(0) = 0xAA;
+  shortMsg.byte(1) = 0xBB;
+  shortMsg.byte(2) = 0xCC;
+  shortMsg.byte(3) = 0xDD;
+  shortMsg.byte(4) = 0x11;
+  shortMsg.byte(5) = 0x22;
+  shortMsg.byte(6) = 0x33;
+  shortMsg.byte(7) = 0x44;
+  output(shortMsg);
+  write("Sent short FD frame 0x200 (8 bytes)");
+}
+
+/*────────────────────────────────────────────────────────────
+  Key handlers for interactive demo
+────────────────────────────────────────────────────────────*/
+on key 'f'
+{
+  write("Sending 64-byte CAN FD frame manually...");
+  ResetFDPayload();
+  output(gFD_TxMsg);
+}
+
+on key 's'
+{
+  SendShortFDFrame();
+}
+
+on key 'r'
+{
+  write("Stats: TX seq=%d  RX count=%d  Errors=%d",
+        gSequence, gRxCount, gErrorCount);
+}
+
+on stopMeasurement
+{
+  write("=== CAN FD Demo Done ===");
+  write("Total TX: %d | Total RX: %d | Errors: %d",
+        gSequence, gRxCount, gErrorCount);
+}

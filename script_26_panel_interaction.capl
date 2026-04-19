@@ -1,0 +1,313 @@
+/*
+ * Script 26: Panel Interaction and Environment Variables
+ * Demonstrates reading/writing CANoe panel controls via
+ * environment variables, system variables, and @sysvar namespace.
+ *
+ * Panels are built in CANoe Panel Designer. This script
+ * connects the panel controls to CAN bus behavior.
+ */
+
+includes { }
+
+variables
+{
+  msTimer gDisplayTimer;  // update panel display every 100ms
+  msTimer gSimTimer;      // simulate changing ECU values
+
+  // Simulated ECU state
+  float  gSimSpeed      = 0.0;
+  float  gSimRPM        = 800.0;
+  float  gSimFuelLevel  = 75.0;
+  int    gSimGear       = 0;         // 0=P,1=R,2=N,3=D
+  int    gSimKeyOn      = 0;
+  int    gEngineRunning = 0;
+
+  // Panel-linked messages
+  message 0x200 gVehicleMsg;
+  message 0x100 gEngineMsg;
+
+  // Acceleration direction from panel slider
+  float gAccelInput = 0.0;   // -1.0 to +1.0
+}
+
+/*────────────────────────────────────────────────────────────
+  on start – initialize panel and start timers
+────────────────────────────────────────────────────────────*/
+on start
+{
+  write("=== Script 26: Panel Interaction Demo ===");
+
+  // Initialize panel display values
+  UpdatePanelDisplay();
+
+  // Timer to refresh display panel at 10Hz
+  setTimer(gDisplayTimer, 100);
+
+  // Timer to evolve simulation state at 20Hz
+  setTimer(gSimTimer, 50);
+
+  write("Panel controls ready. Use panel buttons/sliders.");
+}
+
+/*────────────────────────────────────────────────────────────
+  Environment variable: Key Switch (Button on Panel)
+  EnvKeySwitch: 0=OFF, 1=ON
+────────────────────────────────────────────────────────────*/
+on envVar EnvKeySwitch
+{
+  gSimKeyOn = getValue(this);
+
+  if (gSimKeyOn)
+  {
+    write("Key ON — powering up ECUs");
+    gSimRPM = 800.0;
+    gSimGear = 0;  // Park
+    @EnvEngineStatus = 1;
+  }
+  else
+  {
+    write("Key OFF — shutting down");
+    gSimRPM       = 0.0;
+    gSimSpeed     = 0.0;
+    gEngineRunning = 0;
+    @EnvEngineStatus = 0;
+    @EnvSpeedDisplay = 0.0;
+    @EnvRPMDisplay   = 0.0;
+  }
+}
+
+/*────────────────────────────────────────────────────────────
+  Environment variable: Start/Stop Engine Button
+  EnvEngineStart: pulse 0→1 to toggle engine
+────────────────────────────────────────────────────────────*/
+on envVar EnvEngineStart
+{
+  if (getValue(this) == 1 && gSimKeyOn)
+  {
+    gEngineRunning = !gEngineRunning;
+
+    if (gEngineRunning)
+    {
+      write("Engine STARTED — RPM ramping up");
+      gSimRPM = 800.0;
+    }
+    else
+    {
+      write("Engine STOPPED");
+      gSimRPM = 0.0;
+    }
+    @EnvEngineStatus  = gEngineRunning;
+    @EnvRPMDisplay    = gSimRPM;
+  }
+}
+
+/*────────────────────────────────────────────────────────────
+  Environment variable: Accelerator Pedal (Slider 0-100%)
+  EnvAccelPedal: 0.0 to 100.0
+────────────────────────────────────────────────────────────*/
+on envVar EnvAccelPedal
+{
+  float pedal = getValue(this);
+  gAccelInput = pedal / 100.0;   // normalize 0.0-1.0
+  write("Accel pedal: %.1f%%", pedal);
+}
+
+/*────────────────────────────────────────────────────────────
+  Environment variable: Gear Selector (Buttons: P/R/N/D)
+  EnvGearSelect: 0=P, 1=R, 2=N, 3=D
+────────────────────────────────────────────────────────────*/
+on envVar EnvGearSelect
+{
+  int gear = getValue(this);
+  gSimGear = gear;
+
+  char gearNames[4][4] = {"P", "R", "N", "D"};
+  // Note: array of strings not directly supported — use switch
+  switch (gear)
+  {
+    case 0: write("Gear: PARK");    break;
+    case 1: write("Gear: REVERSE"); break;
+    case 2: write("Gear: NEUTRAL"); break;
+    case 3: write("Gear: DRIVE");   break;
+  }
+
+  @EnvGearDisplay = gear;
+}
+
+/*────────────────────────────────────────────────────────────
+  Environment variable: Hazard Warning Button
+────────────────────────────────────────────────────────────*/
+on envVar EnvHazardBtn
+{
+  if (getValue(this) == 1)
+  {
+    static int hazardOn = 0;
+    hazardOn = !hazardOn;
+    @EnvHazardStatus = hazardOn;
+    write("Hazard lights: %s", hazardOn ? "ON" : "OFF");
+  }
+}
+
+/*────────────────────────────────────────────────────────────
+  System Variable example: @sysvar namespace
+  (Used for structured panel variable groups)
+────────────────────────────────────────────────────────────*/
+on sysvar sysvar::Vehicle::SpeedSetpoint
+{
+  float setpoint = @sysvar::Vehicle::SpeedSetpoint;
+  write("Speed Setpoint changed to: %.1f km/h", setpoint);
+  // Could be used for ACC setpoint control
+}
+
+/*────────────────────────────────────────────────────────────
+  Simulation Timer: evolve vehicle state based on pedal input
+────────────────────────────────────────────────────────────*/
+on timer gSimTimer
+{
+  if (!gSimKeyOn || !gEngineRunning)
+  {
+    setTimer(gSimTimer, 50);
+    return;
+  }
+
+  // Update speed based on accelerator (simplified physics)
+  if (gSimGear == 3)  // DRIVE
+  {
+    gSimSpeed += gAccelInput * 2.0;  // 2 km/h per step at max pedal
+    if (gSimSpeed > 260.0) gSimSpeed = 260.0;
+    if (gSimSpeed < 0.0)   gSimSpeed = 0.0;
+  }
+  else if (gSimGear == 1)  // REVERSE
+  {
+    gSimSpeed = -gAccelInput * 20.0;  // max -20 km/h
+  }
+  else
+  {
+    // Decelerate if not in drive
+    gSimSpeed -= 1.0;
+    if (gSimSpeed < 0.0) gSimSpeed = 0.0;
+  }
+
+  // Update RPM based on speed (simplified)
+  if (gSimSpeed > 0)
+    gSimRPM = 800.0 + (gSimSpeed * 20.0);
+  else
+    gSimRPM = 800.0;  // idle
+
+  if (gSimRPM > 8000.0) gSimRPM = 8000.0;
+
+  // Fuel consumption
+  gSimFuelLevel -= 0.0001 * gSimSpeed;
+  if (gSimFuelLevel < 0.0) gSimFuelLevel = 0.0;
+
+  setTimer(gSimTimer, 50);
+}
+
+/*────────────────────────────────────────────────────────────
+  Display Timer: update panel display env vars and send CAN messages
+────────────────────────────────────────────────────────────*/
+on timer gDisplayTimer
+{
+  UpdatePanelDisplay();
+  SendVehicleCANMessages();
+  setTimer(gDisplayTimer, 100);
+}
+
+/*────────────────────────────────────────────────────────────
+  Update all panel display environment variables
+────────────────────────────────────────────────────────────*/
+void UpdatePanelDisplay()
+{
+  @EnvSpeedDisplay  = gSimSpeed;
+  @EnvRPMDisplay    = gSimRPM;
+  @EnvFuelDisplay   = gSimFuelLevel;
+  @EnvGearDisplay   = gSimGear;
+
+  // Low fuel warning
+  if (gSimFuelLevel < 10.0)
+    @EnvFuelWarning = 1;
+  else
+    @EnvFuelWarning = 0;
+
+  // Overspeed warning
+  if (gSimSpeed > 180.0)
+    @EnvOverspeedWarn = 1;
+  else
+    @EnvOverspeedWarn = 0;
+
+  // System variable update (for dashboard widget)
+  @sysvar::Vehicle::CurrentSpeed = gSimSpeed;
+  @sysvar::Vehicle::CurrentRPM   = gSimRPM;
+}
+
+/*────────────────────────────────────────────────────────────
+  Send vehicle CAN messages with simulated data
+────────────────────────────────────────────────────────────*/
+void SendVehicleCANMessages()
+{
+  word rawSpeed, rawRPM;
+
+  // VehicleData 0x200: Speed [factor=0.01, offset=0]
+  rawSpeed = (word)(gSimSpeed / 0.01);
+  gVehicleMsg.dlc    = 8;
+  gVehicleMsg.byte(0) = (rawSpeed >> 8) & 0xFF;
+  gVehicleMsg.byte(1) =  rawSpeed        & 0xFF;
+  gVehicleMsg.byte(2) = gSimGear & 0x0F;
+  gVehicleMsg.byte(3) = (gSimFuelLevel / 100.0 * 255);
+  output(gVehicleMsg);
+
+  // EngineData 0x100: RPM [factor=0.25, offset=0]
+  rawRPM = (word)(gSimRPM / 0.25);
+  gEngineMsg.dlc    = 8;
+  gEngineMsg.byte(0) = (rawRPM >> 8) & 0xFF;
+  gEngineMsg.byte(1) =  rawRPM        & 0xFF;
+  gEngineMsg.byte(2) = gEngineRunning;
+  output(gEngineMsg);
+}
+
+/*────────────────────────────────────────────────────────────
+  Key handlers for testing without panel connected
+────────────────────────────────────────────────────────────*/
+on key 'k'
+{
+  // Toggle key switch
+  gSimKeyOn = !gSimKeyOn;
+  putValue(EnvKeySwitch, gSimKeyOn);
+}
+
+on key 'e'
+{
+  putValue(EnvEngineStart, 1);
+}
+
+on key 'a'
+{
+  @EnvAccelPedal += 10.0;
+  if (@EnvAccelPedal > 100.0) @EnvAccelPedal = 100.0;
+  gAccelInput = @EnvAccelPedal / 100.0;
+}
+
+on key 'b'
+{
+  @EnvAccelPedal -= 10.0;
+  if (@EnvAccelPedal < 0.0) @EnvAccelPedal = 0.0;
+  gAccelInput = @EnvAccelPedal / 100.0;
+}
+
+on key 'i'
+{
+  write("=== Panel State ===");
+  write("Key: %s | Engine: %s | Gear: %d",
+        gSimKeyOn ? "ON" : "OFF",
+        gEngineRunning ? "RUNNING" : "OFF",
+        gSimGear);
+  write("Speed: %.1f km/h | RPM: %.0f | Fuel: %.1f%%",
+        gSimSpeed, gSimRPM, gSimFuelLevel);
+}
+
+on stopMeasurement
+{
+  write("=== Panel Demo Done ===");
+  write("Final: Speed=%.1f RPM=%.0f Fuel=%.1f%%",
+        gSimSpeed, gSimRPM, gSimFuelLevel);
+}

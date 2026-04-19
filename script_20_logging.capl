@@ -1,0 +1,258 @@
+/*
+ * Script 20: Logging & Custom Panel Output
+ * Demonstrates:
+ *   - Writing to CANoe Write window
+ *   - Writing to an external log file (FileAppend / FileOpen)
+ *   - Custom panel integration via environment variables
+ *   - Structured CSV logging of CAN signals
+ *   - Conditional logging with severity levels
+ *   - Log rotation / session header stamping
+ */
+
+includes
+{
+}
+
+variables
+{
+  // File handle for custom log
+  dword gLogFile;
+  char  gLogPath[128] = "C:\\Temp\\capl_log.csv";
+
+  // Severity levels
+  const int LOG_DEBUG   = 0;
+  const int LOG_INFO    = 1;
+  const int LOG_WARNING = 2;
+  const int LOG_ERROR   = 3;
+
+  int gLogLevel = LOG_INFO;  // Change to LOG_DEBUG for verbose output
+
+  // Panel environment variables (must be defined in CANoe panel)
+  // envVar float  EnvVehicleSpeed;    -- connected to a gauge in panel
+  // envVar int    EnvAlertCount;      -- connected to a counter display
+  // envVar string EnvLastAlert;       -- connected to a text field
+
+  int   gAlertCount   = 0;
+  float gLastSpeed    = 0.0;
+
+  // Periodic log timer
+  msTimer logTimer;
+
+  // Monitored message
+  message 0x200 msgVehicle;
+  message 0x100 msgEngine;
+
+  // Simulated data
+  float gSpeed = 0.0;
+  float gRPM   = 1000.0;
+}
+
+/* -------------------------------------------------------
+   on start: open log file, write header
+------------------------------------------------------- */
+on start
+{
+  write("=== Script 20: Logging & Custom Panel Output ===");
+
+  // Open CSV log file (append mode = 1, write mode = 0)
+  gLogFile = openFileWrite(gLogPath, 0); // 0 = overwrite
+
+  if (gLogFile == 0)
+  {
+    write("!! Failed to open log file: %s", gLogPath);
+    write("!! Writing to Write window only.");
+  }
+  else
+  {
+    // Write CSV header
+    writeToLog(LOG_INFO, "Timestamp_ms,Channel,MsgID,Signal,Value,Unit,Severity");
+    write(">> Log file opened: %s", gLogPath);
+  }
+
+  // Start periodic logging
+  setTimer(logTimer, 500);
+
+  // Initial panel update
+  updatePanel(0.0, 0, "System started");
+
+  logEvent(LOG_INFO, "Measurement started");
+}
+
+/* -------------------------------------------------------
+   Generic logger: writes to file and Write window
+------------------------------------------------------- */
+void writeToLog(int level, char line[])
+{
+  if (level >= gLogLevel)
+  {
+    // Write to CANoe Write window
+    if      (level == LOG_DEBUG)   write("[DEBUG] %s", line);
+    else if (level == LOG_INFO)    write("[INFO]  %s", line);
+    else if (level == LOG_WARNING) write("[WARN]  %s", line);
+    else if (level == LOG_ERROR)   write("[ERROR] %s", line);
+
+    // Write to file
+    if (gLogFile != 0)
+      filePutString(line, elCount(line), gLogFile);
+  }
+}
+
+/* -------------------------------------------------------
+   Structured CSV event logger
+------------------------------------------------------- */
+void logSignalEvent(int channel, long msgId, char signal[], float value, char unit[], int severity)
+{
+  char line[256];
+  char severityStr[16];
+
+  long ts = timeNow() / 100; // Convert to ms
+
+  if      (severity == LOG_DEBUG)   snprintf(severityStr, elCount(severityStr), "DEBUG");
+  else if (severity == LOG_INFO)    snprintf(severityStr, elCount(severityStr), "INFO");
+  else if (severity == LOG_WARNING) snprintf(severityStr, elCount(severityStr), "WARNING");
+  else                               snprintf(severityStr, elCount(severityStr), "ERROR");
+
+  snprintf(line, elCount(line), "%ld,%d,0x%03X,%s,%.3f,%s,%s",
+           ts, channel, msgId, signal, value, unit, severityStr);
+
+  writeToLog(severity, line);
+}
+
+/* -------------------------------------------------------
+   Plain event logger (no signal context)
+------------------------------------------------------- */
+void logEvent(int level, char msg[])
+{
+  char line[256];
+  snprintf(line, elCount(line), "%ld,,,EVENT,,,%s",
+           timeNow() / 100, msg);
+  writeToLog(level, line);
+}
+
+/* -------------------------------------------------------
+   Panel update helper
+   Updates environment variables connected to panel widgets
+------------------------------------------------------- */
+void updatePanel(float speed, int alertCount, char lastAlert[])
+{
+  // Update env vars linked to panel controls
+  @EnvVehicleSpeed = speed;         // connected to speedometer gauge
+  @EnvAlertCount   = alertCount;    // connected to alert counter LED
+  putValue(EnvLastAlert, lastAlert); // connected to text display
+}
+
+/* -------------------------------------------------------
+   Receive Vehicle Speed message
+------------------------------------------------------- */
+on message 0x200
+{
+  gSpeed = (this.byte(0) | (this.byte(1) << 8)) * 0.1; // 0.1 km/h per bit
+
+  // Log speed signal
+  logSignalEvent(this.channel, this.id, "VehicleSpeed", gSpeed, "km/h", LOG_INFO);
+
+  // Update panel gauge
+  @EnvVehicleSpeed = gSpeed;
+
+  // Overspeed detection
+  if (gSpeed > 180.0)
+  {
+    gAlertCount++;
+    @EnvAlertCount = gAlertCount;
+    logSignalEvent(this.channel, this.id, "VehicleSpeed", gSpeed, "km/h", LOG_WARNING);
+    updatePanel(gSpeed, gAlertCount, "OVERSPEED!");
+    write("!! OVERSPEED: %.1f km/h", gSpeed);
+  }
+
+  // Detect sudden speed jump (> 50 km/h delta)
+  if (abs(gSpeed - gLastSpeed) > 50.0)
+  {
+    logEvent(LOG_WARNING, "Sudden speed change detected");
+    write("!! Sudden speed change: %.1f -> %.1f km/h", gLastSpeed, gSpeed);
+  }
+
+  gLastSpeed = gSpeed;
+}
+
+/* -------------------------------------------------------
+   Receive Engine RPM message
+------------------------------------------------------- */
+on message 0x100
+{
+  gRPM = (this.byte(0) | (this.byte(1) << 8)) * 0.25; // 0.25 RPM per bit
+
+  logSignalEvent(this.channel, this.id, "EngineRPM", gRPM, "RPM", LOG_DEBUG);
+
+  if (gRPM > 7000.0)
+  {
+    gAlertCount++;
+    @EnvAlertCount = gAlertCount;
+    logSignalEvent(this.channel, this.id, "EngineRPM", gRPM, "RPM", LOG_WARNING);
+    updatePanel(gSpeed, gAlertCount, "HIGH RPM!");
+  }
+}
+
+/* -------------------------------------------------------
+   Periodic: write session heartbeat to log
+------------------------------------------------------- */
+on timer logTimer
+{
+  char heartbeat[128];
+  snprintf(heartbeat, elCount(heartbeat),
+           "%ld,,,HEARTBEAT,,, Speed=%.1f RPM=%.1f Alerts=%d",
+           timeNow() / 100, gSpeed, gRPM, gAlertCount);
+
+  writeToLog(LOG_DEBUG, heartbeat);
+  setTimer(logTimer, 500);
+}
+
+/* -------------------------------------------------------
+   Keyboard controls for log level
+------------------------------------------------------- */
+on key '0'
+{
+  gLogLevel = LOG_DEBUG;
+  write(">> Log level set to DEBUG");
+}
+
+on key '1'
+{
+  gLogLevel = LOG_INFO;
+  write(">> Log level set to INFO");
+}
+
+on key '2'
+{
+  gLogLevel = LOG_WARNING;
+  write(">> Log level set to WARNING");
+}
+
+on key '3'
+{
+  gLogLevel = LOG_ERROR;
+  write(">> Log level set to ERROR");
+}
+
+on key 'p'
+{
+  write("--- Panel State ---");
+  write("  VehicleSpeed  : %.1f km/h", @EnvVehicleSpeed);
+  write("  Alert Count   : %d", @EnvAlertCount);
+  write("-------------------");
+}
+
+/* -------------------------------------------------------
+   on stopMeasurement: flush and close log file
+------------------------------------------------------- */
+on stopMeasurement
+{
+  logEvent(LOG_INFO, "Measurement stopped");
+
+  if (gLogFile != 0)
+  {
+    fileClose(gLogFile);
+    write(">> Log file closed: %s", gLogPath);
+  }
+
+  write("=== Script 20 stopped. Total alerts: %d ===", gAlertCount);
+}

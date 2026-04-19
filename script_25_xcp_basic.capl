@@ -1,0 +1,270 @@
+/*
+ * Script 25: XCP (Universal Measurement and Calibration Protocol)
+ * Demonstrates XCP over CAN: Connect, GetStatus, Upload (read),
+ * Download (write calibration), and MemoryRead workflows.
+ *
+ * XCP is defined in ASAM MCD-1 XCP standard.
+ * CANoe requires the XCP option and an A2L file loaded.
+ */
+
+includes { }
+
+variables
+{
+  msTimer gXCPTimer;
+
+  // XCP Connection state
+  const int XCP_STATE_DISCONNECTED = 0;
+  const int XCP_STATE_CONNECTED    = 1;
+  const int XCP_STATE_PROTECTED    = 2;
+  int gXCPState = 0;
+
+  // XCP CAN IDs (A2L-defined for this ECU)
+  const long XCP_TX_ID = 0x7E1;   // Tester → ECU (CMD)
+  const long XCP_RX_ID = 0x7E9;   // ECU → Tester (RES/ERR/EV)
+
+  // XCP Command Codes
+  const byte CMD_CONNECT         = 0xFF;
+  const byte CMD_DISCONNECT      = 0xFE;
+  const byte CMD_GET_STATUS      = 0xFD;
+  const byte CMD_GET_CAL_PAGE    = 0xEA;
+  const byte CMD_SET_CAL_PAGE    = 0xEB;
+  const byte CMD_UPLOAD          = 0xF5;  // read from ECU
+  const byte CMD_SHORT_UPLOAD    = 0xF4;  // read with address in one frame
+  const byte CMD_DOWNLOAD        = 0xF0;  // write to ECU
+  const byte CMD_SHORT_DOWNLOAD  = 0xED;  // write with data in one frame
+  const byte CMD_SET_MTA         = 0xF6;  // set memory transfer address
+
+  // XCP Response codes
+  const byte RES_OK   = 0xFF;
+  const byte RES_ERR  = 0xFE;
+
+  // Calibration variable addresses (from A2L)
+  const dword ADDR_IDLE_RPM      = 0x20001000;
+  const dword ADDR_MAX_FUEL_TRIM = 0x20001004;
+  const dword ADDR_COOLANT_GAIN  = 0x20001008;
+
+  long gLastResponseTime  = 0;
+  int  gPendingCmd        = 0;
+  byte gCurrentPage       = 0;   // 0=ROM, 1=RAM
+}
+
+/*────────────────────────────────────────────────────────────
+  Helper: build and send an XCP CAN command frame
+────────────────────────────────────────────────────────────*/
+void XCP_Send(byte b0, byte b1, byte b2, byte b3,
+              byte b4, byte b5, byte b6, byte b7)
+{
+  message XCP_TX_ID cmdMsg;
+  cmdMsg.dlc    = 8;
+  cmdMsg.byte(0) = b0;
+  cmdMsg.byte(1) = b1;
+  cmdMsg.byte(2) = b2;
+  cmdMsg.byte(3) = b3;
+  cmdMsg.byte(4) = b4;
+  cmdMsg.byte(5) = b5;
+  cmdMsg.byte(6) = b6;
+  cmdMsg.byte(7) = b7;
+  output(cmdMsg);
+  gPendingCmd       = b0;
+  gLastResponseTime = timeNow();
+}
+
+/*────────────────────────────────────────────────────────────
+  Step 1: XCP Connect
+────────────────────────────────────────────────────────────*/
+void XCP_Connect()
+{
+  write("XCP: Sending CONNECT (0xFF) mode=0x00 (normal)");
+  // CONNECT: [FF] [Mode=00] [00 00 00 00 00 00]
+  XCP_Send(CMD_CONNECT, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
+}
+
+/*────────────────────────────────────────────────────────────
+  Step 2: XCP Disconnect
+────────────────────────────────────────────────────────────*/
+void XCP_Disconnect()
+{
+  write("XCP: Sending DISCONNECT (0xFE)");
+  XCP_Send(CMD_DISCONNECT, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
+  gXCPState = XCP_STATE_DISCONNECTED;
+}
+
+/*────────────────────────────────────────────────────────────
+  Step 3: Get ECU status
+────────────────────────────────────────────────────────────*/
+void XCP_GetStatus()
+{
+  write("XCP: Sending GET_STATUS (0xFD)");
+  XCP_Send(CMD_GET_STATUS, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
+}
+
+/*────────────────────────────────────────────────────────────
+  Step 4: Set Memory Transfer Address for upcoming Upload/Download
+  addr: 32-bit ECU address, addrExt: address extension (usually 0)
+────────────────────────────────────────────────────────────*/
+void XCP_SetMTA(dword addr, byte addrExt)
+{
+  write("XCP: SET_MTA addr=0x%08X ext=0x%02X", addr, addrExt);
+  // SET_MTA: [F6][00][00][AddrExt][Addr3][Addr2][Addr1][Addr0]
+  XCP_Send(CMD_SET_MTA,
+           0x00, 0x00, addrExt,
+           (addr >> 24) & 0xFF,
+           (addr >> 16) & 0xFF,
+           (addr >>  8) & 0xFF,
+            addr        & 0xFF);
+}
+
+/*────────────────────────────────────────────────────────────
+  Step 5: Upload (read from ECU) — reads N bytes from MTA
+────────────────────────────────────────────────────────────*/
+void XCP_Upload(byte numBytes)
+{
+  write("XCP: UPLOAD %d bytes from MTA", numBytes);
+  // UPLOAD: [F5][NumBytes][00 00 00 00 00 00]
+  XCP_Send(CMD_UPLOAD, numBytes, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
+}
+
+/*────────────────────────────────────────────────────────────
+  Step 6: Short Upload — read 4 bytes from explicit address
+────────────────────────────────────────────────────────────*/
+void XCP_ShortUpload(dword addr, byte numBytes)
+{
+  write("XCP: SHORT_UPLOAD %d bytes from 0x%08X", numBytes, addr);
+  // SHORT_UPLOAD: [F4][NumBytes][00][AddrExt][Addr3..Addr0]
+  XCP_Send(CMD_SHORT_UPLOAD,
+           numBytes, 0x00, 0x00,
+           (addr >> 24) & 0xFF,
+           (addr >> 16) & 0xFF,
+           (addr >>  8) & 0xFF,
+            addr        & 0xFF);
+}
+
+/*────────────────────────────────────────────────────────────
+  Step 7: Short Download — write up to 4 bytes to an address
+────────────────────────────────────────────────────────────*/
+void XCP_ShortDownload(dword addr, dword value, byte numBytes)
+{
+  write("XCP: SHORT_DOWNLOAD %d bytes value=0x%08X to 0x%08X",
+        numBytes, value, addr);
+  // SHORT_DOWNLOAD: [ED][NumBytes][00][AddrExt][Addr3..0] + data bytes occupy bytes 4-7
+  // (data inserted in bytes 4..4+N-1 in standard layout)
+  XCP_Send(CMD_SHORT_DOWNLOAD,
+           numBytes, 0x00, 0x00,
+           (addr >> 24) & 0xFF,
+           (addr >> 16) & 0xFF,
+           (addr >>  8) & 0xFF,
+            addr        & 0xFF);
+  // Note: For actual download, data bytes follow in next frame or must be in bytes 4-7
+  // depending on ECU implementation. Full implementation requires multi-frame sequence.
+}
+
+/*────────────────────────────────────────────────────────────
+  Receive XCP responses from ECU
+────────────────────────────────────────────────────────────*/
+on message XCP_RX_ID
+{
+  byte respCode = this.byte(0);
+  long latencyUs = (timeNow() - gLastResponseTime) / 10;  // 100ns → µs
+
+  if (respCode == RES_OK)   // 0xFF = positive response
+  {
+    write("XCP RES+ (cmd=0x%02X) latency=%d µs | bytes: %02X %02X %02X %02X %02X %02X %02X",
+          gPendingCmd, latencyUs,
+          this.byte(1), this.byte(2), this.byte(3), this.byte(4),
+          this.byte(5), this.byte(6), this.byte(7));
+
+    // Parse specific responses
+    if (gPendingCmd == CMD_CONNECT)
+    {
+      gXCPState = XCP_STATE_CONNECTED;
+      write("  → XCP Connected | MaxDTO=%d MaxCTO=%d ProtocolVer=%d",
+            (this.byte(4) << 8) | this.byte(5),
+             this.byte(6),
+             this.byte(1));
+    }
+    else if (gPendingCmd == CMD_GET_STATUS)
+    {
+      byte sessionStatus = this.byte(1);
+      byte calPage       = this.byte(2);
+      write("  → Status: session=0x%02X calPage=0x%02X", sessionStatus, calPage);
+      gCurrentPage = calPage;
+    }
+    else if (gPendingCmd == CMD_UPLOAD || gPendingCmd == CMD_SHORT_UPLOAD)
+    {
+      // Data in bytes 1..N
+      long readValue = ((long)this.byte(1) << 24) |
+                       ((long)this.byte(2) << 16) |
+                       ((long)this.byte(3) <<  8) |
+                        (long)this.byte(4);
+      write("  → Upload data (32-bit): 0x%08X (%d)", readValue, readValue);
+    }
+  }
+  else if (respCode == RES_ERR)   // 0xFE = error
+  {
+    byte errCode = this.byte(1);
+    write("XCP ERR (cmd=0x%02X) errorCode=0x%02X", gPendingCmd, errCode);
+    // Common error codes:
+    // 0x00 = ERR_CMD_SYNCH
+    // 0x10 = ERR_CMD_BUSY
+    // 0x20 = ERR_DAQ_ACTIVE
+    // 0x24 = ERR_MEMORY_OVERFLOW
+    // 0x25 = ERR_GENERIC
+    // 0x29 = ERR_ACCESS_DENIED
+    // 0x30 = ERR_ACCESS_LOCKED
+  }
+}
+
+/*────────────────────────────────────────────────────────────
+  Automated XCP calibration workflow example
+────────────────────────────────────────────────────────────*/
+void RunCalibrationWorkflow()
+{
+  write("=== XCP Calibration Workflow ===");
+
+  // 1. Connect
+  XCP_Connect();
+
+  // (In real code use testWaitForMessage or timer for response)
+  // For demo, using keys to step through manually.
+  write("Press 's' to get status, 'u' to upload Idle RPM, 'd' to write new value");
+}
+
+/*────────────────────────────────────────────────────────────
+  Key handlers
+────────────────────────────────────────────────────────────*/
+on key 'c'  { XCP_Connect(); }
+on key 'x'  { XCP_Disconnect(); }
+on key 's'  { XCP_GetStatus(); }
+
+on key 'u'
+{
+  // Read Idle RPM calibration value
+  XCP_ShortUpload(ADDR_IDLE_RPM, 4);
+}
+
+on key 'd'
+{
+  // Write new Idle RPM = 750 (0x000002EE)
+  XCP_SetMTA(ADDR_IDLE_RPM, 0x00);
+  // Then download would follow — simplified for demo
+  write("XCP: Would write IdleRPM=750 to 0x%08X", ADDR_IDLE_RPM);
+}
+
+on key 'w'
+{
+  RunCalibrationWorkflow();
+}
+
+on start
+{
+  write("=== Script 25: XCP Basic Demo ===");
+  write("Keys: c=Connect  x=Disconnect  s=GetStatus  u=Upload IdleRPM  d=Download");
+}
+
+on stopMeasurement
+{
+  if (gXCPState == XCP_STATE_CONNECTED)
+    XCP_Disconnect();
+  write("=== XCP Demo Done ===");
+}

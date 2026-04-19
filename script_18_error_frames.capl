@@ -1,0 +1,208 @@
+/*
+ * Script 18: CAN Error Frame Handling
+ * Demonstrates:
+ *   - Detecting error frames on the bus
+ *   - Monitoring bus-off, error-passive, error-active states
+ *   - Counting error types (bit, stuff, CRC, form, ACK)
+ *   - Injecting error conditions for test purposes
+ *   - Recovering from bus-off
+ */
+
+includes
+{
+}
+
+variables
+{
+  // Error counters
+  int gBitErrorCount    = 0;
+  int gStuffErrorCount  = 0;
+  int gCRCErrorCount    = 0;
+  int gFormErrorCount   = 0;
+  int gACKErrorCount    = 0;
+  int gTotalErrorCount  = 0;
+
+  // Bus state tracking
+  int gBusOffCount      = 0;
+  int gErrorPassiveCount = 0;
+
+  // Periodic stats timer
+  msTimer statsTimer;
+
+  // Error injection test message
+  message 0x200 testMsg;
+}
+
+/* -------------------------------------------------------
+   on start
+------------------------------------------------------- */
+on start
+{
+  write("=== Script 18: CAN Error Frame Handling ===");
+  write("Monitoring bus for error frames...");
+  setTimer(statsTimer, 5000); // print stats every 5 seconds
+
+  // Send a normal test message to verify bus is active
+  testMsg.dlc = 4;
+  testMsg.byte(0) = 0xDE;
+  testMsg.byte(1) = 0xAD;
+  testMsg.byte(2) = 0xBE;
+  testMsg.byte(3) = 0xEF;
+  output(testMsg);
+  write(">> Test message 0x200 sent on bus");
+}
+
+/* -------------------------------------------------------
+   on errorFrame
+   Triggered for every CAN error frame detected
+------------------------------------------------------- */
+on errorFrame
+{
+  gTotalErrorCount++;
+
+  write("!! ERROR FRAME detected at %.3f s | TotalErrors=%d",
+        timeNow() / 100000.0, gTotalErrorCount);
+
+  // Check error frame direction
+  if (this.dir == RX)
+    write("   Direction: RX (received error frame)");
+  else
+    write("   Direction: TX (transmitted error frame)");
+
+  // Analyze error flags from the error frame
+  // (CANoe error frame object fields)
+  analyzeErrorFrame(this);
+}
+
+/* -------------------------------------------------------
+   Analyze error frame details
+------------------------------------------------------- */
+void analyzeErrorFrame(errorFrame ef)
+{
+  // Error code bits (depends on CANoe version and hardware)
+  // Common pattern: check error type via ECC register or frame flags
+  write("   CAN ID context: 0x%X", ef.id);
+
+  // Bit position of error (if available)
+  write("   Error at bit position: %d", ef.bitPosition);
+
+  // Error direction
+  if (ef.codeType == 1)
+  {
+    gBitErrorCount++;
+    write("   Type: Bit Error");
+  }
+  else if (ef.codeType == 2)
+  {
+    gStuffErrorCount++;
+    write("   Type: Stuff Error");
+  }
+  else if (ef.codeType == 3)
+  {
+    gCRCErrorCount++;
+    write("   Type: CRC Error");
+  }
+  else if (ef.codeType == 4)
+  {
+    gFormErrorCount++;
+    write("   Type: Form Error");
+  }
+  else if (ef.codeType == 5)
+  {
+    gACKErrorCount++;
+    write("   Type: ACK Error");
+  }
+  else
+  {
+    write("   Type: Unknown (code=%d)", ef.codeType);
+  }
+}
+
+/* -------------------------------------------------------
+   on busOff
+   Triggered when the CAN controller enters bus-off state
+------------------------------------------------------- */
+on busOff
+{
+  gBusOffCount++;
+  write("!! BUS-OFF detected on channel %d at %.3f s (count=%d)",
+        this.channel, timeNow() / 100000.0, gBusOffCount);
+  write("   TEC/REC thresholds exceeded. ECU has disconnected from bus.");
+
+  // In real test scenarios, notify test framework
+  testWaitForTimeout(100); // small delay before recovery attempt
+  write("   Attempting bus-off recovery...");
+}
+
+/* -------------------------------------------------------
+   on errorPassive (TX Error Counter >= 128)
+------------------------------------------------------- */
+on errorActive
+{
+  write("-- Node returned to ERROR ACTIVE state (TEC/REC < 128)");
+  write("   Bus communication restored.");
+}
+
+/* -------------------------------------------------------
+   Keyboard trigger: press 'e' to simulate error conditions
+------------------------------------------------------- */
+on key 'e'
+{
+  write(">> Simulating message burst to stress-test error handling...");
+  int i;
+  for (i = 0; i < 10; i++)
+  {
+    testMsg.byte(0) = i;
+    output(testMsg);
+  }
+  write("   10 messages sent rapidly.");
+}
+
+/* -------------------------------------------------------
+   Keyboard trigger: press 's' to show current error stats
+------------------------------------------------------- */
+on key 's'
+{
+  printErrorStats();
+}
+
+/* -------------------------------------------------------
+   Periodic stats output
+------------------------------------------------------- */
+on timer statsTimer
+{
+  printErrorStats();
+  setTimer(statsTimer, 5000);
+}
+
+void printErrorStats()
+{
+  write("--- Error Statistics at %.3f s ---", timeNow() / 100000.0);
+  write("  Total Errors   : %d", gTotalErrorCount);
+  write("  Bit Errors     : %d", gBitErrorCount);
+  write("  Stuff Errors   : %d", gStuffErrorCount);
+  write("  CRC Errors     : %d", gCRCErrorCount);
+  write("  Form Errors    : %d", gFormErrorCount);
+  write("  ACK Errors     : %d", gACKErrorCount);
+  write("  Bus-Off Events : %d", gBusOffCount);
+  write("----------------------------------");
+}
+
+/* -------------------------------------------------------
+   Monitor high-frequency messages for anomalies
+------------------------------------------------------- */
+on message *
+{
+  // Detect unexpectedly short DLC (possible frame corruption)
+  if (this.dlc == 0 && this.id != 0)
+  {
+    write("!! Warning: Message 0x%X received with DLC=0 (possible corruption)", this.id);
+  }
+}
+
+on stopMeasurement
+{
+  write("=== Final Error Report ===");
+  printErrorStats();
+  write("=== Script 18 stopped ===");
+}

@@ -1,0 +1,153 @@
+VERSION ""
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_DEF_SGTYPE_VAL_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_DESC_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: Engine_ECU ABS_ECU Transmission_ECU BCM Gateway Cluster
+
+BO_ 256 EngineData: 8 Engine_ECU
+ SG_ EngineSpeed : 0|16@1+ (0.25,0) [0|8191.75] "RPM" ABS_ECU,Transmission_ECU,Gateway,Cluster
+ SG_ ThrottlePosition : 16|8@1+ (0.392157,0) [0|100] "%" Gateway,Cluster
+ SG_ EngineTemp : 24|8@1+ (1,-40) [-40|215] "degC" BCM,Gateway,Cluster
+ SG_ EngineStatus : 32|2@1+ (1,0) [0|3] "" ABS_ECU,Gateway,Cluster
+ SG_ MIL_Active : 34|1@1+ (1,0) [0|1] "" BCM,Gateway,Cluster
+ SG_ CheckEngine : 35|1@1+ (1,0) [0|1] "" BCM,Gateway,Cluster
+
+BO_ 512 VehicleData: 8 ABS_ECU
+ SG_ VehicleSpeed : 0|12@1+ (0.1,0) [0|409.5] "km/h" Engine_ECU,Transmission_ECU,Gateway,Cluster
+ SG_ WheelSpeed_FL : 12|12@1+ (0.1,0) [0|409.5] "km/h" ABS_ECU,Gateway
+ SG_ WheelSpeed_FR : 24|12@1+ (0.1,0) [0|409.5] "km/h" ABS_ECU,Gateway
+ SG_ WheelSpeed_RL : 36|12@1+ (0.1,0) [0|409.5] "km/h" ABS_ECU,Gateway
+ SG_ WheelSpeed_RR : 48|12@1+ (0.1,0) [0|409.5] "km/h" ABS_ECU,Gateway
+ SG_ ABSActive : 60|1@1+ (1,0) [0|1] "" BCM,Gateway,Cluster
+ SG_ TCSActive : 61|1@1+ (1,0) [0|1] "" BCM,Gateway,Cluster
+
+BO_ 768 TransmissionData: 8 Transmission_ECU
+ SG_ GearPosition : 0|4@1+ (1,0) [0|15] "" Engine_ECU,Gateway,Cluster
+ SG_ GearChangeRequest : 4|1@1+ (1,0) [0|1] "" Engine_ECU,Gateway
+ SG_ TransmissionTemp : 8|8@1+ (1,-40) [-40|215] "degC" Gateway
+ SG_ TorqueConverter : 16|8@1+ (0.5,0) [0|127.5] "Nm" Engine_ECU,Gateway
+ SG_ TransmissionMode : 24|3@1+ (1,0) [0|7] "" BCM,Gateway,Cluster
+
+BO_ 1024 BrakeData: 8 ABS_ECU
+ SG_ BrakePressure : 0|10@1+ (0.5,0) [0|511.5] "bar" Engine_ECU,ABS_ECU,Gateway
+ SG_ BrakePedal : 10|8@1+ (0.392157,0) [0|100] "%" Gateway,Cluster
+ SG_ ParkingBrake : 18|1@1+ (1,0) [0|1] "" BCM,Gateway,Cluster
+ SG_ BrakeTemp_FL : 24|8@1+ (4,0) [0|1020] "degC" ABS_ECU,Gateway
+
+BO_ 1280 FuelData: 8 Engine_ECU
+ SG_ FuelLevel : 0|8@1+ (0.392157,0) [0|100] "%" BCM,Gateway,Cluster
+ SG_ FuelConsumption : 8|8@1+ (0.1,0) [0|25.5] "L/100km" Cluster
+ SG_ FuelPressure : 16|8@1+ (0.5,0) [0|127.5] "bar" Gateway
+ SG_ FuelRange : 24|12@1+ (1,0) [0|4095] "km" Cluster
+
+BO_ 1536 ClimateControl: 8 BCM
+ SG_ CabinTemp : 0|8@1+ (0.5,-20) [-20|107.5] "degC" Cluster,Gateway
+ SG_ SetTemp_Driver : 8|8@1+ (0.5,15) [15|30] "degC" BCM
+ SG_ FanSpeed : 16|4@1+ (1,0) [0|15] "" BCM,Cluster
+ SG_ ACCompressor : 20|1@1+ (1,0) [0|1] "" Engine_ECU,BCM
+ SG_ RecirculationMode : 21|1@1+ (1,0) [0|1] "" BCM
+
+BO_ 1792 DiagnosticsStatus: 8 Gateway
+ SG_ ActiveDTCCount : 0|8@1+ (1,0) [0|255] "" Cluster,BCM
+ SG_ ServiceDue : 8|1@1+ (1,0) [0|1] "" Cluster,BCM
+ SG_ OdometerKm : 16|24@1+ (1,0) [0|16777215] "km" Cluster
+ SG_ HoursRun : 40|16@1+ (0.1,0) [0|6553.5] "h" Gateway
+
+BO_ 2048 Heartbeat_Gateway: 1 Gateway
+ SG_ AliveCounter : 0|8@1+ (1,0) [0|255] "" Engine_ECU,ABS_ECU,Transmission_ECU,BCM
+
+BO_ 2303 Multiplexed_Sensor: 8 Engine_ECU
+ SG_ Mux_ID : 0|4@1+ (1,0) [0|15] "" Vector__XXX
+ SG_ CrankPosition M0 : 4|12@1+ (0.1,0) [0|409.5] "deg" Gateway
+ SG_ CamPhase M1 : 4|8@1+ (1,-40) [-40|215] "deg" Gateway
+ SG_ InjectorPulse M2 : 4|10@1+ (0.01,0) [0|10.23] "ms" Gateway
+
+CM_ BU_ Engine_ECU "Engine Control Module - Manages fuel injection, ignition timing, and torque";
+CM_ BU_ ABS_ECU "Anti-lock Braking System ECU - Wheel speed monitoring and ABS/TCS control";
+CM_ BU_ Transmission_ECU "Transmission Control Module - Gear selection and shift logic";
+CM_ BU_ BCM "Body Control Module - Climate, lighting, and body electronics";
+CM_ BU_ Gateway "Central gateway - Routes messages between network segments";
+CM_ BU_ Cluster "Instrument cluster - Displays vehicle information";
+
+CM_ BO_ 256 "Engine operational data broadcast at 10ms cycle";
+CM_ BO_ 512 "Vehicle speed and wheel speed data at 10ms cycle";
+CM_ BO_ 768 "Transmission state data at 20ms cycle";
+CM_ BO_ 1024 "Brake system data at 10ms cycle";
+CM_ BO_ 1280 "Fuel system data at 100ms cycle";
+CM_ BO_ 1536 "Climate control data at 200ms cycle";
+CM_ BO_ 1792 "Diagnostics and maintenance data at 1000ms cycle";
+CM_ BO_ 2048 "Gateway alive counter at 10ms cycle";
+
+CM_ SG_ 256 EngineSpeed "Engine rotational speed in RPM. Range: 0-8191.75 RPM, Factor: 0.25";
+CM_ SG_ 256 EngineStatus "0=Off, 1=Cranking, 2=Running, 3=Error";
+CM_ SG_ 512 VehicleSpeed "Calculated vehicle speed in km/h. Factor: 0.1";
+CM_ SG_ 768 GearPosition "0=Park, 1-6=Drive gears, 7=Reverse, 8=Neutral";
+CM_ SG_ 1024 BrakePressure "Hydraulic brake circuit pressure in bar";
+
+BA_DEF_ BO_ "GenMsgCycleTime" INT 0 10000;
+BA_DEF_ BO_ "GenMsgSendType" STRING;
+BA_DEF_ BO_ "GenMsgStartDelayTime" INT 0 10000;
+BA_DEF_ SG_ "GenSigSendType" STRING;
+BA_DEF_ SG_ "GenSigStartValue" FLOAT 0 100;
+
+BA_DEF_DEF_ "GenMsgCycleTime" 0;
+BA_DEF_DEF_ "GenMsgSendType" "Cyclic";
+BA_DEF_DEF_ "GenMsgStartDelayTime" 0;
+BA_DEF_DEF_ "GenSigSendType" "Cyclic";
+BA_DEF_DEF_ "GenSigStartValue" 0;
+
+BA_ "GenMsgCycleTime" BO_ 256 10;
+BA_ "GenMsgCycleTime" BO_ 512 10;
+BA_ "GenMsgCycleTime" BO_ 768 20;
+BA_ "GenMsgCycleTime" BO_ 1024 10;
+BA_ "GenMsgCycleTime" BO_ 1280 100;
+BA_ "GenMsgCycleTime" BO_ 1536 200;
+BA_ "GenMsgCycleTime" BO_ 1792 1000;
+BA_ "GenMsgCycleTime" BO_ 2048 10;
+
+BA_ "GenMsgSendType" BO_ 256 "Cyclic";
+BA_ "GenMsgSendType" BO_ 512 "Cyclic";
+BA_ "GenMsgSendType" BO_ 2303 "Event";
+
+VAL_ 256 EngineStatus 0 "Off" 1 "Cranking" 2 "Running" 3 "Error";
+VAL_ 256 MIL_Active 0 "Off" 1 "On";
+VAL_ 256 CheckEngine 0 "OK" 1 "Fault";
+VAL_ 512 ABSActive 0 "Inactive" 1 "Active";
+VAL_ 512 TCSActive 0 "Inactive" 1 "Active";
+VAL_ 768 GearPosition 0 "Park" 1 "1st" 2 "2nd" 3 "3rd" 4 "4th" 5 "5th" 6 "6th" 7 "Reverse" 8 "Neutral";
+VAL_ 768 TransmissionMode 0 "Auto" 1 "Sport" 2 "Manual" 3 "Winter" 4 "ECO";
+VAL_ 1024 ParkingBrake 0 "Released" 1 "Applied";
+VAL_ 1536 ACCompressor 0 "Off" 1 "On";
+VAL_ 1536 RecirculationMode 0 "Fresh_Air" 1 "Recirculate";
+VAL_ 1792 ServiceDue 0 "OK" 1 "Service_Due";

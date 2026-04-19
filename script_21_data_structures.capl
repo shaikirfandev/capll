@@ -1,0 +1,380 @@
+/*
+ * Script: Data Structures in CAPL
+ *
+ * CAPL supports the following data structures:
+ *   1. Arrays (1D, 2D, byte/int/float/char)
+ *   2. Structs (struct keyword – CANoe 10+)
+ *   3. Enumerations (enum)
+ *   4. Strings (char arrays + string functions)
+ *   5. Associative Arrays (key-value maps – unique to CAPL)
+ *
+ * CAPL does NOT support:
+ *   - Pointers (no dynamic memory)
+ *   - Linked lists / trees (no heap allocation)
+ *   - Classes / objects
+ */
+
+// ============================================================
+// 1. BASIC ARRAYS
+// ============================================================
+
+variables
+{
+  // --- 1D Arrays ---
+  byte    gRawBytes[8]    = {0x10, 0x03, 0x00, 0x00, 0xCC, 0xCC, 0xCC, 0xCC};
+  int     gSensorValues[5] = {100, 200, 300, 400, 500};
+  float   gTemps[4]        = {25.5, 37.0, -10.0, 100.0};
+  char    gLabel[32]       = "EngineECU";
+
+  // --- 2D Array ---
+  // CAPL supports 2D arrays: type name[rows][cols]
+  byte    gMatrix[3][4];   // 3 rows, 4 columns
+
+  // --- Enum ---
+  // CAPL enums are int-typed; use const int as alternative
+  const int STATE_OFF      = 0;
+  const int STATE_STANDBY  = 1;
+  const int STATE_ACTIVE   = 2;
+  const int STATE_FAULT    = 3;
+
+  // --- Associative Array (key-value map, unique to CAPL) ---
+  // Declared as: type name[type_of_key]
+  int     gDTCCount[long];     // key=DTC code, value=occurrence count
+  float   gSignalValue[char];  // key=signal name string, value=float
+
+  // --- Struct (CANoe 10+) ---
+  struct DTCRecord
+  {
+    long  dtcCode;
+    byte  statusByte;
+    float odometerKm;
+    char  description[64];
+  };
+
+  struct CANFrame
+  {
+    long  id;
+    byte  dlc;
+    byte  data[8];
+  };
+
+  // Struct instances
+  struct DTCRecord  gLastDTC;
+  struct CANFrame   gLastFrame;
+
+  // Array of structs
+  struct DTCRecord  gDTCList[10];
+  int               gDTCListCount = 0;
+}
+
+// ============================================================
+// 2. ARRAY OPERATIONS
+// ============================================================
+
+// --- Copy array manually (no memcpy in basic CAPL) ---
+void CopyByteArray(byte src[], byte dst[], int len)
+{
+  int i;
+  for (i = 0; i < len; i++)
+    dst[i] = src[i];
+}
+
+// --- Fill array with a value ---
+void FillArray(byte arr[], int len, byte val)
+{
+  int i;
+  for (i = 0; i < len; i++)
+    arr[i] = val;
+}
+
+// --- Linear search ---
+int FindValue(int arr[], int len, int target)
+{
+  int i;
+  for (i = 0; i < len; i++)
+    if (arr[i] == target) return i;
+  return -1;  // not found
+}
+
+// --- Bubble sort (ascending) ---
+void SortIntArray(int arr[], int len)
+{
+  int i, j, tmp;
+  for (i = 0; i < len - 1; i++)
+    for (j = 0; j < len - i - 1; j++)
+      if (arr[j] > arr[j+1])
+      {
+        tmp        = arr[j];
+        arr[j]     = arr[j+1];
+        arr[j+1]   = tmp;
+      }
+}
+
+// --- Sum and average ---
+float ArrayAverage(int arr[], int len)
+{
+  int i;
+  float sum = 0.0;
+  for (i = 0; i < len; i++)
+    sum += arr[i];
+  return (len > 0) ? (sum / len) : 0.0;
+}
+
+// --- 2D array: set and get element ---
+void Set2D(byte m[][4], int row, int col, byte val)
+{
+  m[row][col] = val;
+}
+
+byte Get2D(byte m[][4], int row, int col)
+{
+  return m[row][col];
+}
+
+// ============================================================
+// 3. STRUCT OPERATIONS
+// ============================================================
+
+void InitDTCRecord(struct DTCRecord rec, long code, byte status,
+                   float odo, char desc[])
+{
+  rec.dtcCode    = code;
+  rec.statusByte = status;
+  rec.odometerKm = odo;
+  strncpy(rec.description, desc, 63);
+}
+
+void PrintDTCRecord(struct DTCRecord rec)
+{
+  write("  DTC: 0x%06X | Status: 0x%02X | Odo: %.1f km | %s",
+        rec.dtcCode, rec.statusByte, rec.odometerKm, rec.description);
+}
+
+// Add DTC to the list (array of structs)
+int AddDTC(long code, byte status, float odo, char desc[])
+{
+  if (gDTCListCount >= 10)
+  {
+    write("!! DTC list full (max 10)");
+    return -1;
+  }
+  gDTCList[gDTCListCount].dtcCode    = code;
+  gDTCList[gDTCListCount].statusByte = status;
+  gDTCList[gDTCListCount].odometerKm = odo;
+  strncpy(gDTCList[gDTCListCount].description, desc, 63);
+  gDTCListCount++;
+  return gDTCListCount - 1;
+}
+
+void PrintAllDTCs()
+{
+  int i;
+  write("--- DTC List (%d entries) ---", gDTCListCount);
+  for (i = 0; i < gDTCListCount; i++)
+    PrintDTCRecord(gDTCList[i]);
+}
+
+// ============================================================
+// 4. ASSOCIATIVE ARRAYS (CAPL-SPECIFIC)
+// ============================================================
+// - Declared like: type name[keytype]
+// - Dynamically grows at runtime (no size limit declared)
+// - Keys can be: long, int, char[] (string)
+// - Check if key exists with: isvalid(arr[key])
+// - Remove key with: del(arr[key])
+// - Count entries with: elCount(arr)
+
+void DemoAssociativeArray()
+{
+  write("--- Associative Array Demo ---");
+
+  // Populate: count DTC occurrences
+  gDTCCount[0xC0200] = 3;
+  gDTCCount[0xB1234] = 1;
+  gDTCCount[0xC0200]++;   // increment existing
+
+  write("DTC 0xC0200 count: %d", gDTCCount[0xC0200]);   // 4
+  write("DTC 0xB1234 count: %d", gDTCCount[0xB1234]);   // 1
+
+  // Check if key exists
+  if (isvalid(gDTCCount[0xC0200]))
+    write("  0xC0200 exists in map");
+  if (!isvalid(gDTCCount[0x99999]))
+    write("  0x99999 does NOT exist in map");
+
+  // String-keyed associative array
+  gSignalValue["VehicleSpeed"]  = 120.5;
+  gSignalValue["EngineRPM"]     = 3200.0;
+  gSignalValue["ThrottlePos"]   = 45.0;
+
+  write("VehicleSpeed  = %.1f", gSignalValue["VehicleSpeed"]);
+  write("EngineRPM     = %.1f", gSignalValue["EngineRPM"]);
+  write("Total entries : %d",   elCount(gSignalValue));
+
+  // Delete an entry
+  del(gSignalValue["ThrottlePos"]);
+  write("After del ThrottlePos, count: %d", elCount(gSignalValue));
+}
+
+// ============================================================
+// 5. ENUM-STYLE CONSTANTS (STATE MACHINE EXAMPLE)
+// ============================================================
+
+variables
+{
+  int gECUState = 0;  // use STATE_* constants
+}
+
+char* StateToString(int state)
+{
+  switch (state)
+  {
+    case 0: return "OFF";
+    case 1: return "STANDBY";
+    case 2: return "ACTIVE";
+    case 3: return "FAULT";
+    default: return "UNKNOWN";
+  }
+}
+
+void TransitionState(int newState)
+{
+  write("  State: %s --> %s", StateToString(gECUState), StateToString(newState));
+  gECUState = newState;
+}
+
+// ============================================================
+// 6. STRING (CHAR ARRAY) OPERATIONS
+// ============================================================
+
+void DemoStrings()
+{
+  char src[32]  = "Hello, Automotive!";
+  char dst[32];
+  char part[16];
+  int  len;
+
+  len = strlen(src);
+  write("String: \"%s\"  length=%d", src, len);
+
+  // Copy
+  strcpy(dst, src);
+  write("Copied: \"%s\"", dst);
+
+  // Concatenate
+  strcat(dst, " v2");
+  write("Concat: \"%s\"", dst);
+
+  // Compare
+  if (strcmp(src, dst) != 0)
+    write("Strings are different");
+
+  // Substring via snprintf
+  snprintf(part, 6, "%s", src);   // first 5 chars + null
+  write("Substring(0,5): \"%s\"", part);
+
+  // Format into string
+  char info[64];
+  snprintf(info, elCount(info), "Speed=%.1f RPM=%d", 120.5, 3200);
+  write("Formatted: \"%s\"", info);
+}
+
+// ============================================================
+// 7. USING elCount() – SIZE OF ARRAY AT COMPILE TIME
+// ============================================================
+
+void DemoElCount()
+{
+  byte buf[8] = {1,2,3,4,5,6,7,8};
+  int  vals[10];
+  int  i;
+
+  write("buf  size: %d", elCount(buf));    // 8
+  write("vals size: %d", elCount(vals));   // 10
+
+  // Safe iteration using elCount
+  for (i = 0; i < elCount(buf); i++)
+    write("  buf[%d] = 0x%02X", i, buf[i]);
+}
+
+// ============================================================
+// 8. PUTTING IT ALL TOGETHER – on start
+// ============================================================
+
+on start
+{
+  write("========== CAPL Data Structures Demo ==========");
+
+  // --- Arrays ---
+  write("\n[1] 1D Arrays");
+  int i;
+  for (i = 0; i < elCount(gSensorValues); i++)
+    write("  Sensor[%d] = %d", i, gSensorValues[i]);
+
+  int sortTest[5] = {50, 10, 40, 20, 30};
+  SortIntArray(sortTest, 5);
+  write("  Sorted: %d %d %d %d %d",
+        sortTest[0], sortTest[1], sortTest[2], sortTest[3], sortTest[4]);
+
+  int idx = FindValue(gSensorValues, elCount(gSensorValues), 300);
+  write("  FindValue(300) at index: %d", idx);
+  write("  Average: %.1f", ArrayAverage(gSensorValues, elCount(gSensorValues)));
+
+  // --- 2D Array ---
+  write("\n[2] 2D Array");
+  int r, c;
+  for (r = 0; r < 3; r++)
+    for (c = 0; c < 4; c++)
+      gMatrix[r][c] = (r * 4) + c;
+
+  for (r = 0; r < 3; r++)
+    write("  Row[%d]: %d %d %d %d",
+          r, gMatrix[r][0], gMatrix[r][1], gMatrix[r][2], gMatrix[r][3]);
+
+  // --- Struct ---
+  write("\n[3] Structs");
+  AddDTC(0xC0200, 0x09, 12345.0, "Engine Speed Sensor Circuit");
+  AddDTC(0xB1234, 0x08, 11200.5, "Battery Voltage Low");
+  AddDTC(0xC0500, 0x0F, 12000.0, "Throttle Position Out of Range");
+  PrintAllDTCs();
+
+  // --- Associative Array ---
+  write("\n[4] Associative Arrays");
+  DemoAssociativeArray();
+
+  // --- State Machine with enum-style constants ---
+  write("\n[5] Enum-Style Constants / State Machine");
+  TransitionState(STATE_STANDBY);
+  TransitionState(STATE_ACTIVE);
+  TransitionState(STATE_FAULT);
+  TransitionState(STATE_OFF);
+
+  // --- Strings ---
+  write("\n[6] String Operations");
+  DemoStrings();
+
+  // --- elCount ---
+  write("\n[7] elCount (compile-time array size)");
+  DemoElCount();
+
+  write("\n========== Demo Complete ==========");
+}
+
+// ============================================================
+// QUICK REFERENCE SUMMARY (as comments)
+// ============================================================
+//
+// Type         | Declaration Example          | Notes
+// -------------|------------------------------|---------------------------
+// 1D Array     | byte buf[8];                 | Fixed size, 0-indexed
+// 2D Array     | byte m[3][4];                | Row-major
+// String       | char name[32] = "hello";     | Null-terminated char array
+// Struct       | struct Point { int x; int y; } | CANoe 10+
+// Assoc Array  | int map[char];               | Key: long/int/char[]
+// Enum         | const int A=0, B=1, C=2;     | No native enum keyword
+//
+// Key functions:
+//   elCount(arr)        → compile-time array length
+//   isvalid(assoc[key]) → check if key exists in associative array
+//   del(assoc[key])     → remove key from associative array
+//   strlen/strcpy/strcat/strcmp/snprintf → string operations
