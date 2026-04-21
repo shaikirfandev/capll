@@ -1,7 +1,7 @@
 # C Fundamentals for ADAS Engineering
 
-> **Domain:** Advanced Driver Assistance Systems
-> **Systems:** Camera, Radar, LiDAR, Ultrasonic, Sensor Fusion, Path Planning, V2X
+> **Domain:** Advanced Driver Assistance Systems (ADAS) & Driver verification (DMS/OMS)
+> **Systems:** Camera, Radar, LiDAR, Driver Monitoring System (DMS), MCAL / Device Driver Verification
 > **Standards:** ISO 26262, ISO 21448 (SOTIF), MISRA C:2012, AUTOSAR Classic
 
 ---
@@ -10,21 +10,21 @@
 
 | Layer | Language | Reason |
 |---|---|---|
-| MCAL / BSW Drivers | C | Direct hardware access, AUTOSAR mandated |
-| Sensor raw data acquisition | C | ISR timing, DMA control, zero overhead |
-| Safety monitors (ASIL D) | C | Deterministic, no hidden costs |
-| Signal processing (DSP) | C + CMSIS | Optimised intrinsics, SIMD |
-| Application logic (fusion) | C++ | OOP, templates, STL (Adaptive) |
+| MCAL / BSW Drivers | C | Direct hardware access, AUTOSAR mandated. Crucial for verifying SPI/I2C/CAN peripheral behavior. |
+| Sensor raw data acquisition | C | ISR timing, DMA control, zero overhead for high-bandwidth video/radar streams. |
+| Safety monitors (ASIL D) | C | Deterministic, no hidden costs, required for functional safety checks. |
+| Signal processing (DSP) | C + CMSIS | Optimised intrinsics, SIMD for image processing or radar DSP. |
+| Application logic (fusion) | C++ | OOP, templates, STL (AUTOSAR Adaptive). |
 
 ---
 
-## 2. Data Types — ADAS Signal Representation
+## 2. Data Types — Sensor & Driver Monitoring Signals
 
 ```c
 #include <stdint.h>     /* MISRA: use fixed-width types everywhere */
 #include <stdbool.h>
 
-/* Sensor measurement types */
+/* Environmental Sensor measurement types (Radar/LiDAR/Camera) */
 typedef uint16_t  radar_range_cm_t;       /* 0–65535 cm (655.35 m) */
 typedef int16_t   radar_velocity_cms_t;   /* -32768 to +32767 cm/s */
 typedef uint8_t   radar_confidence_t;     /* 0–100 % */
@@ -32,6 +32,11 @@ typedef uint16_t  lidar_range_mm_t;       /* millimetre resolution */
 typedef uint16_t  camera_pixel_t;         /* 16-bit depth or disparity */
 typedef int32_t   position_mm_t;          /* signed world coordinates */
 typedef float     angle_rad_t;            /* MISRA: float OK for physical angles */
+
+/* Driver Monitoring System (DMS) / Occupant Monitoring System (OMS) Types */
+typedef uint8_t   dms_gaze_zone_t;        /* Enum: 0=Road, 1=InstrumentCluster, 2=Infotainment, 3=Mirrors */
+typedef float     dms_eye_closure_pct_t;  /* 0.0 (wide open) to 100.0 (closed) */
+typedef uint8_t   dms_drowsiness_lvl_t;   /* KSS (Karolinska Sleepiness Scale) 1 to 9 */
 
 /* Radar target structure */
 typedef struct {
@@ -43,6 +48,19 @@ typedef struct {
     uint8_t             target_id;
     uint8_t             is_valid;
 } RadarTarget_t;
+
+/* DMS Driver State Structure */
+typedef struct {
+    dms_gaze_zone_t       gaze_zone;
+    dms_eye_closure_pct_t left_eye_closure;
+    dms_eye_closure_pct_t right_eye_closure;
+    angle_rad_t           head_pitch_rad;
+    angle_rad_t           head_yaw_rad;
+    angle_rad_t           head_roll_rad;
+    dms_drowsiness_lvl_t  kss_level;
+    bool                  is_distracted;
+    bool                  is_hands_on_wheel; /* From capacitive steering wheel sensor */
+} DmsDriverState_t;
 
 /* LiDAR point */
 typedef struct {
@@ -100,14 +118,29 @@ uint8_t fuse_sensors(
     return count;
 }
 
-/* Function pointer — sensor driver callback table */
-typedef void (*SensorCb_t)(const uint8_t* data, uint16_t length);
+/* Function pointer — DMA / Low-level Driver Interface Verification */
+typedef void (*DmaTransferCompleteCb_t)(uint32_t bytes_transferred);
+typedef void (*DmaTransferErrorCb_t)(uint32_t error_code);
 
 typedef struct {
-    uint8_t    sensor_id;
-    SensorCb_t on_data_ready;
-    SensorCb_t on_error;
-} SensorDriver_t;
+    uint8_t                channel_id;
+    uint32_t*              source_addr;
+    uint32_t*              dest_addr;
+    DmaTransferCompleteCb_t on_complete;
+    DmaTransferErrorCb_t    on_error;
+} DmaDriverConfig_t;
+
+/* Low-level MCAL device driver validation pattern */
+bool verify_spi_driver_registers(void) {
+    /* Ensure SPI Control Register 1 is correctly configured via driver init */
+    /* Check Master Mode, Baud Rate (f_PCLK/8), CPOL=0, CPHA=0 */
+    uint32_t expected_cr1 = (0x1U << 2U) | (0x2U << 3U);
+    if ((SPI1->CR1 & 0x003CU) != expected_cr1) {
+        /* Driver verification failed */
+        return false;
+    }
+    return true;
+}
 
 static void radar_data_cb(const uint8_t* data, uint16_t len);
 static void camera_data_cb(const uint8_t* data, uint16_t len);
@@ -170,11 +203,20 @@ typedef struct {
     uint8_t brake_active;
     uint8_t hazard_lights;
 } EgoState_t;
+
+/* DMS FSM State */
+typedef enum {
+    DMS_ATTENTIVE = 0U,
+    DMS_DISTRACTED_LEVEL_1 = 1U,  /* Look away > 2s */
+    DMS_DISTRACTED_LEVEL_2 = 2U,  /* Look away > 4s -> Acoustic warning */
+    DMS_MICROSLEEP         = 3U,  /* Eyes closed > 1.5s -> Haptic warning */
+    DMS_UNRESPONSIVE       = 4U   /* No steering tone > 10s -> MRM (Minimum Risk Maneuver) */
+} DmsState_t;
 ```
 
 ---
 
-## 5. Bit Manipulation — CAN Signal Decoding for ADAS
+## 5. Bit Manipulation — CAN Signal Decoding & Hardware Drivers
 
 ```c
 /* Extract ADAS status bits from CAN frame */
@@ -223,11 +265,23 @@ void encode_radar_range(uint8_t* frame, uint16_t range_cm) {
 uint16_t decode_radar_range(const uint8_t* frame) {
     return (uint16_t)(((uint16_t)frame[0] << 4U) | ((frame[1] >> 4U) & 0x0FU));
 }
+
+/* Hardware Driver Verification via Bit Manipulation */
+void verify_spi_dma_registers(void) {
+    /* Verify DMA stream is enabled and circular mode is set */
+    uint32_t cr = DMA2_Stream0->CR;
+    bool is_enabled = (cr & (1U << 0U)) != 0U;            /* EN bit */
+    bool is_circular = (cr & (1U << 8U)) != 0U;           /* CIRC bit */
+    
+    if (!is_enabled || !is_circular) {
+        log_hw_driver_fault(SENSOR_SPI_DMA_FAULT);
+    }
+}
 ```
 
 ---
 
-## 6. Arrays & Buffers — Sensor Data Pipelines
+## 6. Arrays & Buffers — Sensor Data Pipelines & Ring Buffers
 
 ```c
 #define MAX_RADAR_TARGETS    64U
@@ -279,9 +333,39 @@ void grid_mark_object(float obj_x_m, float obj_y_m) {
 
 ---
 
-## 7. Control Flow — ADAS State Machine
+## 7. Control Flow — ADAS & DMS State Machines
 
 ```c
+/* Driver Monitoring System (DMS) State Machine */
+void process_dms_frame(const DmsDriverState_t* driver, uint32_t dt_ms) {
+    static uint32_t distracted_timer_ms = 0;
+    static uint32_t eyes_closed_timer_ms = 0;
+    static DmsState_t state = DMS_ATTENTIVE;
+
+    if (driver->left_eye_closure > 80.0f && driver->right_eye_closure > 80.0f) {
+        eyes_closed_timer_ms += dt_ms;
+        if (eyes_closed_timer_ms >= 1500) {
+            state = DMS_MICROSLEEP;
+            trigger_haptic_seat_warning();
+        }
+    } else {
+        eyes_closed_timer_ms = 0;
+        /* Gaze away from road */
+        if (driver->gaze_zone != 0U) { /* not looking at road */
+            distracted_timer_ms += dt_ms;
+            if (distracted_timer_ms >= 4000) {
+                state = DMS_DISTRACTED_LEVEL_2;
+                trigger_acoustic_warning();
+            } else if (distracted_timer_ms >= 2000) {
+                state = DMS_DISTRACTED_LEVEL_1;
+            }
+        } else {
+            distracted_timer_ms = 0;
+            state = DMS_ATTENTIVE;
+        }
+    }
+}
+
 /* FCW (Forward Collision Warning) state machine */
 typedef enum {
     FCW_STATE_INACTIVE   = 0U,  /* No threat */
