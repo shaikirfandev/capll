@@ -543,4 +543,341 @@ if __name__ == "__main__":
 
 ---
 
+---
+
+## 6. cantools — DBC-Based Signal Decoding
+
+```python
+"""
+cantools_decoder.py
+Use the cantools library to decode CAN frames using a DBC file.
+cantools parses dbc automatically — no manual bit math.
+"""
+
+import cantools
+import can
+
+# Load DBC file
+db = cantools.database.load_file("Powertrain_v2.3.dbc")
+
+# ── Decode a raw message ─────────────────────────────────────────────
+def decode_message(msg_id: int, raw_bytes: bytes) -> dict:
+    """Decode CAN frame bytes into signal dictionary using DBC."""
+    try:
+        msg_def = db.get_message_by_frame_id(msg_id)
+        return msg_def.decode(raw_bytes, decode_choices=False)
+    except KeyError:
+        return {}
+    except cantools.db.errors.DecodeError as e:
+        print(f"Decode error for 0x{msg_id:03X}: {e}")
+        return {}
+
+# ── Live bus monitoring with cantools + python-can ──────────────────
+def monitor_and_decode(duration_sec: int = 30):
+    bus = can.interface.Bus(interface="vector", channel=0, bitrate=500_000)
+    t_start = can.util.time_perfcounter_origin()
+    print(f"Monitoring for {duration_sec}s...")
+    for msg in bus:
+        decoded = decode_message(msg.arbitration_id, msg.data)
+        if decoded:
+            print(f"  0x{msg.arbitration_id:03X} | {decoded}")
+        if (can.util.time_perfcounter_origin() - t_start) > duration_sec:
+            break
+    bus.shutdown()
+
+# ── Check signal limits (auto from DBC) ─────────────────────────────
+def check_signal_limits(db_path: str):
+    db = cantools.database.load_file(db_path)
+    print(f"\nSignal limits from {db_path}:")
+    for msg in db.messages:
+        for sig in msg.signals:
+            print(f"  [{msg.name}] {sig.name}: "
+                  f"min={sig.minimum}, max={sig.maximum}, "
+                  f"factor={sig.scale}, offset={sig.offset}, unit={sig.unit}")
+
+if __name__ == "__main__":
+    check_signal_limits("Powertrain_v2.3.dbc")
+```
+
+---
+
+## 7. pytest Framework for Cluster Validation Tests
+
+```python
+"""
+test_cluster_signals.py
+Structured pytest tests for cluster validation.
+Run: pytest test_cluster_signals.py -v --html=report.html
+Requires: pytest, pytest-html, python-can, cantools
+"""
+
+import can
+import cantools
+import pytest
+import time
+
+DB = cantools.database.load_file("Powertrain_v2.3.dbc")
+
+@pytest.fixture(scope="module")
+def can_bus():
+    """Create and yield a CAN bus, then shut it down after all tests."""
+    bus = can.interface.Bus(interface="vector", channel=0, bitrate=500_000)
+    yield bus
+    bus.shutdown()
+
+def send_and_receive(bus, msg_id: int, data: list, wait_s: float = 0.5) -> can.Message | None:
+    """Send a frame, wait, then return the first matching response frame."""
+    frame = can.Message(arbitration_id=msg_id, data=data, is_extended_id=False)
+    bus.send(frame)
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline:
+        rx = bus.recv(timeout=0.1)
+        if rx and rx.arbitration_id == msg_id:
+            return rx
+    return None
+
+# ── TC_SPD_001: Speed 60 km/h ────────────────────────────────────────
+def test_speed_60kmh(can_bus):
+    """Inject 60 km/h, verify cluster displays 60 ± 2 km/h."""
+    raw = int(60.0 / 0.01)           # factor = 0.01
+    data = [raw & 0xFF, (raw >> 8) & 0xFF, 0x01, 0, 0, 0, 0, 0]
+    rx = send_and_receive(can_bus, 0x3B3, data)
+    assert rx is not None, "No response received for 0x3B3"
+    decoded = DB.decode_message(0x3B3, rx.data)
+    assert "VehicleSpeed" in decoded
+    assert abs(decoded["VehicleSpeed"] - 60.0) <= 2.0, (
+        f"Speed error: expected 60 ± 2, got {decoded['VehicleSpeed']}"
+    )
+
+# ── TC_SPD_002: Speed = 0 km/h (stop) ──────────────────────────────
+def test_speed_zero(can_bus):
+    """Speed = 0 km/h must display 0 (no phantom shift)."""
+    data = [0x00, 0x00, 0x01, 0, 0, 0, 0, 0]
+    rx = send_and_receive(can_bus, 0x3B3, data)
+    assert rx is not None
+    decoded = DB.decode_message(0x3B3, rx.data)
+    assert decoded["VehicleSpeed"] == pytest.approx(0.0, abs=0.5)
+
+# ── TC_TEL_001: ABS fault telltale ──────────────────────────────────
+def test_abs_fault_telltale(can_bus):
+    """ABS_Fault=1 → cluster ABS telltale should activate."""
+    # 0x3A5 Byte 0 Bit 0 = ABS_Fault
+    data_fault    = [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+    data_no_fault = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+    bus = can_bus
+
+    bus.send(can.Message(arbitration_id=0x3A5, data=data_fault, is_extended_id=False))
+    time.sleep(0.5)
+    # Verification requires HIL observation or UDS read — mark as manual confirm
+    # In full HIL: read cluster display status via UDS DID 0xF120
+    pytest.skip("Manual confirm required: observe cluster ABS telltale is ON")
+
+# ── TC_NVM_001: Odometer survives KL15 cycle ─────────────────────────
+def test_odometer_kl15_retention(can_bus):
+    """Odometer value should not drop after KL15 cycle (NVM retention)."""
+    # Step 1: Read current odo via UDS 0x22 0xF400
+    # (Simplified — in real bench use UDS library)
+    pytest.skip("Requires UDS library integration — see uds_client fixture")
+
+# ── Parametrised speed sweep ─────────────────────────────────────────
+@pytest.mark.parametrize("speed_kmh,tolerance", [
+    (0,   0.5),
+    (30,  2.0),
+    (60,  2.0),
+    (100, 3.0),
+    (120, 3.0),
+    (160, 4.0),
+    (200, 5.0),
+])
+def test_speed_linearity(can_bus, speed_kmh, tolerance):
+    """Parametrised speedometer linearity sweep."""
+    raw = int(speed_kmh / 0.01)
+    data = [raw & 0xFF, (raw >> 8) & 0xFF, 0x01, 0, 0, 0, 0, 0]
+    rx = send_and_receive(can_bus, 0x3B3, data, wait_s=0.8)
+    assert rx is not None, f"No response at {speed_kmh} km/h"
+    decoded = DB.decode_message(0x3B3, rx.data)
+    actual = decoded.get("VehicleSpeed", -1)
+    assert abs(actual - speed_kmh) <= tolerance, (
+        f"At {speed_kmh} km/h: displayed {actual}, tolerance ±{tolerance}"
+    )
+```
+
+---
+
+## 8. CI/CD Integration for Cluster Tests
+
+### 8.1 GitHub Actions Workflow — Run Cluster Tests on New Build
+
+```yaml
+# .github/workflows/cluster_validation.yml
+name: Cluster Validation Regression
+
+on:
+  push:
+    branches: [main, release/*]
+  workflow_dispatch:
+    inputs:
+      build_version:
+        description: 'IC SW build version'
+        required: true
+        default: 'v1.5.1'
+
+jobs:
+  run-cluster-tests:
+    runs-on: self-hosted    # Must be Windows runner with CANoe + Vector HW
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout test suite
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run DBC validation
+        run: python dbc_validator.py Powertrain_v2.2.dbc Powertrain_v2.3.dbc
+
+      - name: Run pytest cluster tests
+        run: |
+          pytest test_cluster_signals.py \
+            -v \
+            --html=results/test_report_${{ github.run_id }}.html \
+            --self-contained-html \
+            -k "not manual"  # skip tests requiring manual observation
+
+      - name: Parse results and create Jira defects
+        if: failure()
+        run: python jira_cluster_defect.py --from-pytest results/
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cluster-test-report
+          path: results/
+```
+
+### 8.2 requirements.txt for Cluster Python Automation
+
+```
+python-can==4.3.1
+cantools==39.4.3
+pytest==8.1.1
+pytest-html==4.1.1
+openpyxl==3.1.2
+requests==2.31.0
+```
+
+### 8.3 Build Notification Script
+
+```python
+"""
+build_notifier.py
+Poll a build server, download new IC SW build, trigger test suite automatically.
+Suitable for nightly regression.
+"""
+
+import requests
+import subprocess
+import os
+from datetime import datetime
+
+BUILD_SERVER_URL = "http://build-server.ltts.local/api/ic/latest"
+LAST_BUILD_FILE  = ".last_build_version"
+
+def get_latest_build_version() -> str:
+    resp = requests.get(BUILD_SERVER_URL, timeout=10)
+    resp.raise_for_status()
+    return resp.json()["version"]
+
+def load_last_build() -> str:
+    if os.path.exists(LAST_BUILD_FILE):
+        with open(LAST_BUILD_FILE) as f:
+            return f.read().strip()
+    return ""
+
+def save_current_build(version: str):
+    with open(LAST_BUILD_FILE, "w") as f:
+        f.write(version)
+
+def trigger_regression(version: str):
+    print(f"[{datetime.now():%Y-%m-%d %H:%M}] New build: {version} — starting regression")
+    result = subprocess.run(
+        ["pytest", "test_cluster_signals.py", "-v",
+         "--html", f"results/report_{version}.html",
+         "--self-contained-html"],
+        capture_output=True, text=True
+    )
+    print(result.stdout)
+    if result.returncode != 0:
+        print(f"FAILURES in {version} — check report and raise Jira defects")
+
+if __name__ == "__main__":
+    latest  = get_latest_build_version()
+    current = load_last_build()
+    if latest != current:
+        trigger_regression(latest)
+        save_current_build(latest)
+    else:
+        print(f"No new build ({latest}) — regression not triggered")
+```
+
+---
+
+## 9. Python — UDS Automated Read via python-udsoncan
+
+```python
+"""
+uds_cluster_reader.py
+Read cluster UDS data items (odometer, SW version, telltale status).
+Uses python-udsoncan + isotp libraries.
+pip install python-udsoncan can-isotp
+"""
+
+import udsoncan
+from udsoncan.connections import PythonIsoTpConnection
+import isotp
+import can
+
+# CAN bus
+bus = can.interface.Bus(interface="vector", channel=0, bitrate=500_000)
+
+# ISO-TP addressing: Cluster TX ID = 0x726, RX ID = 0x72E (example)
+addr = isotp.Address(isotp.AddressingMode.Normal_11bits, txid=0x726, rxid=0x72E)
+stack = isotp.CanStack(bus, address=addr)
+conn = PythonIsoTpConnection(stack)
+
+with udsoncan.Client(conn, request_timeout=2) as client:
+    # Read SW version (DID 0xF189 = ECU SW version — standard UDS)
+    resp = client.read_data_by_identifier(udsoncan.DataIdentifier(0xF189))
+    if resp.positive:
+        sw_version = resp.data[0xF189].decode("ascii", errors="replace")
+        print(f"SW Version: {sw_version}")
+
+    # Read odometer (DID 0xF400 — OEM specific)
+    resp = client.read_data_by_identifier(0xF400)
+    if resp.positive:
+        raw_odo = int.from_bytes(resp.data[0xF400], byteorder="big")
+        odo_km = raw_odo * 0.1      # OEM scale: factor 0.1
+        print(f"Odometer: {odo_km:.1f} km")
+
+    # Fault code check (read DTCs — UDS service 0x19)
+    resp = client.get_dtc_by_status_mask(0xFF)     # all status masks
+    if resp.positive:
+        if resp.dtcs:
+            print(f"\nActive DTCs: {len(resp.dtcs)}")
+            for dtc in resp.dtcs:
+                print(f"  DTC {dtc.id:#06x} | severity={dtc.severity}")
+        else:
+            print("No DTCs stored")
+
+bus.shutdown()
+```
+
+---
+
 *File: 05_python_automation.md | marelli_cluster_lead series*

@@ -278,4 +278,158 @@ OEM Defect Triage Call — Cluster IC | Duration: 45 min
 
 ---
 
+---
+
+## 7. Test Strategy Document — Template for Cluster Lead
+
+```
+DOCUMENT: IC Validation Test Strategy
+PROJECT:  Marelli Cluster — Platform X
+VERSION:  1.0
+AUTHOR:   [Your Name], Cluster Lead
+
+1. SCOPE
+   In scope:  Telltales, Gauges, NVM, Power Mode, CAN Timeout, DIS features
+   Out scope: Radio, Navigation (handled by Infotainment team)
+
+2. TEST APPROACH
+   a) Functional testing: signal injection via CANoe CAPL
+   b) Regression testing: automated CANoe test module run per build
+   c) Exploratory testing: engineer-driven ad-hoc (planned 10% of effort)
+   d) Defect-based retesting: full retest on fixed builds
+
+3. ENTRY CRITERIA (to start execution)
+   - Cluster SW build delivered with build note
+   - DBC version frozen and verified against SW
+   - Test bench operational (power supply, CANoe, CAN interface)
+   - Test cases reviewed and approved by lead
+   - Baseline regression: previous build's results available
+
+4. EXIT CRITERIA (to sign off delivery)
+   - All P1/P2 defects Closed/Verified
+   - Test execution ≥ 95% (max 5% Blocked with documented reason)
+   - First-pass yield within target (≥ 85%)
+   - Traceability matrix complete: every SRS requirement has ≥ 1 TC
+   - OEM sign-off on all open P3/P4 (accept as-is or deferral)
+
+5. RISKS AND MITIGATIONS
+   Risk 1: DBC freeze delayed → MITIGATION: Run with draft DBC, revalidate after freeze
+   Risk 2: Bench availability → MITIGATION: Bench booking schedule, shared calendar
+   Risk 3: Junior engineer CAPL skill gap → MITIGATION: Senior pairing for first 2 weeks
+
+6. TEST ENVIRONMENT
+   HW:    Cluster bench — 12V power supply, CANcaseXL, CAN HS 500kbps
+   SW:    CANoe 17 SP3, DBC: Powertrain_v2.3.dbc, Body_v1.8.dbc
+   Build: IC_SW_v1.5.x (updated per sprint)
+
+7. TOOLS
+   Test Management:   Jira + Zephyr plugin
+   CAN interface:     Vector VN1630
+   Bug Tracking:      Jira IC_CLUSTER project
+   Reporting:         Python-generated Excel + CANoe XML HTML report
+```
+
+---
+
+## 8. Test Case Review Checklist — Detailed
+
+```
+REVIEW CHECKLIST (Lead completes before approving each TC batch)
+
+□ REQUIREMENT TRACEABILITY
+  - Every TC has at least one SRS requirement reference
+  - SRS reference is at correct revision (e.g. SRS Rev C, not Rev A)
+  - No orphan tests (test with no requirement — adds effort without coverage value)
+
+□ PRECONDITIONS
+  - Preconditions are achievable on the test bench
+  - Order of preconditions matches logical sequence (KL15 before signal injection)
+  - Precondition does not assume test environment state from a previous TC
+
+□ INPUTS AND EXPECTED VALUES
+  - Input values are numeric, not vague ("send speed signal" → "set VehicleSpeed = 60.0 km/h")
+  - Expected result quotes the SRS tolerance: "within ±3 km/h as per SRS_SPD_REQ_003"
+  - Edge cases covered: 0 value, max value, boundary conditions
+
+□ CAPL ALIGNMENT
+  - CAPL script variable names match those in test case step
+  - Timer values in CAPL match the wait times stated in TC steps
+  - CAPL script compiles without error (run compile check before sprint start)
+
+□ PASS/FAIL CRITERIA
+  - Pass/fail is binary and measurable — not "looks correct"
+  - Tolerance specified for analog checks
+  - Binary telltale checks: ON or OFF — no "dimly lit" ambiguity
+
+□ DEFECT LINKAGE
+  - Failing TCs from previous builds have defect ID cross-reference
+  - TC notes state "Blocked by CLU-XXXX" when not executable
+
+Rejection trigger: Any TC with vague expected result or missing SRS ref is sent back.
+```
+
+---
+
+## 9. Sprint Planning — Full Template
+
+```
+SPRINT:    Sprint 07
+DURATION:  2 weeks (Mon 2026-04-20 → Fri 2026-05-01)
+TEAM:      Ravi K, Priya M, Suresh L, Anjali R
+GOAL:      Complete telltale matrix validation (TC_TEL_001–TC_TEL_060)
+           Begin CAN timeout validation (TC_CTO_001–TC_CTO_015)
+
+─────────────────────────────────────────────────────────────────────
+CAPACITY CALCULATION:
+
+Engineer     Days    Hours/day  Available  Planned Effort
+──────────── ──────  ──────────  ─────────  ──────────────
+Ravi K          10       6h       60h       55h  (5h meetings)
+Priya M         10       6h       60h       55h
+Suresh L         8       6h       48h       43h  (off 2 days)
+Anjali R        10       4h       40h       35h  (fresher rate)
+──────── ──────────────────────────────────────────────────
+Total                            208h      188h usable
+
+─────────────────────────────────────────────────────────────────────
+BACKLOG SELECTION:
+
+Story/Task                        Owner     Estimate  Priority
+──────────────────────────────────────────────────────────────
+TC_TEL_001–030 (safety telltales) Suresh L   20h       P1
+TC_TEL_031–060 (info telltales)   Ravi K     20h       P2
+TC_CTO_001–015 (CAN timeout)      Ravi K     15h       P1
+Retest CLU-1024, CLU-1031         Suresh L    4h       P1
+ABS CAPL script update            Priya M     8h       P2
+DBC comparison run on v2.3        Priya M     3h       P2
+Onboard Anjali: telltale TCs      Anjali R   30h       Normal
+Sprint review prep + reporting    Lead        5h       Admin
+──────────────────────────────────────────────────────────────
+Total                                        105h  ← within 188h capacity
+
+─────────────────────────────────────────────────────────────────────
+DEPENDENCIES:
+  - DBC v2.3 from ABS team — needed before TC_CTO start (ETA: Apr 22)
+  - IC_SW_v1.5.1 build — needed for CLU-1024 retest (ETA: Apr 21)
+
+RISKS:
+  - If DBC delayed past Apr 24: TC_CTO pushed to Sprint 08 (notify PM)
+```
+
+---
+
+## 10. Lead Behaviours — Do's and Don'ts in Day-to-Day
+
+| Situation | DO | DON'T |
+|---|---|---|
+| Engineer raises a blocker in standup | "Thanks — I will take that action today. Who can unblock this?" | "Why didn't you raise this earlier?" (shaming) |
+| OEM raises a defect dispute | Present evidence, quote SRS, ask for written OEM decision | Argue on the call without data |
+| Fresher makes a mistake in defect report | Private correction, show example, have them redo it | Correct them publicly in a team meeting |
+| Schedule is slipping | Inform PM with options and risk — do not hide | Wait until deadline to flag |
+| Engineer's test case is rejected | Give written, specific feedback with a correct example | Reject without explanation |
+| Two engineers disagree on expected result | Bring it to SRS — the requirement is the truth | Pick a side personally |
+| P1 defect found 1 day before gateway | Escalate immediately, adjust test scope, inform OEM | Try to fix root cause yourself without escalating |
+
+---
+
 *File: 04_team_lead_planning.md | marelli_cluster_lead series*

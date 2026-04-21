@@ -379,4 +379,262 @@ PLAN NEXT WEEK:
 
 ---
 
+---
+
+## 7. CAN Error Frame Analysis
+
+### 7.1 Types of CAN Errors (ISO 11898)
+
+| Error Type | Cause | How to See in CANoe |
+|---|---|---|
+| Bit Error | Node transmits a bit but reads back a different level | Error frame in Trace, red row |
+| Stuff Error | 6+ consecutive same-polarity bits (stuffing violation) | Error frame, `StuffError` annotation |
+| CRC Error | Receiver CRC mismatch | `CRCError` annotation in Trace |
+| Form Error | Fixed-form field (EOF, ACK) has wrong bit level | `FormError` annotation |
+| ACK Error | No node acknowledges the frame | `AckError` — only transmitter sees this |
+| Bus-Off | Node error counter reaches 256 → taken off bus | No more TX from that node |
+| Error Passive | Error counter 127 < n < 256 → node still active but passive | |
+
+### 7.2 Reading Error Frames in CANoe Trace
+
+```
+In CANoe Trace window, error frames appear as red rows:
+
+    09:14:22.3410  CAN 1  Error Frame  Bit Error, TxErrCnt=12, RxErrCnt=4
+    09:14:22.3412  CAN 1  Error Frame  Stuff Error
+
+Steps:
+1. Filter trace to "CAN Errors" only (Filter → Error Frames)
+2. Note timestamp — compare to last valid message before error
+3. Note error counter values — rising TxErrCnt indicates transmitter fault
+4. Check if errors are on one channel only (bus impedance problem)
+   or both channels (ground fault or EMC event)
+5. Correlate with signal plot — does speed signal disappear at exact error time?
+
+Common cluster test causes:
+  - CAN termination removed during test → reflection → Bit errors
+  - Bench power supply voltage sag → ECU reboot → Bus-Off condition
+  - Wrong baud rate in CANoe config → continuous error frames on all messages
+```
+
+### 7.3 Bus Load and Timing Analysis
+
+```
+CANoe Statistics Panel — key metrics:
+
+Bus Load % = (frame_bits_per_second / 500000) × 100
+  - Healthy: < 30% for HS-CAN 500kbps
+  - Warning: 30–60%
+  - Overloaded: > 60% → higher latency, more error frames
+
+Cycle time analysis using CAPL:
+```
+
+```capl
+/* Measure actual cycle time of VehicleSpeed message */
+variables {
+    double  last_ts_ms  = 0.0;
+    double  cycle_time  = 0.0;
+}
+
+on message VehicleSpeed {
+    double now = timeNow() / 1e5;  /* timeNow() returns 100ns units */
+    if (last_ts_ms > 0.0) {
+        cycle_time = now - last_ts_ms;
+        if (cycle_time > 15.0 || cycle_time < 5.0) {
+            write("TIMING VIOLATION: VehicleSpeed cycle %.2f ms (expected 10ms)", cycle_time);
+        }
+    }
+    last_ts_ms = now;
+}
+```
+
+---
+
+## 8. Defect Writing — Deep Guide
+
+### 8.1 Anatomy of a High-Quality Cluster Defect Report
+
+```
+DEFECT ID:   CLU-1024
+TITLE:       [ABS] ABS fault telltale does NOT activate when ABS_Fault = 1
+
+──────────────────────────────────────────────────────────────────
+ENVIRONMENT:
+  Cluster SW Build:   IC_SW_v1.4.2
+  CANoe version:      17.0 SP3
+  DBC version:        Powertrain_v2.3.dbc
+  Test bench:         IC HIL Bench #3
+  Date:               2026-04-20
+
+──────────────────────────────────────────────────────────────────
+PRECONDITION:
+  1. Cluster powered on, KL15 = ON
+  2. VehicleSpeed signal active at 0 km/h
+  3. Bulb check completed — ABS telltale was visible during self-check
+
+──────────────────────────────────────────────────────────────────
+STEPS TO REPRODUCE:
+  1. Open CANoe project IC_Validation_v2.3.cfg
+  2. Start measurement
+  3. In Panel, set KL15 = ON → confirm cluster wakes up
+  4. Set ABS_Fault signal = 1 in message 0x3A5, Byte 0, Bit 0
+  5. Wait 1000ms
+  6. Observe cluster
+
+──────────────────────────────────────────────────────────────────
+EXPECTED RESULT:
+  ABS telltale (amber, ISO 2575 symbol J.5.2) illuminates within 500ms
+  of ABS_Fault = 1. Priority: P2 (ISO 2575).
+
+ACTUAL RESULT:
+  ABS telltale remains OFF. No change on cluster.
+  VehicleSpeed display continues to update normally (CAN reception is OK).
+
+──────────────────────────────────────────────────────────────────
+ROOT CAUSE HYPOTHESIS:
+  DBC signal ABS_Fault in Powertrain_v2.3.dbc is mapped to Byte 0 Bit 1.
+  CAN log shows transmitted bit at Byte 0 Bit 0 (per test setup).
+  Possible DBC mismatch — cluster firmware may expect Bit 1.
+
+──────────────────────────────────────────────────────────────────
+ATTACHMENTS:
+  [ CLU-1024_trace.asc ]        — filtered CAN log showing 0x3A5 frames
+  [ CLU-1024_panel_screenshot.png ] — cluster showing no ABS lamp
+  [ CLU-1024_dbc_extract.txt ]  — ABS_Fault signal definition from DBC v2.2 vs v2.3
+
+──────────────────────────────────────────────────────────────────
+SEVERITY:     P1 — Safety / ASIL B gate blocker
+ASSIGNED TO:  ABS ECU team (for DBC confirmation) + Cluster SW team
+SRS REF:      IC_SRS_TEL_REQ_014 Rev C
+```
+
+### 8.2 Defect Severity Classification — Cluster-Specific
+
+| Severity | Criteria | Cluster Examples |
+|---|---|---|
+| S1 / P1 | Safety-critical, ASIL gate blocker, OEM stop-ship | ABS telltale missing, SRS fault lamp absent, odometer rollback |
+| S2 / P2 | Functional loss or OEM-visible quality issue | Speedometer error >5 km/h, MIL latches incorrectly, gear wrong |
+| S3 / P3 | Cosmetic or minor functional deviation | Units wrong (L/100km vs MPG), DIS truncated text, backlight flicker |
+| S4 / P4 | Suggestion / improvement | Font size slightly small, animation timing slightly off |
+
+### 8.3 Defect Metrics — What a Cluster Lead Tracks
+
+```
+Weekly metrics dashboard (Jira filters):
+
+1. Defect Discovery Rate (new per week):
+   Healthy = < 5 new P1/P2 per week in late execution phase
+
+2. Defect Closure Rate:
+   Target: Closure rate ≥ Discovery rate (no growing backlog)
+
+3. First-Pass Yield:
+   FPY = (TCs passed on first execution) / (Total TCs executed)
+   Target: > 85%
+
+4. Defect Leakage:
+   = Defects found by OEM AFTER LTTS sign-off / Total defects
+   Target: < 5% leakage. Zero leakage for P1.
+
+5. Mean Time To Close (MTTC) by severity:
+   P1: < 7 days
+   P2: < 14 days
+   P3: < 30 days or deferred to next build
+
+6. Age of Oldest Open P1:
+   If > 7 days → escalate to PM with risk flag
+```
+
+---
+
+## 9. Advanced Root-Cause Patterns
+
+### 9.1 DBC Version Mismatch — The #1 Root Cause
+
+```
+Scenario: Signal suddenly decodes incorrectly after a new SW build
+
+Detection:
+  1. A signal that was working now shows wrong value
+  2. Raw CAN data (hex bytes in trace) has not changed
+  3. Conclusion: interpretation has changed → DBC mismatch
+
+Investigation steps:
+  Step 1: Export current DBC signal definition for suspect signal
+  Step 2: Compare with previously used DBC (version in version control)
+  Step 3: Key fields to compare:
+          - Start bit position (most common change)
+          - Factor and offset (scaling changes)
+          - Signal length (bits)
+          - Byte order (Intel vs Motorola)
+
+  Example diff:
+    v2.2: SG_ ABS_Fault : 0|1@1+ (1,0) — Bit 0 of Byte 0
+    v2.3: SG_ ABS_Fault : 8|1@1+ (1,0) — Bit 0 of Byte 1
+    → Signal moved from Byte 0 to Byte 1 → test setup injecting Byte 0 was wrong!
+
+Prevention:
+  - Always verify DBC version at test session start
+  - Use DBC comparison script (see 05_python_automation.md section 4)
+  - Freeze DBC at project milestone with git tag
+```
+
+### 9.2 Timing-Related Defects
+
+```
+Class: Signal present on bus but cluster display does not update in time
+
+Examples:
+  - Speedometer lags 1-2 seconds behind actual speed
+  - Fuel gauge hesitates before updating
+  - Gear indicator shows previous gear for 500ms after shift
+
+Root cause investigation:
+  1. Measure signal cycle time on bus (is ECU sending at correct rate?)
+  2. Measure cluster response time (time between signal arrival and display change)
+     In CANoe: use Measurement Setup → Graphics → overlay panel camera timestamp
+  3. Check if cluster is applying a filter or averaging algorithm
+     (Common: fuel gauge is filtered over 5s to avoid needle jitter)
+  4. Check cluster SW requirement for display response time (typically < 200ms for speed)
+
+Defect criteria:
+  Response time > SRS requirement → valid defect
+  Response time > SRS requirement but within OEM tolerance range → discuss with customer
+```
+
+---
+
+## 10. Communication Templates
+
+### 10.1 P1 Defect Escalation Email Template
+
+```
+Subject: [P1 URGENT] CLU-1024 ABS Telltale — Gateway Blocker — ACTION REQUIRED
+
+Hi [ABS ECU Team Lead],
+
+We have an S1 (P1) defect impacting the IC Gateway Review scheduled for [date].
+
+DEFECT: CLU-1024 — ABS fault telltale not activating when ABS_Fault = 1
+BUILD:  IC_SW_v1.4.2 + ABS_SW_v3.1.0
+IMPACT: ASIL B gate blocker — cannot sign off cluster delivery with P1 open
+
+ROOT CAUSE HYPOTHESIS:
+ABS_Fault signal bit position mismatch between DBC v2.2 (test setup) and v2.3
+(cluster ECU firmware). Awaiting ABS team confirmation on which DBC version governs.
+
+ACTION NEEDED FROM YOUR TEAM:
+  1. Confirm correct bit position for ABS_Fault in your current build
+  2. Provide updated DBC if v2.3 is correct
+  3. ETA for response: [required date] to meet build freeze
+
+Log and DBC extract attached.
+
+Regards,
+[Your Name] | Cluster Validation Lead | LTTS Bangalore
+```
+
+---
+
 *File: 03_can_log_analysis_defect_management.md | marelli_cluster_lead series*

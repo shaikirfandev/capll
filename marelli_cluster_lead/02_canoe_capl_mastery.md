@@ -529,4 +529,294 @@ void log_test_result(char name[], int passed, char detail[]) {
 
 ---
 
+---
+
+## 7. Advanced CAPL Techniques
+
+### 7.1 Environment Variables and System Variables
+
+```capl
+/*
+Environment variables (EnvVar) are shared between CAPL, Panels, and Symbols.
+System variables (SysVar) are in the ::namespace and are available across
+all measurement setups in the same CANoe project.
+*/
+
+/* Declare in CAPL (also must be defined in CANoe Symbols window): */
+variables {
+    msTimer  pollTimer;
+    int      g_test_running = 0;
+}
+
+/* READ an environment variable (set by Panel slider): */
+on envVar SpeedSlider {
+    float speed = getValue(this);
+    $VehicleSpeed::VehicleSpeed = speed;
+}
+
+/* WRITE to a system variable (to update Panel display): */
+on timer pollTimer {
+    float displayed = $VehicleSpeed::VehicleSpeed;
+    putValue(sysvar::ClusterDisplay::SpeedReading, displayed);
+    setTimer(pollTimer, 100);   /* poll every 100ms */
+}
+
+/* Trigger on system variable change: */
+on sysvar ClusterDisplay::FaultButtonPressed {
+    if (getValue(this) == 1) {
+        inject_abs_fault();
+    }
+}
+```
+
+### 7.2 CAPL Error Handling and Defensive Coding
+
+```capl
+/*
+CAPL has no exceptions. You must handle errors manually.
+Best practices for robust cluster test scripts:
+*/
+
+/* 1. Always check diagResponse result code */
+on diagResponse ClusterDiag.ReadDataByIdentifier {
+    if (this.result != 0) {
+        write("ERROR: UDS response failed, result code = %d", this.result);
+        TestStepFail("UDS_Read", "Diagnostic request did not receive positive response");
+        return;
+    }
+    /* proceed with data extraction */
+}
+
+/* 2. Guard against zero division in signal scaling */
+float safe_decode_speed(long raw_value, float factor) {
+    if (factor == 0.0) {
+        write("ERROR: factor is zero — DBC error");
+        return -1.0;
+    }
+    return raw_value * factor;
+}
+
+/* 3. Timeout guard on expected CAN response */
+msTimer responseTimeout;
+int    g_response_received = 0;
+
+void wait_for_response_or_timeout(int timeout_ms) {
+    g_response_received = 0;
+    setTimer(responseTimeout, timeout_ms);
+}
+
+on timer responseTimeout {
+    if (!g_response_received) {
+        write("TIMEOUT: Expected response not received within timer period");
+        TestStepFail("ResponseTimeout", "No CAN response within expected window");
+    }
+}
+
+on message 0x726 {  /* Cluster UDS response */
+    g_response_received = 1;
+    cancelTimer(responseTimeout);
+}
+```
+
+### 7.3 CAPL — Multi-Channel Handling
+
+```capl
+/*
+CANoe can have multiple CAN channels (CH1 = Powertrain, CH2 = Body).
+In CAPL, channel is accessed via message object properties.
+*/
+
+variables {
+    message 0x3B3 speed_msg;     /* auto-routes to channel per DBC assignment */
+    message CAN1.0x3B3 speed_ch1; /* explicit channel 1 */
+    message CAN2.0x3A0 bcm_ch2;  /* explicit channel 2 */
+}
+
+on start {
+    speed_ch1.VehicleSpeed = 5000;  /* raw = 50 km/h */
+    output(speed_ch1);              /* sends on CAN channel 1 only */
+
+    bcm_ch2.IgnitionStatus = 1;
+    output(bcm_ch2);                /* sends on CAN channel 2 only */
+}
+
+/* Listen to a specific channel: */
+on message CAN2.* {
+    write("Body bus message: 0x%X  DLC=%d", this.id, this.dlc);
+}
+```
+
+### 7.4 CAPL — Structured Test Parametrisation
+
+```capl
+/*
+Run the same test logic with different input parameters.
+Use arrays to drive test tables — avoids copy-paste of test code.
+*/
+
+typedef struct {
+    float  inject_kmh;
+    float  expected_kmh;
+    float  tolerance;
+    char   tc_id[16];
+} SpeedTestPoint_t;
+
+SpeedTestPoint_t speed_tests[8] = {
+    {  0.0,   0.0, 2.0, "TC_SPD_001"},
+    { 30.0,  30.0, 2.0, "TC_SPD_002"},
+    { 60.0,  60.0, 2.0, "TC_SPD_003"},
+    {100.0, 100.0, 3.0, "TC_SPD_004"},
+    {120.0, 120.0, 3.0, "TC_SPD_005"},
+    {160.0, 160.0, 4.0, "TC_SPD_006"},
+    {200.0, 200.0, 5.0, "TC_SPD_007"},
+    {250.0, 250.0, 5.0, "TC_SPD_008"}
+};
+
+testcase TC_SPD_SWEEP () {
+    int i;
+    for (i = 0; i < elcount(speed_tests); i++) {
+        SpeedTestPoint_t pt = speed_tests[i];
+
+        /* Inject signal */
+        $VehicleSpeed::VehicleSpeed = pt.inject_kmh;
+        TestWaitForTimeout(500);
+
+        /* Read back (via UDS or system variable from panel) */
+        float displayed = getValue(sysvar::ClusterDisplay::SpeedReading);
+
+        float diff = displayed - pt.expected_kmh;
+        if (diff < 0) diff = -diff;  /* abs() */
+
+        if (diff <= pt.tolerance) {
+            TestStep(pt.tc_id, "passed", "Inject=%.1f Display=%.1f Tol=±%.1f",
+                     pt.inject_kmh, displayed, pt.tolerance);
+        } else {
+            TestStep(pt.tc_id, "failed",
+                     "Inject=%.1f Display=%.1f Error=%.1f > Tol=%.1f",
+                     pt.inject_kmh, displayed, diff, pt.tolerance);
+        }
+    }
+}
+```
+
+---
+
+## 8. CANoe Logging Configuration for Cluster Testing
+
+### 8.1 Trigger-Based Logging
+
+```
+Goal: Capture only the relevant window around a failure event.
+      Avoids multi-GB log files from full test runs.
+
+CANoe Logging Block Trigger Setup:
+
+Pre-trigger: 5 seconds  (captures events BEFORE failure)
+Post-trigger: 10 seconds (captures recovery behaviour)
+
+Trigger conditions (any of):
+  - CAN Error Frame received
+  - Message 0x3B3 not received for > 200ms  (timeout)
+  - Signal ABS_Fault transitions from 0→1
+  - User-defined CAPL trigger: call triggerLogging() from testcase
+
+CAPL trigger call:
+  triggerStart();   /* begins logging from pre-trigger buffer */
+  /* ... test action ... */
+  triggerStop();    /* ends logging and saves file */
+```
+
+### 8.2 Logging Filter Configuration
+
+```
+To keep log files manageable, exclude irrelevant messages:
+
+Include:
+  - 0x3B3 (VehicleSpeed) — 10ms cycle, core signal
+  - 0x316 (EngineStatus) — 10ms cycle
+  - 0x34A (FuelLevel) — 100ms cycle
+  - 0x3A5, 0x3A6, 0x3A0, 0x3C0 — all fault/status messages
+  - 0x7xx range — UDS diagnostic messages
+
+Exclude:
+  - 0x400–0x4FF — Infotainment heartbeat (irrelevant for IC HW validation)
+  - 0x600+ — System-level keep-alive (noisy, low value)
+
+CANoe Filter File: IC_Validation_filter.clf
+  Applied to Trace window AND to logging block simultaneously
+```
+
+---
+
+## 9. CANoe XML Test Report Structure
+
+```
+When using CANoe Test Module (.vts), results are auto-generated in:
+  - HTML report
+  - XML (parsable by CI tools)
+  - PDF (for OEM delivery)
+
+Typical test result XML structure:
+
+<TestReport>
+  <TestSuite name="IC_System_TestSuite">
+    <TestCase id="TC_SPD_001" name="Speed 60kmh" result="Pass">
+      <TestStep id="1" result="Pass" timestamp="09:14:22.341">
+        Inject 60 km/h — VehicleSpeed raw = 6000
+      </TestStep>
+      <TestStep id="2" result="Pass" timestamp="09:14:22.842">
+        Display reads 60 km/h — within ±2 km/h tolerance
+      </TestStep>
+    </TestCase>
+    <TestCase id="TC_TEL_001" name="ABS Telltale Active" result="Fail">
+      <TestStep id="1" result="Fail" timestamp="09:16:05.100">
+        Expected: ABS telltale ON. Actual: telltale OFF.
+        Defect: CLU-1024
+      </TestStep>
+    </TestCase>
+  </TestSuite>
+  <Summary total="2" pass="1" fail="1" passRate="50.0%"/>
+</TestReport>
+
+Parse XML in Python for CI dashboard:
+  import xml.etree.ElementTree as ET
+  tree = ET.parse("IC_TestReport.xml")
+  root = tree.getroot()
+  for tc in root.findall(".//TestCase"):
+      print(tc.attrib["id"], tc.attrib["result"])
+```
+
+---
+
+## 10. CANoe vs CANalyzer — When to Use What
+
+| Feature | CANoe | CANalyzer |
+|---|---|---|
+| CAPL scripting | ✅ Full support | ✅ Limited (no test module) |
+| Test Modules (.vts) | ✅ Yes | ❌ No |
+| Simulation nodes | ✅ Can simulate ECUs | ❌ No |
+| Diagnostic (UDS) | ✅ via Diagnostics window | ✅ Basic |
+| Logging | ✅ Trigger-based, filtered | ✅ Basic logging |
+| Panel / UI | ✅ Panels with sliders/buttons | ❌ No |
+| LIN bus | ✅ With LIN add-on | ✅ LIN version available |
+| Use case | Full test automation | Quick trace analysis |
+| Licence cost | Higher | Lower |
+
+**Cluster Lead Practice:** Use CANoe for all test automation and execution. Use CANalyzer for quick ad-hoc bus monitoring when CANoe workspace is being prepared.
+
+---
+
+## 11. Frequently Made CAPL Mistakes to Avoid
+
+| Mistake | Problem | Correct Approach |
+|---|---|---|
+| Not cancelling timer before restart | Timer callback fires multiple times | `cancelTimer(t); setTimer(t, 200);` |
+| Using `=` in `on message` condition | No condition filter in CAPL message handler | Use `if (this.signal == x)` inside handler |
+| Accessing signal from wrong channel | Reads wrong bus signal | Use `CAN1.` prefix or verify DBC channel assignment |
+| Blocking in `on message` handler | Causes bus queue backlog | Keep handlers short — use timer for delays |
+| Not resetting state flags between tests | Previous test state leaks into next | `resetVars()` call in `on stop` or between testcases |
+| Hardcoding CAN IDs without DBC names | Script breaks when DBC version changes | Always use DBC symbolic name `VehicleSpeed` not `0x3B3` |
+
+---
+
 *File: 02_canoe_capl_mastery.md | marelli_cluster_lead series*

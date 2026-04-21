@@ -353,4 +353,135 @@ on timer faultTimer {
 
 ---
 
+---
+
+## 10. Cluster Variant Management
+
+### 10.1 Common Variants for a Single Platform
+
+| Variant Axis | Options | CAN Implication |
+|---|---|---|
+| Unit system | km/h vs mph (US/UK markets) | Speed signal same — cluster renders in mph |
+| Steering hand | LHD vs RHD | No CAN impact — display mirror is HW-based |
+| Language | 30+ OEM market languages | DIS strings loaded from NVM at first KL15 |
+| Fuel type | Petrol / Diesel / EV / HEV | Different gauge sets displayed |
+| Trim level | Base / Mid / Top | DIS feature set varies — different SW builds |
+| Region | EU / NAM / APAC | Regulatory warning icons differ (ISO 2575 vs SAE J1048) |
+
+### 10.2 Variant Test Strategy
+
+```
+METHOD 1 — Parameterised CAPL:
+  - A single CAPL test script parametrised via environment variable "market"
+  - Speedometer expected values change based on market (km/h or mph)
+  - Fuel economy: L/100km (EU) vs MPG (US) vs km/L (Japan)
+
+METHOD 2 — Multiple DBC + config files:
+  - variant_eu.cfg / variant_us.cfg — loaded at startup
+  - Different CAN IDs for TPMS in NAM vs EU (OEM-specific)
+
+VALIDATION APPROACH FOR EACH VARIANT:
+  1. Load correct SW build + DBC for that market
+  2. Run the full regression suite
+  3. Verify unit labels, decimal places, and localisation strings
+  4. Check regulatory telltale icons match ISO 2575 (EU) or SAE J1048 (US)
+```
+
+### 10.3 Localisation Test Points
+
+```
+- Speed display: "120 km/h" vs "74 mph" — check rounding, no decimal on speed
+- Fuel economy: "7.5 L/100km" vs "31 MPG" — both from same signal, different formula
+  Formula: MPG = 235.214 / (L_per_100km)
+- Temperature: °C vs °F: °F = (°C × 9/5) + 32
+- Distance (trip): km to 1dp decimal, miles to 1dp decimal
+- DIS language: cluster loads language pack from NVM on first boot (or via UDS write)
+- Max speedometer scale: EU typically 260 km/h, US 160 mph (scale ring changes)
+```
+
+---
+
+## 11. EV / HEV Specific Cluster Signals
+
+### 11.1 EV-Unique Displays (replacing ICE gauges)
+
+| Display | Signal Source | Replaces |
+|---|---|---|
+| State of Charge (SOC %) | BMS on CAN | Fuel gauge |
+| Power meter (kW in/out) | BMS / VCU | Tachometer (often overlaid) |
+| Range estimate (km) | VCU | Fuel range in DIS |
+| Charging status | BMS / ChargeCtrl | Fuel pump telltale |
+| Regen indicator | VCU | None — EV-specific |
+| Ready indicator ("READY") | VCU | MIL position | 
+
+### 11.2 CAN Signals for BMS/EV Cluster Validation
+
+```
+BMS → Cluster (example, OEM-specific IDs):
+
+0x3A2  BMS_Status (10ms cycle)
+  SOC_pct       [0|16@1+] (0.5, 0)   — 0.5% resolution
+  SOH_pct       [16|8@1+] (1, 0)     — battery health
+  BatteryVoltage [24|12@1+] (0.1, 0) — pack voltage
+  BatteryTemp   [36|8@1+] (1, -40)   — offset -40°C
+
+0x3A3  VCU_Status (10ms cycle)
+  DriveRange_km  [0|16@1+] (1, 0)     — GOM (Guess-O-Meter)
+  ChargingState  [16|4@1+] (1, 0)
+      0 = Not charging
+      1 = AC charging
+      2 = DC fast charge
+      3 = Regen active
+  ReadySignal    [20|1@1+] (1, 0)     — Cluster shows READY lamp
+```
+
+### 11.3 EV Cluster Validation Points
+
+```
+1. SOC gauge:
+   - Inject SOC = 0, 10, 20 ... 100% → verify gauge matches
+   - Low battery warning at OEM threshold (typically 10% or 15%)
+   - Empty warning at 5% (OEM-specific)
+   - Gauge rate of change: gauge must not jump — filter/smoothing validation
+
+2. Charging screen:
+   - AC charge = slow fill animation
+   - DC fast charge = faster fill animation + kW display
+   - Full charged = 100% + "CHARGED" message
+
+3. READY lamp:
+   - VCU sends ReadySignal=1 → green READY lamp on cluster
+   - Appears only after HV pre-charge complete (safety requirement)
+   - Validated via CAPL: inject ReadySignal=0,1,0 and verify telltale
+
+4. Range display:
+   - GOM (range km) decreases as injected SOC decreases
+   - Compare displayed range vs (SOC × battery_capacity / avg_consumption)
+   - "--" shown when range data unavailable (signal timeout)
+```
+
+---
+
+## 12. Cluster Validation Interview Q&A — Domain Knowledge
+
+| Question | Answer |
+|---|---|
+| What is the bulb check sequence? | At KL15 ON, cluster activates all telltales for ~2–3 seconds to verify display elements function |
+| Why is the speedometer calibrated to always over-read? | EU Reg 39 forbids under-reading (dangerous) — permitted over-read is ≤10% + 4 km/h |
+| What is NVM in cluster context? | Flash memory storing odometer, trip counters, DTC data, calibration tables — must survive power loss |
+| How does the cluster receive gear position? | From TCU via CAN — `CurrentGear` signal in TCU message (0=P, 1=R, 2=N, 3=D, 4-8 = gears) |
+| What is a timeout fallback? | How cluster displays signal data when CAN message is no longer received within expected cycle time |
+| What is ASIL B relevance to cluster? | Speedometer is an ASIL B function — must not show misleading speed under any fault |
+| What is a DID? | Data Identifier — used in UDS ReadDataByIdentifier (0x22) to read specific ECU data |
+| What is a DTC? | Diagnostic Trouble Code — fault code stored in ECU NVM readable via UDS 0x19 service |
+| How do you validate odometer accuracy? | Inject known speed × time, compare CAN-calculated km vs cluster-displayed km |
+| What is a MIL? | Malfunction Indicator Lamp — the "check engine" amber telltale required by OBD legislation |
+| What causes a MIL to remain latched? | ECU stores DTC that requires a drive cycle to clear — cluster reads DTC presence from ECM |
+| What is TPMS? | Tyre Pressure Monitoring System — required by EU Reg. 661/2009 since 2014 |
+| What are P-codes and B-codes? | Powertrain and Body OBD DTCs — P0xxx = generic, P1xxx = OEM specific |
+| What is KL15 vs KL30? | KL30 = battery (always on). KL15 = ignition-switched power (controlled by ignition key) |
+| What is cluster self-test / IGN-on test? | Sequence where cluster sweeps all gauges, lights all telltales, plays chime — verifies hardware |
+
+---
+
 *File: 01_instrument_cluster_fundamentals.md | marelli_cluster_lead series*
