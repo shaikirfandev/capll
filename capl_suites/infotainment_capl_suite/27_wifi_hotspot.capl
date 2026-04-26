@@ -1,0 +1,92 @@
+/*
+ * File   : 27_wifi_hotspot.capl
+ * Purpose: Validate WiFi AP enable, client connect count, data limit alert, disable
+ * Tests  : TC01 WiFi AP ON, TC02 Client connects, TC03 Max client limit, TC04 Data limit alert, TC05 WiFi AP OFF
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x409 msg_WiFi;
+  msTimer stepTimer;
+
+  byte g_rxAPActive     = 0;
+  byte g_rxClientCount  = 0;
+  int  g_step           = 0;
+  int  g_pass           = 0;
+  int  g_fail           = 0;
+
+  const byte WIFI_AP_ON  = 1;
+  const byte WIFI_AP_OFF = 0;
+  const byte MAX_CLIENTS = 8;
+}
+
+on start {
+  write("=== TC: WiFi Hotspot ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Enable WiFi hotspot AP");
+      msg_WiFi.byte(0) = WIFI_AP_ON;
+      msg_WiFi.byte(1) = 0;
+      output(msg_WiFi);
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      check("WiFiAPEnabled", (g_rxAPActive == WIFI_AP_ON) ? 1 : 0);
+      write("[STEP 2] Simulate 2 clients connected");
+      msg_WiFi.byte(0) = WIFI_AP_ON;
+      msg_WiFi.byte(1) = 2;
+      output(msg_WiFi);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      check("ClientCount2", (g_rxClientCount == 2) ? 1 : 0);
+      write("[STEP 3] Simulate max clients (%d)", MAX_CLIENTS);
+      msg_WiFi.byte(1) = MAX_CLIENTS;
+      output(msg_WiFi);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      check("MaxClientsReached", (g_rxClientCount == MAX_CLIENTS) ? 1 : 0);
+      write("[STEP 4] Simulate data limit alert (byte0=1, byte1=0xFF)");
+      msg_WiFi.byte(0) = WIFI_AP_ON;
+      msg_WiFi.byte(1) = 0xFF;  // special code for data limit
+      output(msg_WiFi);
+      check("DataLimitAlert", (g_rxClientCount == 0xFF) ? 1 : 0);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      write("[STEP 5] Disable WiFi AP");
+      msg_WiFi.byte(0) = WIFI_AP_OFF;
+      msg_WiFi.byte(1) = 0;
+      output(msg_WiFi);
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      check("WiFiAPDisabled", (g_rxAPActive == WIFI_AP_OFF) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on message 0x409 {
+  g_rxAPActive    = this.byte(0);
+  g_rxClientCount = this.byte(1);
+  write("[RX] WiFi AP=%d  Clients=%d", g_rxAPActive, g_rxClientCount);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== WiFi Hotspot Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

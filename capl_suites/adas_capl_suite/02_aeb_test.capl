@@ -1,0 +1,162 @@
+/*
+ * 02_aeb_test.capl
+ * Autonomous Emergency Braking (AEB) Validation
+ * Tests: AEB activation timing, deceleration level, pedestrian AEB, speed thresholds
+ * Standard: Euro NCAP AEB Protocol, ISO 22839
+ */
+
+variables {
+  message 0x308 RadarObj;
+  message 0x100 VehicleSpeed;
+  message 0x301 AEB_Status;      // AEB output: Active, BrakeLevel, Reason
+
+  msTimer  stepTimer;
+  msTimer  responseTimer;
+
+  int   testStep        = 0;
+  int   passCount       = 0;
+  int   failCount       = 0;
+  int   aebActive       = 0;
+  int   brakeLevel      = 0;      // 0–255 = 0–100% decel
+  float responseTime_ms = 0.0;
+  float txTimestamp     = 0.0;
+  int   aebResponseSeen = 0;
+}
+
+void sendTarget(float dist_m, float closing_kmh, byte valid) {
+  int d = (int)(dist_m * 10);
+  int s = (int)((closing_kmh + 128.0) * 10);
+  RadarObj.dlc = 8;
+  RadarObj.byte(0) = (d >> 8) & 0xFF;
+  RadarObj.byte(1) = d & 0xFF;
+  RadarObj.byte(2) = (s >> 8) & 0xFF;
+  RadarObj.byte(3) = s & 0xFF;
+  RadarObj.byte(4) = valid;
+  txTimestamp = timeNow() / 10000.0;
+  aebResponseSeen = 0;
+  output(RadarObj);
+}
+
+void sendSpeed(float spd) {
+  int raw = (int)(spd * 10);
+  VehicleSpeed.dlc = 8;
+  VehicleSpeed.byte(0) = (raw >> 8) & 0xFF;
+  VehicleSpeed.byte(1) = raw & 0xFF;
+  output(VehicleSpeed);
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+on start {
+  write("=== AEB Test Suite Started ===");
+  sendSpeed(50.0);
+  setTimer(stepTimer, 500);
+}
+
+on timer stepTimer {
+  testStep++;
+  write("--- AEB Step %d ---", testStep);
+
+  switch(testStep) {
+    case 1:
+      // AEB city scenario: 50 km/h, stationary target at 20m
+      write("[STEP 1] City AEB: 50 km/h → stationary target 20m");
+      sendSpeed(50.0);
+      sendTarget(20.0, 50.0, 1);   // 50 km/h closing = stationary
+      setTimer(stepTimer, 2000);
+      break;
+
+    case 2:
+      // AEB highway: 100 km/h, 30m to slow vehicle at 80 km/h → closing 20 km/h
+      write("[STEP 2] Highway AEB: 100 km/h, closing 20 km/h, 30m");
+      sendSpeed(100.0);
+      sendTarget(30.0, 20.0, 1);
+      setTimer(stepTimer, 2000);
+      break;
+
+    case 3:
+      // AEB pedestrian mode (target type byte = 0x02)
+      write("[STEP 3] Pedestrian AEB: 40 km/h, 15m, ped target");
+      sendSpeed(40.0);
+      RadarObj.byte(5) = 0x02;  // Target type: pedestrian
+      sendTarget(15.0, 40.0, 1);
+      setTimer(stepTimer, 2000);
+      break;
+
+    case 4:
+      // Speed too low: should NOT activate AEB
+      write("[STEP 4] AEB inhibit: speed=8 km/h (<10 km/h threshold)");
+      sendSpeed(8.0);
+      sendTarget(5.0, 8.0, 1);
+      setTimer(stepTimer, 1500);
+      break;
+
+    case 5:
+      // AEB deactivation: driver applies steering override
+      write("[STEP 5] AEB override: driver steering torque applied");
+      sendSpeed(60.0);
+      sendTarget(20.0, 60.0, 1);
+      setTimer(stepTimer, 500);
+      break;
+
+    case 6:
+      // Simulate driver override during AEB (steering torque message)
+      {
+        message 0x311 SteerTorque;
+        SteerTorque.dlc = 4;
+        SteerTorque.byte(0) = 0x00;
+        SteerTorque.byte(1) = 0xB4;   // 180 = high torque override
+        output(SteerTorque);
+        write("[STEP 6] Driver torque override sent – AEB must deactivate");
+      }
+      setTimer(stepTimer, 1500);
+      break;
+
+    case 7:
+      // No target: AEB must NOT fire
+      write("[STEP 7] No target: AEB must be inactive");
+      sendSpeed(80.0);
+      sendTarget(0.0, 0.0, 0);   // valid=0 means no object
+      setTimer(stepTimer, 1000);
+      break;
+
+    case 8:
+      write("=== AEB Test Complete PASS=%d FAIL=%d ===", passCount, failCount);
+      break;
+  }
+}
+
+on message 0x301 {  // AEB_Status
+  float now_ms = timeNow() / 10000.0;
+  aebActive  = this.byte(0) & 0x01;
+  brakeLevel = this.byte(1);
+
+  if (aebActive && !aebResponseSeen) {
+    responseTime_ms = now_ms - txTimestamp;
+    aebResponseSeen = 1;
+    write("[AEB RX] Active=%d BrakeLevel=%d ResponseTime=%.1f ms",
+          aebActive, brakeLevel, responseTime_ms);
+  }
+
+  switch(testStep) {
+    case 1: if (aebActive) check("AEB_City_Activation",  brakeLevel >= 150 && responseTime_ms <= 600); break;
+    case 2: if (aebActive) check("AEB_Highway_Activation", brakeLevel >= 100 && responseTime_ms <= 600); break;
+    case 3: if (aebActive) check("AEB_Pedestrian_Mode",   brakeLevel >= 180); break;
+    case 4:                check("AEB_Inhibit_LowSpeed",  aebActive == 0); break;
+    case 6:                check("AEB_Override_Deactivate", aebActive == 0); break;
+    case 7:                check("AEB_NoTarget_Inactive", aebActive == 0); break;
+  }
+}
+
+on key 'a' {
+  write("[KEY] Manual AEB trigger test");
+  sendSpeed(60.0);
+  sendTarget(15.0, 60.0, 1);
+}
+
+on stopMeasurement {
+  write("=== AEB Summary: PASS=%d | FAIL=%d ===", passCount, failCount);
+}

@@ -1,0 +1,97 @@
+/*
+ * File   : 17_v2x_transmit_mode.capl
+ * Purpose: V2X role=tx, BSM sent every 100ms, neighbour vehicle received on 0x650
+ * CAN IDs: 0x610 V2X_BSM, 0x650 TCU_Response
+ */
+
+variables {
+  message 0x610 V2X_BSM;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  msTimer bsmTimer;
+  int passCount      = 0;
+  int failCount      = 0;
+  int testStep       = 0;
+  int bsmCount       = 0;
+  int neighbourSeen  = 0;
+  dword bsmStart     = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 17_v2x_transmit_mode: V2X TX Mode  BSM Rate & Neighbour ===");
+  passCount = 0; failCount = 0; testStep = 0; bsmCount = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Set V2X role to TX (byte0=2)");
+      V2X_BSM.byte(0) = 2; V2X_BSM.byte(1) = 0; V2X_BSM.byte(2) = 0;
+      output(V2X_BSM);
+      setTimer(stepTimer, 500);
+      break;
+    case 2:
+      write("[STEP 2] Start BSM transmission at 100ms interval");
+      bsmStart = timeNow() / 100000;
+      setTimer(bsmTimer, 100);
+      setTimer(stepTimer, 1200);
+      break;
+    case 3:
+      write("[STEP 3] Stop BSM timer, check count (expect ~10 in 1s)");
+      cancelTimer(bsmTimer);
+      write("  BSM messages sent: %d", bsmCount);
+      setTimer(stepTimer, 500);
+      break;
+    case 4:
+      write("[STEP 4] Verify BSM rate: 10 ± 2 msgs per second");
+      check("BSM rate within 100ms interval (8-12 msgs/s)", bsmCount >= 8 && bsmCount <= 12);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Inject neighbouring vehicle seen (byte1=1)");
+      V2X_BSM.byte(0) = 2; V2X_BSM.byte(1) = 1; V2X_BSM.byte(2) = 0;
+      output(V2X_BSM);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] TCU reports neighbour received on 0x650");
+      TCU_Response.byte(0) = 0xB1; TCU_Response.byte(1) = 0x01; TCU_Response.byte(2) = 0x00;
+      output(TCU_Response);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify neighbour vehicle seen in TX mode");
+      check("Neighbour vehicle received", neighbourSeen);
+      check("V2X role still TX (2)",      V2X_BSM.byte(0) == 2);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify hazard flag not present in normal TX");
+      check("No hazard in normal TX mode", V2X_BSM.byte(2) == 0);
+      break;
+    default:
+      break;
+  }
+}
+
+on msTimer bsmTimer {
+  bsmCount++;
+  V2X_BSM.byte(0) = 2; V2X_BSM.byte(1) = 0; V2X_BSM.byte(2) = 0;
+  output(V2X_BSM);
+  setTimer(bsmTimer, 100);
+}
+
+on message 0x610 {
+  if (this.byte(1) >= 1 && this.byte(0) == 2) neighbourSeen = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

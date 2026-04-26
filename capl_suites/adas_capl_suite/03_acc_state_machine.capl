@@ -1,0 +1,133 @@
+/*
+ * 03_acc_state_machine.capl
+ * Adaptive Cruise Control (ACC) State Machine Validation
+ * Tests: Standby→Active, speed regulation, gap control, cut-in, resume, override
+ */
+
+variables {
+  message 0x302 ACC_Control;   // Input: SetSpeed, SetGap, Enable
+  message 0x302 ACC_Status;    // Output: CurrentState, ActualSpeed, TargetSpeed
+  message 0x100 VehicleSpeed;
+  message 0x308 RadarObj;
+
+  msTimer stepTimer;
+  int     testStep    = 0;
+  int     passCount   = 0;
+  int     failCount   = 0;
+  float   setSpeed    = 0.0;
+  float   actualSpeed = 0.0;
+  float   accState    = 0;   // 0=Off 1=Standby 2=Active 3=Override 4=Braking
+
+  // ACC States
+  enum { ACC_OFF=0, ACC_STANDBY=1, ACC_ACTIVE=2, ACC_OVERRIDE=3, ACC_BRAKING=4 }
+}
+
+void setACCSpeed(float spd, byte gapLevel) {
+  int raw = (int)(spd * 10);
+  ACC_Control.byte(0) = 0x01;   // Enable
+  ACC_Control.byte(1) = (raw >> 8) & 0xFF;
+  ACC_Control.byte(2) = raw & 0xFF;
+  ACC_Control.byte(3) = gapLevel & 0x07;   // Gap: 1–4
+  output(ACC_Control);
+}
+
+void setHostSpeed(float spd) {
+  int raw = (int)(spd * 10);
+  VehicleSpeed.byte(0) = (raw >> 8) & 0xFF;
+  VehicleSpeed.byte(1) = raw & 0xFF;
+  output(VehicleSpeed);
+}
+
+void sendLeadVehicle(float dist, float closing) {
+  int d = (int)(dist * 10);
+  int s = (int)((closing + 128.0) * 10);
+  RadarObj.byte(0) = (d >> 8) & 0xFF;
+  RadarObj.byte(1) = d & 0xFF;
+  RadarObj.byte(2) = (s >> 8) & 0xFF;
+  RadarObj.byte(3) = s & 0xFF;
+  RadarObj.byte(4) = 0x01;
+  output(RadarObj);
+}
+
+void check(char n[], int c) { if(c){write("[PASS] %s",n);passCount++;}else{write("[FAIL] %s",n);failCount++;} }
+
+on start {
+  write("=== ACC State Machine Suite ===");
+  setHostSpeed(0.0);
+  setTimer(stepTimer, 500);
+}
+
+on timer stepTimer {
+  testStep++;
+  switch(testStep) {
+    case 1:
+      write("[S1] Enable ACC at standstill – expect STANDBY"); 
+      setHostSpeed(0.0);
+      ACC_Control.byte(0) = 0x01; ACC_Control.byte(1) = 0; ACC_Control.byte(2) = 0;
+      output(ACC_Control);
+      setTimer(stepTimer, 1500);
+      break;
+    case 2:
+      write("[S2] Set speed 100 km/h, no lead car – expect ACTIVE free-run");
+      setHostSpeed(80.0);
+      setACCSpeed(100.0, 2);
+      setTimer(stepTimer, 2000);
+      break;
+    case 3:
+      write("[S3] Lead car at 80m, 5 km/h closing – maintain gap");
+      sendLeadVehicle(80.0, 5.0);
+      setTimer(stepTimer, 2000);
+      break;
+    case 4:
+      write("[S4] Cut-in: vehicle merges at 30m – ACC must decelerate");
+      sendLeadVehicle(30.0, 20.0);
+      setTimer(stepTimer, 2000);
+      break;
+    case 5:
+      write("[S5] Lead car disappears – ACC resume set speed");
+      RadarObj.byte(4) = 0x00;  // No object
+      output(RadarObj);
+      setTimer(stepTimer, 2000);
+      break;
+    case 6:
+      write("[S6] Driver throttle override – ACC goes OVERRIDE state");
+      { message 0x350 ThrottleOverride; ThrottleOverride.byte(0) = 0xC8; output(ThrottleOverride); }
+      setTimer(stepTimer, 1500);
+      break;
+    case 7:
+      write("[S7] Cancel ACC – expect OFF");
+      ACC_Control.byte(0) = 0x00;
+      output(ACC_Control);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[S8] Speed < 30 km/h – ACC standby auto (if follow-to-stop not set)");
+      setHostSpeed(25.0);
+      setACCSpeed(80.0, 2);
+      setTimer(stepTimer, 1500);
+      break;
+    case 9:
+      write("=== ACC Test Done PASS=%d FAIL=%d ===", passCount, failCount);
+      break;
+  }
+}
+
+on message 0x302 {
+  if (this.dir == RX) {
+    accState    = this.byte(0);
+    actualSpeed = ((this.byte(1)*256) + this.byte(2)) / 10.0;
+
+    switch(testStep) {
+      case 1: check("ACC_Standby_On_Enable",      accState == ACC_STANDBY); break;
+      case 2: check("ACC_Active_FreeRun",          accState == ACC_ACTIVE);  break;
+      case 3: check("ACC_Gap_Control",             accState == ACC_ACTIVE);  break;
+      case 4: check("ACC_Decel_On_CutIn",          accState == ACC_BRAKING); break;
+      case 5: check("ACC_Resume_After_LeadGone",   accState == ACC_ACTIVE);  break;
+      case 6: check("ACC_Override_State",          accState == ACC_OVERRIDE);break;
+      case 7: check("ACC_Off_After_Cancel",        accState == ACC_OFF);     break;
+      case 8: check("ACC_Standby_BelowMinSpeed",   accState == ACC_STANDBY); break;
+    }
+  }
+}
+
+on stopMeasurement { write("ACC: P=%d F=%d", passCount, failCount); }

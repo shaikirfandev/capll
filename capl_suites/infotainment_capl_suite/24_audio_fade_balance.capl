@@ -1,0 +1,95 @@
+/*
+ * File   : 24_audio_fade_balance.capl
+ * Purpose: Validate fade front/rear, balance left/right, centre reset
+ * Tests  : TC01 Fade front, TC02 Fade rear, TC03 Balance left, TC04 Balance right, TC05 Centre reset
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  // Fade/balance message byte0=fade(-10..+10 encoded 0..20), byte1=balance
+  message 0x400 msg_FadeBalance;
+  msTimer stepTimer;
+
+  byte g_rxFade    = 0;
+  byte g_rxBalance = 0;
+  int  g_step      = 0;
+  int  g_pass      = 0;
+  int  g_fail      = 0;
+
+  // Encoding: 0=−10 (rear/left), 10=centre, 20=+10 (front/right)
+  const byte FADE_FRONT  = 18;
+  const byte FADE_REAR   = 2;
+  const byte BAL_LEFT    = 2;
+  const byte BAL_RIGHT   = 18;
+  const byte CENTRE      = 10;
+}
+
+on start {
+  write("=== TC: Audio Fade & Balance ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Fade to front (fade=%d)", FADE_FRONT);
+      msg_FadeBalance.byte(0) = FADE_FRONT;
+      msg_FadeBalance.byte(1) = CENTRE;
+      output(msg_FadeBalance);
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      check("FadeFront", (g_rxFade == FADE_FRONT) ? 1 : 0);
+      write("[STEP 2] Fade to rear (fade=%d)", FADE_REAR);
+      msg_FadeBalance.byte(0) = FADE_REAR;
+      output(msg_FadeBalance);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      check("FadeRear", (g_rxFade == FADE_REAR) ? 1 : 0);
+      write("[STEP 3] Balance left (bal=%d)", BAL_LEFT);
+      msg_FadeBalance.byte(0) = CENTRE;
+      msg_FadeBalance.byte(1) = BAL_LEFT;
+      output(msg_FadeBalance);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      check("BalanceLeft", (g_rxBalance == BAL_LEFT) ? 1 : 0);
+      write("[STEP 4] Balance right (bal=%d)", BAL_RIGHT);
+      msg_FadeBalance.byte(1) = BAL_RIGHT;
+      output(msg_FadeBalance);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      check("BalanceRight", (g_rxBalance == BAL_RIGHT) ? 1 : 0);
+      write("[STEP 5] Reset to centre (fade=%d bal=%d)", CENTRE, CENTRE);
+      msg_FadeBalance.byte(0) = CENTRE;
+      msg_FadeBalance.byte(1) = CENTRE;
+      output(msg_FadeBalance);
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      check("CentreReset", (g_rxFade == CENTRE && g_rxBalance == CENTRE) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on message 0x400 {
+  g_rxFade    = this.byte(0);
+  g_rxBalance = this.byte(1);
+  write("[RX] Fade=%d Balance=%d", g_rxFade, g_rxBalance);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Audio Fade & Balance Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

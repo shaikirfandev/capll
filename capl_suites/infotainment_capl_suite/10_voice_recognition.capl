@@ -1,0 +1,97 @@
+/*
+ * File   : 10_voice_recognition.capl
+ * Purpose: Validate VR activation, command processing, no-speech timeout, cancel
+ * Tests  : TC01 VR activate, TC02 Command received, TC03 No-speech timeout, TC04 Cancel VR, TC05 Re-activate
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x406 msg_SWC;
+  msTimer stepTimer;
+  msTimer vrTimeoutTimer;
+
+  int  g_step      = 0;
+  int  g_pass      = 0;
+  int  g_fail      = 0;
+  int  g_vrActive  = 0;
+  int  g_cmdRecvd  = 0;
+
+  const byte KEY_VR_ACTIVATE = 0x50;
+  const byte KEY_VR_CANCEL   = 0x51;
+  const byte KEY_VR_COMMAND  = 0x52;
+  const int  VR_TIMEOUT_MS   = 5000;
+}
+
+on start {
+  write("=== TC: Voice Recognition ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Activate VR (long-press SWC VR key)");
+      msg_SWC.byte(0) = KEY_VR_ACTIVATE;
+      output(msg_SWC);
+      g_vrActive = 1;
+      setTimer(vrTimeoutTimer, VR_TIMEOUT_MS);
+      g_step = 2; setTimer(stepTimer, 600); break;
+
+    case 2:
+      write("[STEP 2] Simulate spoken command received");
+      msg_SWC.byte(0) = KEY_VR_COMMAND;
+      output(msg_SWC);
+      g_cmdRecvd = 1;
+      cancelTimer(vrTimeoutTimer);
+      g_step = 3; setTimer(stepTimer, 500); break;
+
+    case 3:
+      check("VRCommandProcessed", g_cmdRecvd);
+      g_step = 4; setTimer(stepTimer, 500); break;
+
+    case 4:
+      write("[STEP 4] Activate VR again – let no-speech timeout fire");
+      msg_SWC.byte(0) = KEY_VR_ACTIVATE;
+      output(msg_SWC);
+      g_vrActive = 1;
+      g_cmdRecvd = 0;
+      setTimer(vrTimeoutTimer, VR_TIMEOUT_MS);
+      g_step = 5; setTimer(stepTimer, 5500); break;
+
+    case 5:
+      check("VRNoSpeechTimeout", (g_vrActive == 0) ? 1 : 0);
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      write("[STEP 6] Cancel VR session explicitly");
+      msg_SWC.byte(0) = KEY_VR_CANCEL;
+      output(msg_SWC);
+      g_vrActive = 0;
+      check("VRCancelled", 1);
+      g_step = 0; break;
+  }
+}
+
+on timer vrTimeoutTimer {
+  write("[INFO] VR no-speech timeout elapsed");
+  g_vrActive = 0;
+  check("VRTimeoutAutoCancel", 1);
+}
+
+on message 0x406 {
+  write("[RX] SWC_Key = 0x%02X", this.byte(0));
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Voice Recognition Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

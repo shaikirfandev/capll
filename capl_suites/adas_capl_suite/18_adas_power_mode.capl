@@ -1,0 +1,100 @@
+/*
+ * 18_adas_power_mode.capl
+ * ADAS Power Mode Transitions – Off→Standby→On→Sleep, ignition handling, wake-up
+ * CAN: 0x320 (PowerMode), 0x101 (Ignition)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+  msTimer sleepTimer;
+
+  // Power states: 0=OFF, 1=STANDBY, 2=ON, 3=SLEEP, 4=WAKEUP
+  int powerState    = 0;
+  int ignitionState = 0;   // 0=off, 1=KL15_ON
+  int wakeupSource  = 0;   // 0=none,1=ignition,2=CAN,3=timer
+  int sleepInhibit  = 0;
+  int sleepCountdown= 0;   // seconds
+
+  const int STANDBY_TO_SLEEP_S = 5;
+
+  int stepCount = 0;
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "ADAS_PowerModeTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void setPowerState(int newState) {
+  if (newState != powerState) {
+    write("[PWR] %d -> %d (ign=%d)", powerState, newState, ignitionState);
+    powerState = newState;
+  }
+}
+
+void evalPowerMode() {
+  message 0x320 pwrMsg;
+  switch (powerState) {
+    case 0: // OFF
+      if (ignitionState == 1) { wakeupSource = 1; setPowerState(4); }
+      break;
+    case 4: // WAKEUP
+      setPowerState(1); break;  // -> STANDBY
+    case 1: // STANDBY
+      if (ignitionState == 1) { setPowerState(2); sleepCountdown = 0; }
+      else {
+        sleepCountdown++;
+        if (sleepCountdown >= STANDBY_TO_SLEEP_S && !sleepInhibit) setPowerState(3);
+      }
+      break;
+    case 2: // ON
+      if (ignitionState == 0) { setPowerState(1); sleepCountdown = 0; }
+      break;
+    case 3: // SLEEP
+      if (ignitionState == 1) { wakeupSource = 1; setPowerState(4); }
+      break;
+  }
+  pwrMsg.byte(0) = powerState   & 0xFF;
+  pwrMsg.byte(1) = ignitionState & 0xFF;
+  pwrMsg.byte(2) = wakeupSource  & 0xFF;
+  pwrMsg.byte(3) = sleepInhibit  & 0xFF;
+  output(pwrMsg);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 500);
+}
+
+on timer stepTimer {
+  stepCount++;
+
+  if (stepCount == 1) { ignitionState = 0; evalPowerMode(); check("Initial_OFF", powerState == 0); }
+  if (stepCount == 2) { ignitionState = 1; evalPowerMode(); check("KL15_ON_Wakeup",  powerState == 4 || powerState == 1 || powerState == 2); }
+  if (stepCount == 3) { evalPowerMode(); check("Wakeup_ToStandby_OrOn", powerState >= 1); }
+  if (stepCount == 4) { evalPowerMode(); check("Standby_To_On", powerState == 2); }
+  if (stepCount == 5) { ignitionState = 0; evalPowerMode(); check("KL15_OFF_Standby", powerState == 1); }
+  // Let sleep countdown run without inhibit
+  if (stepCount >= 6 && stepCount <= 11) { sleepInhibit = 0; evalPowerMode(); }
+  if (stepCount == 11) check("Standby_To_Sleep",  powerState == 3);
+  if (stepCount == 12) { ignitionState = 1; evalPowerMode(); check("Sleep_Wakeup_IGN", wakeupSource == 1); }
+  if (stepCount == 14) { sleepInhibit = 1; ignitionState = 0; evalPowerMode(); }
+  if (stepCount == 20) { evalPowerMode(); check("SleepInhibit_PreventsSlp", powerState != 3); }
+
+  if (stepCount < 21) setTimer(stepTimer, 500);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on message 0x101 { ignitionState = this.byte(0); }
+on message 0x320 {
+  write("[RX 0x320] state=%d ign=%d wake=%d sleepInhib=%d",
+        this.byte(0), this.byte(1), this.byte(2), this.byte(3));
+}

@@ -1,0 +1,111 @@
+/*
+ * 12_speed_limit_recognition.capl
+ * Speed Limit Recognition / ISA Validation – sign detected, speed overshoot
+ * warning, HMI signal
+ * CAN: 0x100 (VehicleSpeed), 0x312 (TSR_ISA)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+  msTimer signHoldTimer;
+
+  int vehicleSpeed   = 0;   // km/h
+  int detectedLimit  = 0;   // km/h from sign
+  int signConfidence = 0;   // 0-100 %
+  int overshootWarn  = 0;   // 0/1
+  int hmiDisplayCode = 0;   // 0=none,1=advisory,2=warning,3=alert
+
+  const int OVERSHOOT_MARGIN = 5;   // km/h tolerance above limit
+  const int CONFIDENCE_MIN   = 70;
+
+  int stepCount = 0;
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "SpeedLimitRecognitionTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void evalISA() {
+  message 0x312 tsrMsg;
+  overshootWarn = 0;
+  if (detectedLimit > 0 && signConfidence >= CONFIDENCE_MIN) {
+    if (vehicleSpeed > detectedLimit + OVERSHOOT_MARGIN) {
+      overshootWarn  = 1;
+      hmiDisplayCode = 3;  // alert
+    } else if (vehicleSpeed > detectedLimit) {
+      overshootWarn  = 1;
+      hmiDisplayCode = 2;  // warning
+    } else {
+      hmiDisplayCode = 1;  // advisory (showing limit)
+    }
+  } else {
+    hmiDisplayCode = 0;
+  }
+  tsrMsg.byte(0) = detectedLimit & 0xFF;
+  tsrMsg.byte(1) = signConfidence & 0xFF;
+  tsrMsg.byte(2) = overshootWarn & 0xFF;
+  tsrMsg.byte(3) = hmiDisplayCode & 0xFF;
+  output(tsrMsg);
+  write("[ISA] limit=%d spd=%d conf=%d warn=%d hmi=%d",
+        detectedLimit, vehicleSpeed, signConfidence, overshootWarn, hmiDisplayCode);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 400);
+}
+
+on timer stepTimer {
+  stepCount++;
+
+  if (stepCount == 1) {
+    detectedLimit = 50; signConfidence = 80; vehicleSpeed = 45;
+    evalISA();
+    check("LimitDetected_Advisory",  hmiDisplayCode == 1);
+    check("NoOvershoot_Below",       overshootWarn == 0);
+  }
+  if (stepCount == 2) {
+    vehicleSpeed = 52;  // within margin
+    evalISA();
+    check("WithinMargin_Warning",    hmiDisplayCode == 2);
+  }
+  if (stepCount == 3) {
+    vehicleSpeed = 60;  // clear overshoot
+    evalISA();
+    check("Overshoot_Alert",         hmiDisplayCode == 3);
+    check("OvershootWarn_Active",    overshootWarn == 1);
+  }
+  if (stepCount == 4) {
+    signConfidence = 30; // low confidence – suppress
+    evalISA();
+    check("LowConfidence_Suppressed",hmiDisplayCode == 0);
+  }
+  if (stepCount == 5) {
+    detectedLimit = 100; signConfidence = 90; vehicleSpeed = 95;
+    evalISA();
+    check("Highway_Limit_Advisory",  hmiDisplayCode == 1);
+  }
+  if (stepCount == 6) {
+    vehicleSpeed = 110;
+    evalISA();
+    check("Highway_Overshoot",       overshootWarn == 1);
+  }
+
+  if (stepCount < 7) setTimer(stepTimer, 400);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on message 0x100 { vehicleSpeed = this.byte(0); }
+on message 0x312 {
+  write("[RX 0x312] limit=%d conf=%d warn=%d hmi=%d",
+        this.byte(0), this.byte(1), this.byte(2), this.byte(3));
+}

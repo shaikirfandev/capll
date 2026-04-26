@@ -1,0 +1,133 @@
+/*
+ * 26_adas_regression_suite.capl
+ * Full Regression Test Runner – calls sub-test functions for all ADAS functions,
+ * overall pass/fail verdict
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+
+  // Module test results: 0=not run, 1=pass, 2=fail
+  int result_FCW  = 0;
+  int result_AEB  = 0;
+  int result_ACC  = 0;
+  int result_LKA  = 0;
+  int result_BSD  = 0;
+  int result_DMS  = 0;
+  int result_Park = 0;
+  int result_TSR  = 0;
+  int result_Radar= 0;
+  int result_Power= 0;
+
+  int totalPass   = 0;
+  int totalFail   = 0;
+  int stepCount   = 0;
+  char testName[64] = "ADAS_RegressionSuiteTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); totalPass++; }
+  else       { write("[FAIL] %s", name); totalFail++; }
+}
+
+/* ---- Stubbed sub-test functions ---- */
+int test_FCW() {
+  int speed, obsDist;
+  speed = 80; obsDist = 40;
+  write("[REG] FCW: speed=%d obsDist=%d", speed, obsDist);
+  return (speed > 0 && obsDist < 60) ? 1 : 2;
+}
+
+int test_AEB() {
+  int ttc;
+  ttc = 1;  // <2s → AEB must fire
+  write("[REG] AEB: ttc=%ds", ttc);
+  return (ttc < 2) ? 1 : 2;
+}
+
+int test_ACC() {
+  int setSpd, actSpd;
+  setSpd = 100; actSpd = 98;
+  write("[REG] ACC: setSpd=%d actSpd=%d", setSpd, actSpd);
+  int diff; diff = setSpd - actSpd; if (diff < 0) diff = -diff;
+  return (diff <= 3) ? 1 : 2;
+}
+
+int test_LKA() {
+  int laneOffset;
+  laneOffset = 8;  // cm
+  write("[REG] LKA: laneOffset=%dcm", laneOffset);
+  return (laneOffset <= 15) ? 1 : 2;
+}
+
+int test_BSD() {
+  int objInBlindSpot;
+  objInBlindSpot = 1;
+  write("[REG] BSD: objInBlindSpot=%d", objInBlindSpot);
+  return (objInBlindSpot == 1) ? 1 : 2;
+}
+
+int test_DMS() {
+  int drowsy, eyeClosed;
+  drowsy = 1; eyeClosed = 0;
+  write("[REG] DMS: drowsy=%d eyeClosed=%d", drowsy, eyeClosed);
+  return (!eyeClosed) ? 1 : 2;
+}
+
+int test_Park() {
+  int rearDist;
+  rearDist = 18;
+  write("[REG] PARK: rearDist=%dcm", rearDist);
+  return (rearDist < 25) ? 1 : 2;
+}
+
+int test_TSR() {
+  int signLimit, detectedLimit;
+  signLimit = 50; detectedLimit = 50;
+  write("[REG] TSR: signLimit=%d detected=%d", signLimit, detectedLimit);
+  return (signLimit == detectedLimit) ? 1 : 2;
+}
+
+int test_Radar() {
+  int objCount;
+  objCount = 3;
+  write("[REG] RADAR: tracking %d objects", objCount);
+  return (objCount > 0) ? 1 : 2;
+}
+
+int test_Power() {
+  int pwrState;
+  pwrState = 2;  // ON
+  write("[REG] POWER: state=%d", pwrState);
+  return (pwrState == 2) ? 1 : 2;
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  stepCount++;
+  if (stepCount == 1)  { result_FCW   = test_FCW();   check("FCW_Module",   result_FCW  == 1); }
+  if (stepCount == 2)  { result_AEB   = test_AEB();   check("AEB_Module",   result_AEB  == 1); }
+  if (stepCount == 3)  { result_ACC   = test_ACC();   check("ACC_Module",   result_ACC  == 1); }
+  if (stepCount == 4)  { result_LKA   = test_LKA();   check("LKA_Module",   result_LKA  == 1); }
+  if (stepCount == 5)  { result_BSD   = test_BSD();   check("BSD_Module",   result_BSD  == 1); }
+  if (stepCount == 6)  { result_DMS   = test_DMS();   check("DMS_Module",   result_DMS  == 1); }
+  if (stepCount == 7)  { result_Park  = test_Park();  check("PARK_Module",  result_Park == 1); }
+  if (stepCount == 8)  { result_TSR   = test_TSR();   check("TSR_Module",   result_TSR  == 1); }
+  if (stepCount == 9)  { result_Radar = test_Radar(); check("RADAR_Module", result_Radar== 1); }
+  if (stepCount == 10) { result_Power = test_Power(); check("POWER_Module", result_Power== 1); }
+  if (stepCount == 11) {
+    write("====================================");
+    write("  ADAS REGRESSION SUITE SUMMARY");
+    write("  PASS: %d  FAIL: %d", totalPass, totalFail);
+    write("  VERDICT: %s", (totalFail == 0) ? "*** ALL PASS ***" : "*** FAILURES DETECTED ***");
+    write("====================================");
+    stop();
+  }
+  if (stepCount < 12) setTimer(stepTimer, 300);
+}

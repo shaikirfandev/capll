@@ -1,0 +1,176 @@
+/*
+ * File   : 30_infotainment_e2e_test.capl
+ * Purpose: Full end-to-end sequence: boot → source switch → nav → BT call → OTA → sleep
+ * Tests  : TC01 Boot, TC02 Source switch Radio→BT, TC03 Nav guidance, TC04 BT call,
+ *          TC05 OTA update, TC06 Sleep, TC07 Wake, TC08 E2E pass/fail summary
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x402 msg_HU_Power;
+  message 0x401 msg_Source;
+  message 0x400 msg_Vol;
+  message 0x403 msg_Nav;
+  message 0x404 msg_BT;
+  message 0x405 msg_Call;
+  message 0x408 msg_OTA;
+  message 0x406 msg_SWC;
+  msTimer stepTimer;
+  msTimer watchdog;
+
+  byte g_rxPower  = 0;
+  byte g_rxSource = 0;
+  byte g_rxNav    = 0;
+  byte g_rxBT     = 0;
+  byte g_rxCall   = 0;
+  byte g_rxOTA    = 0;
+  int  g_step     = 0;
+  int  g_pass     = 0;
+  int  g_fail     = 0;
+
+  const byte HU_ON        = 2;
+  const byte HU_STANDBY   = 1;
+  const byte SRC_RADIO    = 0;
+  const byte SRC_BT       = 2;
+  const byte NAV_GUIDANCE = 2;
+  const byte NAV_ARRIVED  = 3;
+  const byte BT_CONNECTED = 3;
+  const byte CALL_ACTIVE  = 2;
+  const byte CALL_IDLE    = 0;
+  const byte OTA_SUCCESS  = 2;
+  const int  WATCHDOG_MS  = 30000;
+}
+
+on start {
+  write("=== E2E TEST: Full Infotainment Sequence ===");
+  setTimer(watchdog, WATCHDOG_MS);
+  g_step = 1;
+  setTimer(stepTimer, 200);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    /* --- TC01: Boot --- */
+    case 1:
+      write("[STEP 1] IGN ON – HU boot");
+      msg_HU_Power.byte(0) = HU_ON;
+      output(msg_HU_Power);
+      msg_Vol.byte(0) = 25;
+      output(msg_Vol);
+      g_step = 2; setTimer(stepTimer, 500); break;
+
+    case 2:
+      check("E2E_Boot", (g_rxPower == HU_ON) ? 1 : 0);
+
+    /* --- TC02: Source switch --- */
+      write("[STEP 2] Source: Radio → BT");
+      msg_Source.byte(0) = SRC_RADIO;
+      output(msg_Source);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      msg_Source.byte(0) = SRC_BT;
+      output(msg_Source);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      check("E2E_SourceBT", (g_rxSource == SRC_BT) ? 1 : 0);
+
+    /* --- TC03: Navigation --- */
+      write("[STEP 3] Nav guidance active");
+      msg_Nav.byte(0) = NAV_GUIDANCE;
+      msg_Nav.byte(1) = 20;
+      output(msg_Nav);
+      g_step = 5; setTimer(stepTimer, 500); break;
+
+    case 5:
+      check("E2E_NavGuidance", (g_rxNav == NAV_GUIDANCE) ? 1 : 0);
+
+    /* --- TC04: BT phone call --- */
+      write("[STEP 4] Incoming BT call – answer");
+      msg_BT.byte(0) = BT_CONNECTED;
+      output(msg_BT);
+      msg_Call.byte(0) = CALL_ACTIVE;
+      output(msg_Call);
+      g_step = 6; setTimer(stepTimer, 500); break;
+
+    case 6:
+      check("E2E_CallActive", (g_rxCall == CALL_ACTIVE) ? 1 : 0);
+      msg_Call.byte(0) = CALL_IDLE;
+      output(msg_Call);
+
+    /* --- TC05: OTA update --- */
+      write("[STEP 5] OTA update: 0 → 100%%");
+      msg_OTA.byte(0) = 0;
+      msg_OTA.byte(1) = 1;  // Downloading
+      output(msg_OTA);
+      g_step = 7; setTimer(stepTimer, 400); break;
+
+    case 7:
+      msg_OTA.byte(0) = 50;
+      output(msg_OTA);
+      g_step = 8; setTimer(stepTimer, 400); break;
+
+    case 8:
+      msg_OTA.byte(0) = 100;
+      msg_OTA.byte(1) = OTA_SUCCESS;
+      output(msg_OTA);
+      g_step = 9; setTimer(stepTimer, 400); break;
+
+    case 9:
+      check("E2E_OTASuccess", (g_rxOTA == OTA_SUCCESS) ? 1 : 0);
+
+    /* --- TC06: Sleep --- */
+      write("[STEP 6] IGN OFF → HU sleep (standby)");
+      msg_HU_Power.byte(0) = HU_STANDBY;
+      output(msg_HU_Power);
+      g_step = 10; setTimer(stepTimer, 500); break;
+
+    case 10:
+      check("E2E_Sleep", (g_rxPower == HU_STANDBY) ? 1 : 0);
+
+    /* --- TC07: Wake --- */
+      write("[STEP 7] SWC key press – wake from sleep");
+      msg_SWC.byte(0) = 0x01;
+      output(msg_SWC);
+      msg_HU_Power.byte(0) = HU_ON;
+      output(msg_HU_Power);
+      g_step = 11; setTimer(stepTimer, 400); break;
+
+    case 11:
+      check("E2E_WakeOnSWC", (g_rxPower == HU_ON) ? 1 : 0);
+      cancelTimer(watchdog);
+      write("[STEP 8] E2E sequence complete.");
+      g_step = 0; break;
+  }
+}
+
+on timer watchdog {
+  write("[WARN] E2E watchdog timeout – sequence did not complete in time!");
+  check("E2E_Watchdog", 0);
+}
+
+on message 0x402 { g_rxPower  = this.byte(0); write("[RX] HU_Power=%d",  g_rxPower);  }
+on message 0x401 { g_rxSource = this.byte(0); write("[RX] Source=%d",     g_rxSource); }
+on message 0x403 { g_rxNav    = this.byte(0); write("[RX] NavState=%d",   g_rxNav);    }
+on message 0x404 { g_rxBT     = this.byte(0); write("[RX] BTState=%d",    g_rxBT);     }
+on message 0x405 { g_rxCall   = this.byte(0); write("[RX] CallState=%d",  g_rxCall);   }
+on message 0x408 { g_rxOTA    = this.byte(1); write("[RX] OTAStatus=%d",  g_rxOTA);    }
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== E2E Infotainment Test Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+  if (g_fail == 0) {
+    write("[PASS] E2E_FULL_SUITE – all checks passed");
+  } else {
+    write("[FAIL] E2E_FULL_SUITE – %d check(s) failed", g_fail);
+  }
+}

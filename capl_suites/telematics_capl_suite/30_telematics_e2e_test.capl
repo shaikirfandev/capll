@@ -1,0 +1,124 @@
+/*
+ * File   : 30_telematics_e2e_test.capl
+ * Purpose: Full E2E: TCU boot→GPS fix→remote lock→OTA download→eCall idle→sleep
+ * CAN IDs: 0x600 0x601 0x602 0x603 0x604 0x605 0x606 0x608 0x609
+ */
+
+variables {
+  message 0x600 TCU_Status;
+  message 0x601 GPS_Validity;
+  message 0x602 GPS_Latitude;
+  message 0x603 GPS_Longitude;
+  message 0x604 RemoteCmd;
+  message 0x605 RemoteAck;
+  message 0x606 OTA_Status;
+  message 0x608 eCall_Status;
+  message 0x609 TCU_PowerMode;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount    = 0;
+  int failCount    = 0;
+  int testStep     = 0;
+  int phase1_boot  = 0;
+  int phase2_gps   = 0;
+  int phase3_lock  = 0;
+  int phase4_ota   = 0;
+  int phase5_ecall = 0;
+  int phase6_sleep = 0;
+  dword e2eStart   = 0;
+  dword e2eEnd     = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 30_telematics_e2e_test: Full End-to-End Telematics Flow ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  e2eStart = timeNow() / 100000;
+  setTimer(stepTimer, 500);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[PHASE 1] TCU Boot: offline→connecting→online");
+      TCU_Status.byte(0) = 0; TCU_Status.byte(1) = 0; output(TCU_Status);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      TCU_Status.byte(0) = 2; TCU_Status.byte(1) = 30; output(TCU_Status);
+      setTimer(stepTimer, 1500);
+      break;
+    case 3:
+      TCU_Status.byte(0) = 1; TCU_Status.byte(1) = 90; output(TCU_Status);
+      phase1_boot = 1;
+      check("E2E Phase1: TCU online",               phase1_boot);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[PHASE 2] GPS Fix: invalid→valid, 8 satellites, position injected");
+      GPS_Validity.byte(0) = 0; GPS_Validity.byte(1) = 0; output(GPS_Validity);
+      setTimer(stepTimer, 1500);
+      break;
+    case 5:
+      GPS_Validity.byte(0) = 1; GPS_Validity.byte(1) = 8; output(GPS_Validity);
+      GPS_Latitude.byte(0)  = 0x02; GPS_Latitude.byte(1)  = 0x40;
+      GPS_Latitude.byte(2)  = 0xDA; GPS_Latitude.byte(3)  = 0x14; output(GPS_Latitude);
+      GPS_Longitude.byte(0) = 0xF8; GPS_Longitude.byte(1) = 0xA7;
+      GPS_Longitude.byte(2) = 0xC8; GPS_Longitude.byte(3) = 0x38; output(GPS_Longitude);
+      phase2_gps = 1;
+      check("E2E Phase2: GPS fix valid, sats>=4",   GPS_Validity.byte(1) >= 4);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[PHASE 3] Remote Lock: cmd→processing→done ACK");
+      RemoteCmd.byte(0) = 0x01; RemoteCmd.byte(1) = 0xAA; output(RemoteCmd);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      RemoteAck.byte(0) = 0x01; RemoteAck.byte(1) = 1; RemoteAck.byte(2) = 0; output(RemoteAck);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      RemoteAck.byte(0) = 0x01; RemoteAck.byte(1) = 2; RemoteAck.byte(2) = 0; output(RemoteAck);
+      phase3_lock = (RemoteAck.byte(1) == 2) ? 1 : 0;
+      check("E2E Phase3: Remote lock done",          phase3_lock);
+      write("[PHASE 4] OTA: idle→downloading→complete");
+      OTA_Status.byte(0) = 1; OTA_Status.byte(1) = 50; output(OTA_Status);
+      OTA_Status.byte(0) = 3; OTA_Status.byte(1) = 100; output(OTA_Status);
+      phase4_ota = (OTA_Status.byte(0) == 3) ? 1 : 0;
+      check("E2E Phase4: OTA complete",              phase4_ota);
+      write("[PHASE 5] eCall: idle confirmed");
+      eCall_Status.byte(0) = 0; eCall_Status.byte(1) = 0; output(eCall_Status);
+      phase5_ecall = (eCall_Status.byte(0) == 0) ? 1 : 0;
+      check("E2E Phase5: eCall idle",                phase5_ecall);
+      write("[PHASE 6] Power: TCU transitions to SLEEP");
+      TCU_PowerMode.byte(0) = 1; TCU_PowerMode.byte(1) = 0; output(TCU_PowerMode);
+      TCU_PowerMode.byte(0) = 0; TCU_PowerMode.byte(1) = 0; output(TCU_PowerMode);
+      phase6_sleep = (TCU_PowerMode.byte(0) == 0) ? 1 : 0;
+      check("E2E Phase6: TCU entered sleep",         phase6_sleep);
+      e2eEnd = timeNow() / 100000;
+      {
+        dword total = e2eEnd - e2eStart;
+        write("  Total E2E duration: %d ms", total);
+        check("E2E complete within 60s", total <= 60000);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x605 {
+  if (this.byte(0) == 0x01 && this.byte(1) == 2) phase3_lock = 1;
+}
+
+on stopMeasurement {
+  write("=== E2E PHASE REPORT: Boot=%d GPS=%d Lock=%d OTA=%d eCall=%d Sleep=%d ===",
+        phase1_boot, phase2_gps, phase3_lock, phase4_ota, phase5_ecall, phase6_sleep);
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

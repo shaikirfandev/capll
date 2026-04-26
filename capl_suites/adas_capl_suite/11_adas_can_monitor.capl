@@ -1,0 +1,114 @@
+/*
+ * 11_adas_can_monitor.capl
+ * ADAS CAN Bus Signal Monitor – all ADAS signals, timeout detection,
+ * range checks, cycle time validation
+ */
+
+includes { }
+
+variables {
+  msTimer cycleCheckTimer;
+  msTimer timeoutWatchdog;
+
+  // Last RX timestamps (ms)
+  dword lastRx_0x100 = 0;  // VehicleSpeed
+  dword lastRx_0x301 = 0;  // AEB
+  dword lastRx_0x302 = 0;  // ACC
+  dword lastRx_0x303 = 0;  // LKA
+  dword lastRx_0x308 = 0;  // Radar
+  dword lastRx_0x309 = 0;  // Camera
+
+  // Expected cycle times (ms)
+  const int CYCLE_0x100 = 10;
+  const int CYCLE_0x301 = 20;
+  const int CYCLE_0x302 = 20;
+  const int CYCLE_0x303 = 20;
+  const int CYCLE_0x308 = 50;
+  const int CYCLE_0x309 = 50;
+  const int TIMEOUT_MS  = 200;
+
+  // Range limits
+  const int SPEED_MAX  = 250;   // km/h
+  const int AEB_MAX    = 1;
+  const int ACC_MAX    = 1;
+  const int LKA_MAX    = 1;
+
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "ADASSCANMonitorTest";
+
+  // Prev cycle timestamps for cycle-time check
+  dword prevRx_0x100 = 0;
+  dword cycleTime_0x100 = 0;
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void checkTimeout(char sigName[], dword lastRx) {
+  dword now, delta;
+  now = timeNow() / 100000;  // convert to ms
+  delta = now - lastRx;
+  if (lastRx == 0) { write("[MON] %s: never received", sigName); return; }
+  if (delta > TIMEOUT_MS) {
+    write("[FAIL] TIMEOUT %s (silent %d ms)", sigName, delta);
+    failCount++;
+  } else {
+    write("[PASS] %s active (last %d ms ago)", sigName, delta);
+    passCount++;
+  }
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(cycleCheckTimer, 500);
+  setTimer(timeoutWatchdog,  300);
+}
+
+on message 0x100 {
+  dword now;
+  int speed;
+  now   = timeNow() / 100000;
+  speed = this.byte(0);
+  if (prevRx_0x100 > 0) cycleTime_0x100 = now - prevRx_0x100;
+  prevRx_0x100 = now;
+  lastRx_0x100 = now;
+  check("VehicleSpeed_Range", speed >= 0 && speed <= SPEED_MAX);
+  if (cycleTime_0x100 > 0)
+    check("VehicleSpeed_CycleTime", cycleTime_0x100 >= (CYCLE_0x100 - 2) && cycleTime_0x100 <= (CYCLE_0x100 + 5));
+}
+
+on message 0x301 {
+  lastRx_0x301 = timeNow() / 100000;
+  check("AEB_Signal_Range", this.byte(0) <= AEB_MAX);
+}
+
+on message 0x302 {
+  lastRx_0x302 = timeNow() / 100000;
+  check("ACC_Signal_Range", this.byte(0) <= ACC_MAX);
+}
+
+on message 0x303 {
+  lastRx_0x303 = timeNow() / 100000;
+  check("LKA_Signal_Range", this.byte(0) <= LKA_MAX);
+}
+
+on message 0x308 { lastRx_0x308 = timeNow() / 100000; }
+on message 0x309 { lastRx_0x309 = timeNow() / 100000; }
+
+on timer timeoutWatchdog {
+  checkTimeout("VehicleSpeed_0x100", lastRx_0x100);
+  checkTimeout("AEB_0x301",          lastRx_0x301);
+  checkTimeout("ACC_0x302",          lastRx_0x302);
+  checkTimeout("LKA_0x303",          lastRx_0x303);
+  checkTimeout("Radar_0x308",        lastRx_0x308);
+  checkTimeout("Camera_0x309",       lastRx_0x309);
+  setTimer(timeoutWatchdog, 500);
+}
+
+on timer cycleCheckTimer {
+  write("[MON] Cycle-time 0x100 last=%d ms (expected ~%d ms)", cycleTime_0x100, CYCLE_0x100);
+  write("=== %s running – PASS:%d FAIL:%d ===", testName, passCount, failCount);
+}

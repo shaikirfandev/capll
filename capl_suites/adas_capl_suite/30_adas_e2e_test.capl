@@ -1,0 +1,162 @@
+/*
+ * 30_adas_e2e_test.capl
+ * End-to-End ADAS Integration Test – full scenario:
+ * Highway entry → AEB → LKA → ACC → exit, all signals verified
+ * CAN: 0x100 VehicleSpeed, 0x301 AEB, 0x302 ACC, 0x303 LKA, 0x308 Radar
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+
+  // Scenario phases: 0=IDLE,1=HIGHWAY_ENTRY,2=AEB_EVENT,3=LKA_ACTIVE,4=ACC_ACTIVE,5=EXIT,6=COMPLETE
+  int phase        = 0;
+  int stepCount    = 0;
+
+  // Vehicle signals
+  int vehicleSpeed  = 0;
+  int accSetSpeed   = 0;
+  int accActive     = 0;
+  int lkaActive     = 0;
+  int aebFired      = 0;
+  int steeringTorque= 0;  // Nm*10
+  int laneOffset    = 0;  // cm
+
+  // Radar object
+  int  radarObjRange = 0;
+  int  radarObjSpeed = 0;
+  float ttcSec       = 999.0;
+
+  // Phase results
+  int phaseResult[7] = {-1,-1,-1,-1,-1,-1,-1};
+
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "ADAS_E2E_IntegrationTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void sendSpeed(int spd) {
+  message 0x100 msg; msg.byte(0) = spd & 0xFF; output(msg); vehicleSpeed = spd;
+}
+void sendAEB(int val) {
+  message 0x301 msg; msg.byte(0) = val & 0xFF; output(msg); aebFired = val;
+}
+void sendACC(int active, int setSpd) {
+  message 0x302 msg; msg.byte(0) = active & 0xFF; msg.byte(1) = setSpd & 0xFF;
+  output(msg); accActive = active; accSetSpeed = setSpd;
+}
+void sendLKA(int active, int offset) {
+  message 0x303 msg; msg.byte(0) = active & 0xFF; msg.byte(1) = (offset+128) & 0xFF;
+  output(msg); lkaActive = active; laneOffset = offset;
+}
+void sendRadar(int range, int spd) {
+  message 0x308 msg; msg.byte(1) = (range>255?255:range) & 0xFF; msg.byte(3) = (spd>255?255:spd) & 0xFF;
+  output(msg); radarObjRange = range; radarObjSpeed = spd;
+  int relSpd; relSpd = vehicleSpeed - spd;
+  if (relSpd > 0 && range > 0) ttcSec = (float)range / ((float)relSpd / 3.6);
+  else ttcSec = 999.0;
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 400);
+}
+
+on timer stepTimer {
+  stepCount++;
+
+  /* PHASE 1 – Highway Entry */
+  if (stepCount == 1) {
+    phase = 1;
+    write("[E2E] Phase 1: Highway Entry");
+    sendSpeed(100); sendRadar(150, 90); sendACC(1, 100); sendLKA(1, 0);
+    check("P1_Speed_100",       vehicleSpeed == 100);
+    check("P1_ACC_Active",      accActive == 1);
+    check("P1_LKA_Active",      lkaActive == 1);
+    phaseResult[1] = (vehicleSpeed == 100 && accActive && lkaActive) ? 1 : 0;
+  }
+
+  /* PHASE 2 – AEB Event (sudden obstacle) */
+  if (stepCount == 2) {
+    phase = 2;
+    write("[E2E] Phase 2: AEB Event");
+    sendRadar(15, 0);  // stationary object at 15m
+    sendSpeed(100);
+    if (ttcSec < 2.0) {
+      sendAEB(1);
+      sendSpeed(40);   // emergency braking
+    }
+    check("P2_TTC_Critical",    ttcSec < 2.0);
+    check("P2_AEB_Fired",       aebFired == 1);
+    check("P2_Speed_Reduced",   vehicleSpeed < 100);
+    phaseResult[2] = (aebFired && vehicleSpeed < 100) ? 1 : 0;
+  }
+
+  /* PHASE 3 – LKA Active after AEB */
+  if (stepCount == 3) {
+    phase = 3;
+    write("[E2E] Phase 3: LKA Active");
+    sendAEB(0); sendSpeed(80);
+    sendLKA(1, 5);   // 5cm offset – slight correction
+    sendRadar(200, 70);
+    check("P3_AEB_Reset",       aebFired == 0);
+    check("P3_LKA_Centering",   lkaActive == 1 && laneOffset <= 15);
+    check("P3_Speed_Recovered", vehicleSpeed >= 60);
+    phaseResult[3] = (lkaActive && laneOffset <= 15) ? 1 : 0;
+  }
+
+  /* PHASE 4 – ACC Resume */
+  if (stepCount == 4) {
+    phase = 4;
+    write("[E2E] Phase 4: ACC Resume");
+    sendACC(1, 100); sendSpeed(95);
+    sendRadar(120, 80);
+    int diff; diff = accSetSpeed - vehicleSpeed; if (diff < 0) diff = -diff;
+    check("P4_ACC_SetSpeed",    accSetSpeed == 100);
+    check("P4_Speed_Tracking",  diff <= 10);
+    check("P4_Safe_Headway",    radarObjRange >= 80);
+    phaseResult[4] = (accActive && diff <= 10) ? 1 : 0;
+  }
+
+  /* PHASE 5 – Highway Exit */
+  if (stepCount == 5) {
+    phase = 5;
+    write("[E2E] Phase 5: Highway Exit");
+    sendACC(0, 0); sendLKA(0, 0); sendSpeed(50);
+    check("P5_ACC_Deactivated", accActive == 0);
+    check("P5_LKA_Deactivated", lkaActive == 0);
+    check("P5_Speed_Reduced",   vehicleSpeed <= 60);
+    phaseResult[5] = (!accActive && !lkaActive) ? 1 : 0;
+  }
+
+  /* PHASE 6 – Final Verdict */
+  if (stepCount == 6) {
+    phase = 6;
+    int allPass, i;
+    allPass = 1;
+    write("========================================");
+    write("  ADAS E2E TEST SUMMARY");
+    for (i = 1; i <= 5; i++) {
+      write("  Phase %d: %s", i, phaseResult[i] == 1 ? "PASS" : "FAIL");
+      if (phaseResult[i] != 1) allPass = 0;
+    }
+    write("  OVERALL: %s", allPass ? "*** E2E PASSED ***" : "*** E2E FAILED ***");
+    write("  Unit checks – PASS:%d FAIL:%d", passCount, failCount);
+    write("========================================");
+    check("E2E_AllPhases_Pass", allPass == 1);
+    stop();
+  }
+
+  if (stepCount < 7) setTimer(stepTimer, 400);
+}
+
+on message 0x100 { vehicleSpeed = this.byte(0); }
+on message 0x301 { aebFired     = this.byte(0); }
+on message 0x302 { accActive    = this.byte(0); accSetSpeed = this.byte(1); }
+on message 0x303 { lkaActive    = this.byte(0); }

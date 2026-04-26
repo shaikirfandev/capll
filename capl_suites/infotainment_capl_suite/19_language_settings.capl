@@ -1,0 +1,89 @@
+/*
+ * File   : 19_language_settings.capl
+ * Purpose: Validate language change EN/DE/FR and HMI_Language CAN signal update
+ * Tests  : TC01 Set EN, TC02 Set DE, TC03 Set FR, TC04 Verify CAN signal update, TC05 Invalid lang code
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  // Language message: byte0 = lang (0=EN, 1=DE, 2=FR, 3=ES, 4=IT)
+  message 0x406 msg_LangCmd;
+  msTimer stepTimer;
+
+  byte g_rxLang  = 0xFF;
+  int  g_step    = 0;
+  int  g_pass    = 0;
+  int  g_fail    = 0;
+
+  const byte LANG_EN   = 0;
+  const byte LANG_DE   = 1;
+  const byte LANG_FR   = 2;
+  const byte LANG_INVAL= 0xFE;
+}
+
+on start {
+  write("=== TC: Language Settings ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Set language to EN (0)");
+      msg_LangCmd.byte(0) = LANG_EN;
+      output(msg_LangCmd);
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      check("LangEN", (g_rxLang == LANG_EN) ? 1 : 0);
+      write("[STEP 2] Set language to DE (1)");
+      msg_LangCmd.byte(0) = LANG_DE;
+      output(msg_LangCmd);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      check("LangDE", (g_rxLang == LANG_DE) ? 1 : 0);
+      write("[STEP 3] Set language to FR (2)");
+      msg_LangCmd.byte(0) = LANG_FR;
+      output(msg_LangCmd);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      check("LangFR", (g_rxLang == LANG_FR) ? 1 : 0);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      write("[STEP 5] Send invalid language code 0xFE");
+      msg_LangCmd.byte(0) = LANG_INVAL;
+      output(msg_LangCmd);
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      check("InvalidLangRejected", (g_rxLang == LANG_FR) ? 1 : 0);  // should remain FR
+      g_step = 0; break;
+  }
+}
+
+on message 0x406 {
+  g_rxLang = this.byte(0);
+  write("[RX] HMI_Language = 0x%02X", g_rxLang);
+  if (g_rxLang <= LANG_FR) {
+    check("LanguageCodeValid", 1);
+  } else {
+    check("LanguageCodeValid", 0);
+  }
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Language Settings Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

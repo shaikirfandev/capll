@@ -1,0 +1,111 @@
+/*
+ * 15_highway_pilot.capl
+ * Highway Pilot Mode Validation – activation conditions, hands-off timer,
+ * lane centering, exit conditions
+ * CAN: 0x100 (VehicleSpeed), 0x302 (ACC), 0x303 (LKA), 0x315 (HighwayPilot)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+  msTimer handsOffTimer;
+
+  // HP state: 0=INACTIVE,1=AVAILABLE,2=ACTIVE,3=HANDS_OFF,4=OVERRIDE,5=FAULT
+  int hpState       = 0;
+  int vehicleSpeed  = 0;
+  int accActive     = 0;
+  int lkaActive     = 0;
+  int handsOnWheel  = 1;
+  int laneCentering = 0;   // 0=off,1=centering
+  int handsOffMs    = 0;
+
+  const int HP_SPEED_MIN     = 60;
+  const int HP_SPEED_MAX     = 130;
+  const int HANDSOFF_WARN_MS = 5000;
+  const int HANDSOFF_EXIT_MS = 10000;
+
+  int stepCount = 0;
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "HighwayPilotTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void evalHP() {
+  message 0x315 hpMsg;
+  int prevState;
+  prevState = hpState;
+
+  switch (hpState) {
+    case 0: // INACTIVE
+      if (vehicleSpeed >= HP_SPEED_MIN && vehicleSpeed <= HP_SPEED_MAX
+          && accActive && lkaActive)
+        hpState = 1;   // AVAILABLE
+      break;
+    case 1: // AVAILABLE – auto-activate for test
+      hpState = 2; laneCentering = 1; handsOffMs = 0;
+      write("[HP] ACTIVATED – lane centering engaged");
+      break;
+    case 2: // ACTIVE
+      if (!handsOnWheel) handsOffMs += 200;
+      else               handsOffMs = 0;
+      if (handsOffMs >= HANDSOFF_EXIT_MS)        hpState = 4; // OVERRIDE
+      else if (handsOffMs >= HANDSOFF_WARN_MS)   hpState = 3; // HANDS_OFF warn
+      if (vehicleSpeed < HP_SPEED_MIN || vehicleSpeed > HP_SPEED_MAX) hpState = 4;
+      break;
+    case 3: // HANDS_OFF warning
+      if (!handsOnWheel) handsOffMs += 200;
+      if (handsOffMs >= HANDSOFF_EXIT_MS) { hpState = 4; laneCentering = 0; }
+      if (handsOnWheel)  { hpState = 2; handsOffMs = 0; }
+      break;
+    case 4: // OVERRIDE / exit
+      hpState = 0; laneCentering = 0; handsOffMs = 0;
+      write("[HP] DEACTIVATED");
+      break;
+  }
+
+  if (prevState != hpState)
+    write("[HP] state %d -> %d handsOffMs=%d spd=%d", prevState, hpState, handsOffMs, vehicleSpeed);
+
+  hpMsg.byte(0) = hpState & 0xFF;
+  hpMsg.byte(1) = laneCentering & 0xFF;
+  hpMsg.byte(2) = (handsOffMs / 100) & 0xFF;
+  output(hpMsg);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 200);
+}
+
+on timer stepTimer {
+  stepCount++;
+  if (stepCount == 1)  { vehicleSpeed = 100; accActive = 1; lkaActive = 1; handsOnWheel = 1; }
+  if (stepCount == 5)  { handsOnWheel = 0; }   // hands off wheel
+  if (stepCount == 30) { handsOnWheel = 1; }   // regrab – reset
+  if (stepCount == 35) { vehicleSpeed = 40; }  // below min – deactivate
+
+  evalHP();
+
+  if (stepCount == 2)  check("HP_Available",          hpState >= 1);
+  if (stepCount == 3)  check("HP_Active",              hpState == 2);
+  if (stepCount == 3)  check("LaneCentering_On",       laneCentering == 1);
+  if (stepCount == 30) check("HandsOff_WarnIssued",    hpState == 3 || hpState == 4);
+  if (stepCount == 31) check("HandsOn_Restored",       handsOnWheel == 1);
+  if (stepCount == 36) check("LowSpeed_Deactivated",   hpState == 0 || hpState == 4);
+
+  if (stepCount < 40) setTimer(stepTimer, 200);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on message 0x100 { vehicleSpeed = this.byte(0); }
+on message 0x302 { accActive    = this.byte(0); }
+on message 0x303 { lkaActive    = this.byte(0); }

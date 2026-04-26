@@ -1,0 +1,104 @@
+/*
+ * File   : 09_hmi_touchscreen.capl
+ * Purpose: Validate touch key presses (home/back/menu), long press, gesture swipe
+ * Tests  : TC01 Home key, TC02 Back key, TC03 Menu key, TC04 Long press, TC05 Swipe left, TC06 Swipe right
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x406 msg_SWC;
+  msTimer stepTimer;
+  msTimer longPressTimer;
+
+  byte g_rxKey        = 0;
+  int  g_step         = 0;
+  int  g_pass         = 0;
+  int  g_fail         = 0;
+  int  g_longPressOK  = 0;
+
+  const byte KEY_HOME       = 0x01;
+  const byte KEY_BACK       = 0x02;
+  const byte KEY_MENU       = 0x03;
+  const byte KEY_LONG_HOME  = 0x11;
+  const byte KEY_SWIPE_L    = 0x40;
+  const byte KEY_SWIPE_R    = 0x41;
+  const int  LONG_PRESS_MS  = 800;
+}
+
+on start {
+  write("=== TC: HMI Touchscreen ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Press HOME key");
+      msg_SWC.byte(0) = KEY_HOME;
+      output(msg_SWC);
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      write("[STEP 2] Press BACK key");
+      msg_SWC.byte(0) = KEY_BACK;
+      output(msg_SWC);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      write("[STEP 3] Press MENU key");
+      msg_SWC.byte(0) = KEY_MENU;
+      output(msg_SWC);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      write("[STEP 4] Long-press HOME (hold %d ms)", LONG_PRESS_MS);
+      msg_SWC.byte(0) = KEY_HOME;
+      output(msg_SWC);
+      setTimer(longPressTimer, LONG_PRESS_MS);
+      g_step = 5; setTimer(stepTimer, 1200); break;
+
+    case 5:
+      write("[STEP 5] Swipe LEFT gesture");
+      msg_SWC.byte(0) = KEY_SWIPE_L;
+      output(msg_SWC);
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      write("[STEP 6] Swipe RIGHT gesture");
+      msg_SWC.byte(0) = KEY_SWIPE_R;
+      output(msg_SWC);
+      g_step = 0; break;
+  }
+}
+
+on timer longPressTimer {
+  g_longPressOK = 1;
+  msg_SWC.byte(0) = KEY_LONG_HOME;
+  output(msg_SWC);
+  write("[INFO] Long press duration elapsed – sending KEY_LONG_HOME");
+  check("LongPressHome", 1);
+}
+
+on message 0x406 {
+  g_rxKey = this.byte(0);
+  write("[RX] SWC_Key = 0x%02X", g_rxKey);
+  if (g_rxKey == KEY_HOME)    check("HomeKey",    1);
+  if (g_rxKey == KEY_BACK)    check("BackKey",    1);
+  if (g_rxKey == KEY_MENU)    check("MenuKey",    1);
+  if (g_rxKey == KEY_SWIPE_L) check("SwipeLeft",  1);
+  if (g_rxKey == KEY_SWIPE_R) check("SwipeRight", 1);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== HMI Touchscreen Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

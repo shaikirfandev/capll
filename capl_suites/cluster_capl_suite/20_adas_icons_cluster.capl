@@ -1,0 +1,117 @@
+/*
+ * File   : 20_adas_icons_cluster.capl
+ * Purpose: Activate ACC/LKA/AEB/BSD ADAS features via bitmask in 0x505
+ *          extended bytes; verify cluster 0x550 shows corresponding icons.
+ *  Encoding: byte1 of 0x505 used as ADAS icon bitmask:
+ *    bit0=ACC, bit1=LKA, bit2=AEB, bit3=BSD
+ */
+
+variables {
+  message 0x505 WarningLamps;
+  message 0x100 VehicleSpeed;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep  = 0;
+  int  passCount = 0;
+  int  failCount = 0;
+  byte lastLamp  = 0;
+  byte lastDisp  = 0;
+  byte lastFault = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+void sendADAS(byte lamps, byte adas) {
+  WarningLamps.byte(0) = lamps;
+  WarningLamps.byte(1) = adas;
+  output(WarningLamps);
+}
+
+on start {
+  write("=== 20_adas_icons_cluster.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  /* Set vehicle speed 80 km/h – ADAS systems active above 30 km/h */
+  int raw = 80 * 10;
+  VehicleSpeed.byte(0) = (raw >> 8) & 0xFF;
+  VehicleSpeed.byte(1) =  raw        & 0xFF;
+  output(VehicleSpeed);
+  setTimer(stepTimer, 400);
+}
+
+on timer stepTimer {
+  switch (testStep) {
+    case 0:
+      write("STEP 1: All ADAS icons OFF");
+      sendADAS(0x00, 0x00);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 1:
+      check("No ADAS icons at start", lastFault == 0);
+      write("STEP 2: ACC active (bit0)");
+      sendADAS(0x00, 0x01);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 2:
+      check("ACC icon ack from cluster", lastDisp >= 0 && lastFault == 0);
+      write("STEP 3: LKA active (bit1)");
+      sendADAS(0x00, 0x02);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 3:
+      check("LKA icon ack", lastFault == 0);
+      write("STEP 4: AEB active (bit2)");
+      sendADAS(0x00, 0x04);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 4:
+      check("AEB icon ack", lastFault == 0);
+      write("STEP 5: BSD active (bit3)");
+      sendADAS(0x00, 0x08);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 5:
+      check("BSD icon ack", lastFault == 0);
+      write("STEP 6: ACC+LKA+AEB+BSD all active");
+      sendADAS(0x00, 0x0F);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 6:
+      check("All ADAS icons ON together", lastFault == 0);
+      write("STEP 7: ADAS fault – AEB triggered (high priority)");
+      sendADAS(0x00, 0x04 | 0x80); /* bit7 = fault */
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 7:
+      check("AEB fault flagged to cluster", lastFault != 0 || lastDisp != 0);
+      write("STEP 8: Clear all ADAS");
+      sendADAS(0x00, 0x00);
+      setTimer(stepTimer, 300); testStep++; break;
+
+    case 8:
+      check("ADAS icons cleared", lastFault == 0);
+      testStep++; break;
+
+    default:
+      write("ADAS icons test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [ADAS]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 20_adas_icons_cluster ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

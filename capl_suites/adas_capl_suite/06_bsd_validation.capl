@@ -1,0 +1,49 @@
+/*
+ * 06_bsd_validation.capl
+ * Blind Spot Detection (BSD) – Zone entry/exit, indicator inhibit, speed validation
+ */
+variables {
+  message 0x305 BSD_Status;
+  message 0x100 VehicleSpeed;
+  msTimer stepTimer;
+  int testStep=0, passCount=0, failCount=0;
+  int leftAlert=0, rightAlert=0;
+}
+void simulateBSDObject(byte side, byte present) {
+  // side: 0x01=left, 0x02=right; sends via OEM-specific CAN signal
+  message 0x360 BSR_Input;
+  BSR_Input.byte(0) = side;
+  BSR_Input.byte(1) = present;
+  output(BSR_Input);
+}
+void sendSpd(float s){int r=(int)(s*10);VehicleSpeed.byte(0)=(r>>8)&0xFF;VehicleSpeed.byte(1)=r&0xFF;output(VehicleSpeed);}
+void check(char n[],int c){if(c){write("[PASS] %s",n);passCount++;}else{write("[FAIL] %s",n);failCount++;}}
+on start { write("=== BSD Validation Suite ==="); sendSpd(80.0); setTimer(stepTimer,500); }
+on timer stepTimer {
+  testStep++;
+  switch(testStep) {
+    case 1: write("[S1] Object enters left zone"); simulateBSDObject(0x01,1); setTimer(stepTimer,1500); break;
+    case 2: write("[S2] Object enters right zone"); simulateBSDObject(0x01,0); simulateBSDObject(0x02,1); setTimer(stepTimer,1500); break;
+    case 3: write("[S3] Left indicator ON with object – audible warning escalation");
+      { message 0x320 T; T.byte(0)=0x02; output(T); } simulateBSDObject(0x01,1); setTimer(stepTimer,1500); break;
+    case 4: write("[S4] Speed < 30 km/h – BSD off"); sendSpd(25.0); simulateBSDObject(0x02,1); setTimer(stepTimer,1500); break;
+    case 5: write("[S5] Object exits zone – alert clears"); sendSpd(80.0); simulateBSDObject(0x01,0); simulateBSDObject(0x02,0); setTimer(stepTimer,1000); break;
+    case 6: write("[S6] Reverse gear – RCTA mode (BSD inhibited)");
+      { message 0x330 Gear; Gear.byte(0)=0x07; output(Gear); } simulateBSDObject(0x02,1); setTimer(stepTimer,1000); break;
+    case 7: write("=== BSD Done P=%d F=%d ===",passCount,failCount); break;
+  }
+}
+on message 0x305 {
+  leftAlert  = this.byte(0) & 0x01;
+  rightAlert = (this.byte(0)>>1) & 0x01;
+  int audible = (this.byte(0)>>2) & 0x01;
+  switch(testStep) {
+    case 1: check("BSD_Left_Alert_On",        leftAlert); break;
+    case 2: check("BSD_Right_Alert_On",       rightAlert); break;
+    case 3: check("BSD_Audible_With_Indicator", audible); break;
+    case 4: check("BSD_Off_LowSpeed",         !leftAlert && !rightAlert); break;
+    case 5: check("BSD_Alert_Clears",         !leftAlert && !rightAlert); break;
+    case 6: check("BSD_Inhibit_Reverse",      !leftAlert && !rightAlert); break;
+  }
+}
+on stopMeasurement { write("BSD: P=%d F=%d",passCount,failCount); }

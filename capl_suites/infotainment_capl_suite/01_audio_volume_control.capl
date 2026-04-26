@@ -1,0 +1,126 @@
+/*
+ * File   : 01_audio_volume_control.capl
+ * Purpose: Validate audio volume step-up, step-down, mute, max-limit, and restore
+ * Tests  : TC01 Volume step up, TC02 Volume step down, TC03 Mute,
+ *          TC04 Max limit enforcement, TC05 Volume restore after mute
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x400 msg_AudioVolume;       // Audio_Volume: byte0 = volume 0-100
+  msTimer stepTimer;
+
+  int  g_step        = 0;
+  byte g_lastVolume  = 0;
+  byte g_rxVolume    = 0;
+  int  g_pass        = 0;
+  int  g_fail        = 0;
+
+  const byte VOL_STEP = 10;
+  const byte VOL_MAX  = 100;
+  const byte VOL_MUTE = 0;
+}
+
+on start {
+  write("=== TC: Audio Volume Control ===");
+  g_step = 1;
+  setTimer(stepTimer, 200);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:  // Step up: send volume 30
+      g_lastVolume = 30;
+      msg_AudioVolume.byte(0) = g_lastVolume;
+      output(msg_AudioVolume);
+      write("[STEP 1] Sending volume = %d", g_lastVolume);
+      g_step = 2;
+      setTimer(stepTimer, 300);
+      break;
+
+    case 2:  // Step up: send volume 40
+      g_lastVolume = 40;
+      msg_AudioVolume.byte(0) = g_lastVolume;
+      output(msg_AudioVolume);
+      write("[STEP 2] Step-up volume to %d", g_lastVolume);
+      g_step = 3;
+      setTimer(stepTimer, 300);
+      break;
+
+    case 3:  // Step down: send volume 20
+      g_lastVolume = 20;
+      msg_AudioVolume.byte(0) = g_lastVolume;
+      output(msg_AudioVolume);
+      write("[STEP 3] Step-down volume to %d", g_lastVolume);
+      g_step = 4;
+      setTimer(stepTimer, 300);
+      break;
+
+    case 4:  // Mute: volume 0
+      g_lastVolume = VOL_MUTE;
+      msg_AudioVolume.byte(0) = VOL_MUTE;
+      output(msg_AudioVolume);
+      write("[STEP 4] Mute: sending volume = 0");
+      g_step = 5;
+      setTimer(stepTimer, 300);
+      break;
+
+    case 5:  // Max limit: attempt 110 (should clamp to 100)
+      msg_AudioVolume.byte(0) = 110;
+      output(msg_AudioVolume);
+      write("[STEP 5] Max-limit test: sending volume = 110");
+      g_step = 6;
+      setTimer(stepTimer, 300);
+      break;
+
+    case 6:  // Restore: send volume 50
+      g_lastVolume = 50;
+      msg_AudioVolume.byte(0) = g_lastVolume;
+      output(msg_AudioVolume);
+      write("[STEP 6] Restore volume to %d", g_lastVolume);
+      g_step = 7;
+      setTimer(stepTimer, 300);
+      break;
+
+    case 7:
+      write("[STEP 7] All volume commands sent. Awaiting ECU responses ...");
+      g_step = 0;
+      break;
+  }
+}
+
+on message 0x400 {
+  g_rxVolume = this.byte(0);
+  write("[RX] Audio_Volume byte0 = %d", g_rxVolume);
+  if (g_rxVolume <= VOL_MAX) {
+    check_volume_pass(g_rxVolume);
+  } else {
+    check("VolumeMaxLimit", 0);
+  }
+}
+
+void check_volume_pass(byte vol) {
+  if (vol <= VOL_MAX) {
+    check("VolumeInRange", 1);
+  } else {
+    check("VolumeInRange", 0);
+  }
+}
+
+void check(char name[], int result) {
+  if (result) {
+    write("[PASS] %s", name);
+    g_pass++;
+  } else {
+    write("[FAIL] %s", name);
+    g_fail++;
+  }
+}
+
+on stopMeasurement {
+  write("=== Audio Volume Control Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

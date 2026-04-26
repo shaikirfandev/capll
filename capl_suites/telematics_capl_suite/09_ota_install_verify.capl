@@ -1,0 +1,102 @@
+/*
+ * File   : 09_ota_install_verify.capl
+ * Purpose: Post-download install cmd, verify complete status, reboot signal on 0x650
+ * CAN IDs: 0x606 OTA_Status, 0x650 TCU_Response
+ */
+
+variables {
+  message 0x606 OTA_Status;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount    = 0;
+  int failCount    = 0;
+  int testStep     = 0;
+  int installDone  = 0;
+  int rebootSeen   = 0;
+  int otaStatus    = 0;
+  dword installStart = 0;
+  dword installEnd   = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 09_ota_install_verify: OTA Install & Reboot Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Pre-condition: OTA download complete (byte0=3, 100%)");
+      OTA_Status.byte(0) = 3; OTA_Status.byte(1) = 100;
+      output(OTA_Status);
+      setTimer(stepTimer, 1500);
+      break;
+    case 2:
+      write("[STEP 2] Trigger install phase (byte0=2, progress=0)");
+      OTA_Status.byte(0) = 2; OTA_Status.byte(1) = 0;
+      installStart = timeNow() / 100000;
+      output(OTA_Status);
+      setTimer(stepTimer, 2000);
+      break;
+    case 3:
+      write("[STEP 3] Install mid-progress (byte0=2, progress=50)");
+      OTA_Status.byte(0) = 2; OTA_Status.byte(1) = 50;
+      output(OTA_Status);
+      setTimer(stepTimer, 2000);
+      break;
+    case 4:
+      write("[STEP 4] Install complete (byte0=3, progress=100)");
+      OTA_Status.byte(0) = 3; OTA_Status.byte(1) = 100;
+      installEnd = timeNow() / 100000;
+      output(OTA_Status);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] ECU sends reboot signal on 0x650 (ack_type=0xF0, result=0x01)");
+      TCU_Response.byte(0) = 0xF0; TCU_Response.byte(1) = 0x01; TCU_Response.byte(2) = 0x00;
+      output(TCU_Response);
+      setTimer(stepTimer, 1500);
+      break;
+    case 6:
+      write("[STEP 6] Verify OTA install complete status");
+      check("OTA install complete (status=3)", installDone);
+      check("Install status byte = complete",  otaStatus == 3);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify reboot signal received on 0x650");
+      check("Reboot signal received (0x650)", rebootSeen);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify install duration within 60s");
+      {
+        dword elapsed = installEnd - installStart;
+        check("Install completed within 60s", elapsed <= 60000);
+        write("  Install duration: %d ms", elapsed);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x606 {
+  otaStatus = this.byte(0);
+  if (this.byte(0) == 3 && this.byte(1) == 100) installDone = 1;
+}
+
+on message 0x650 {
+  if (this.byte(0) == 0xF0) rebootSeen = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

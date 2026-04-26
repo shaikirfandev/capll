@@ -1,0 +1,108 @@
+/*
+ * File   : 05_remote_engine_start.capl
+ * Purpose: Send engine_start 0x03, verify engine start ACK, timeout check
+ * CAN IDs: 0x604 RemoteCmd, 0x605 RemoteAck
+ */
+
+variables {
+  message 0x604 RemoteCmd;
+  message 0x605 RemoteAck;
+  msTimer stepTimer;
+  msTimer timeoutTimer;
+  int passCount    = 0;
+  int failCount    = 0;
+  int testStep     = 0;
+  int ackReceived  = 0;
+  int ackStatus    = -1;
+  int timedOut     = 0;
+  dword sentMs     = 0;
+  dword doneMs     = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 05_remote_engine_start: Engine Start Command Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  timedOut = 0; ackReceived = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Set TCU online with valid auth session");
+      {
+        message 0x600 TCU_Status;
+        TCU_Status.byte(0) = 1; TCU_Status.byte(1) = 90;
+        output(TCU_Status);
+      }
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] Send ENGINE_START cmd (byte0=0x03, auth=0xCC)");
+      RemoteCmd.byte(0) = 0x03; RemoteCmd.byte(1) = 0xCC;
+      sentMs = timeNow() / 100000;
+      output(RemoteCmd);
+      setTimer(timeoutTimer, 10000);
+      setTimer(stepTimer, 2000);
+      break;
+    case 3:
+      write("[STEP 3] Simulate ECU processing ACK (byte1=1)");
+      RemoteAck.byte(0) = 0x03; RemoteAck.byte(1) = 1; RemoteAck.byte(2) = 0x00;
+      output(RemoteAck);
+      setTimer(stepTimer, 2000);
+      break;
+    case 4:
+      write("[STEP 4] Simulate ECU done ACK (byte1=2) - engine started");
+      RemoteAck.byte(0) = 0x03; RemoteAck.byte(1) = 2; RemoteAck.byte(2) = 0x00;
+      doneMs = timeNow() / 100000;
+      output(RemoteAck);
+      cancelTimer(timeoutTimer);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Verify engine start ACK received and status = done");
+      check("Engine start ACK received",       ackReceived);
+      check("Engine start ACK status = done",  ackStatus == 2);
+      check("Engine start cmd_echo = 0x03",    RemoteAck.byte(0) == 0x03);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verify response within 10s timeout window");
+      check("Engine start ACK within 10s",     (doneMs - sentMs) <= 10000);
+      check("No timeout triggered",            !timedOut);
+      write("  Latency: %d ms", doneMs - sentMs);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify no fault code on successful start");
+      check("No fault code (byte2=0)", RemoteAck.byte(2) == 0x00);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Confirm only one successful engine start processed");
+      check("ACK status still done after stability check", ackStatus == 2);
+      break;
+    default:
+      break;
+  }
+}
+
+on msTimer timeoutTimer {
+  write("[WARN] Engine start timeout: no ACK within 10s");
+  timedOut = 1;
+}
+
+on message 0x605 {
+  ackReceived = 1;
+  ackStatus   = this.byte(1);
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

@@ -1,0 +1,101 @@
+/*
+ * File   : 20_geofence_exit_event.capl
+ * Purpose: Simulate fence_id=1 exit event, verify speed captured and alert raised
+ * CAN IDs: 0x611 GeoFence_Event, 0x650 TCU_Response
+ */
+
+variables {
+  message 0x611 GeoFence_Event;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount     = 0;
+  int failCount     = 0;
+  int testStep      = 0;
+  int exitSeen      = 0;
+  int alertReceived = 0;
+  int speedAtExit   = 0;
+  int capturedFence = 0;
+  dword exitTime    = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 20_geofence_exit_event: Geofence Exit Event Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Vehicle inside fence=1 at 60 km/h");
+      GeoFence_Event.byte(0) = 0; GeoFence_Event.byte(1) = 1; GeoFence_Event.byte(2) = 60;
+      output(GeoFence_Event);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] Vehicle exits fence=1 at 70 km/h (byte0=1)");
+      GeoFence_Event.byte(0) = 1; GeoFence_Event.byte(1) = 1; GeoFence_Event.byte(2) = 70;
+      exitTime = timeNow() / 100000;
+      output(GeoFence_Event);
+      setTimer(stepTimer, 1500);
+      break;
+    case 3:
+      write("[STEP 3] TCU alerts on 0x650 for exit event");
+      TCU_Response.byte(0) = 0xC1; TCU_Response.byte(1) = 0x01; TCU_Response.byte(2) = 0x01;
+      output(TCU_Response);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] Verify exit event byte0=1 and fence_id=1");
+      check("GeoFence EXIT event seen (byte0=1)", exitSeen);
+      check("Fence ID = 1",                       capturedFence == 1);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Verify speed at exit was captured (70 km/h)");
+      check("Speed at exit captured = 70 km/h",   speedAtExit == 70);
+      write("  Speed at exit: %d km/h", speedAtExit);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verify TCU alert received for exit");
+      check("Alert on 0x650 for exit event",      alertReceived);
+      check("Alert type = 0xC1 (exit)",            TCU_Response.byte(0) == 0xC1);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify alert encodes fence=1 and type=exit");
+      check("Alert byte1 = 0x01 (exit type)", TCU_Response.byte(1) == 0x01);
+      check("Alert byte2 = fence_id 1",       TCU_Response.byte(2) == 0x01);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Speed within valid vehicle range (0-255 km/h)");
+      check("Speed byte <= 255", speedAtExit <= 255);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x611 {
+  if (this.byte(0) == 1) {
+    exitSeen      = 1;
+    capturedFence = this.byte(1);
+    speedAtExit   = this.byte(2);
+  }
+}
+
+on message 0x650 {
+  if (this.byte(0) == 0xC1) alertReceived = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

@@ -1,0 +1,101 @@
+/*
+ * File   : 18_v2x_hazard_broadcast.capl
+ * Purpose: Hazard flag=1 broadcast, verify hazard received on 0x650
+ * CAN IDs: 0x610 V2X_BSM, 0x650 TCU_Response
+ */
+
+variables {
+  message 0x610 V2X_BSM;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount      = 0;
+  int failCount      = 0;
+  int testStep       = 0;
+  int hazardReceived = 0;
+  int hazardAcked    = 0;
+  int hazardCleared  = 0;
+  dword hazardSentAt = 0;
+  dword hazardAckAt  = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 18_v2x_hazard_broadcast: V2X Hazard Flag Broadcast Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] V2X TX mode, no hazard initially");
+      V2X_BSM.byte(0) = 2; V2X_BSM.byte(1) = 3; V2X_BSM.byte(2) = 0;
+      output(V2X_BSM);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] Broadcast HAZARD flag=1 (emergency brake / debris)");
+      V2X_BSM.byte(0) = 2; V2X_BSM.byte(1) = 3; V2X_BSM.byte(2) = 1;
+      hazardSentAt = timeNow() / 100000;
+      output(V2X_BSM);
+      setTimer(stepTimer, 1500);
+      break;
+    case 3:
+      write("[STEP 3] TCU echoes hazard receipt on 0x650 (byte0=0xB2, byte2=1)");
+      TCU_Response.byte(0) = 0xB2; TCU_Response.byte(1) = 0x01; TCU_Response.byte(2) = 0x01;
+      hazardAckAt = timeNow() / 100000;
+      output(TCU_Response);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] Verify hazard received and acknowledged");
+      check("Hazard flag received (V2X_BSM byte2=1)", hazardReceived);
+      check("Hazard acknowledged on 0x650",            hazardAcked);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Verify hazard round-trip latency < 500ms");
+      {
+        dword latency = hazardAckAt - hazardSentAt;
+        check("Hazard ack latency < 500ms", latency < 500);
+        write("  Hazard latency: %d ms", latency);
+      }
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Clear hazard flag after broadcast");
+      V2X_BSM.byte(0) = 2; V2X_BSM.byte(1) = 3; V2X_BSM.byte(2) = 0;
+      output(V2X_BSM);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify hazard cleared after broadcast window");
+      check("Hazard flag cleared (byte2=0)", V2X_BSM.byte(2) == 0);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] verify TCU ack type for hazard = 0xB2");
+      check("TCU hazard ack_type = 0xB2", TCU_Response.byte(0) == 0xB2);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x610 {
+  if (this.byte(2) == 1)  hazardReceived = 1;
+  if (this.byte(2) == 0 && hazardReceived) hazardCleared = 1;
+}
+
+on message 0x650 {
+  if (this.byte(0) == 0xB2 && this.byte(2) == 1) hazardAcked = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

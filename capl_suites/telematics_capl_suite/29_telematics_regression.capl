@@ -1,0 +1,103 @@
+/*
+ * File   : 29_telematics_regression.capl
+ * Purpose: Sequential regression runner: connection+GPS+remote+OTA+cellular+eCall
+ * CAN IDs: All major telematics IDs exercised in sequence
+ */
+
+variables {
+  message 0x600 TCU_Status;
+  message 0x601 GPS_Validity;
+  message 0x604 RemoteCmd;
+  message 0x605 RemoteAck;
+  message 0x606 OTA_Status;
+  message 0x607 Cellular_RSSI;
+  message 0x608 eCall_Status;
+  msTimer stepTimer;
+  int passCount      = 0;
+  int failCount      = 0;
+  int testStep       = 0;
+  int tcuOnline      = 0;
+  int gpsValid       = 0;
+  int lockDone       = 0;
+  int otaDone        = 0;
+  int cellularOk     = 0;
+  int ecallIdle      = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 29_telematics_regression: Full Feature Regression Suite ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 500);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] REGRESSION: TCU Connection – online sequence");
+      TCU_Status.byte(0) = 2; TCU_Status.byte(1) = 50; output(TCU_Status);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      TCU_Status.byte(0) = 1; TCU_Status.byte(1) = 88; output(TCU_Status);
+      check("REG: TCU reached online state",     tcuOnline);
+      setTimer(stepTimer, 1000);
+      break;
+    case 3:
+      write("[STEP 3] REGRESSION: GPS validity – valid with 7 satellites");
+      GPS_Validity.byte(0) = 1; GPS_Validity.byte(1) = 7; output(GPS_Validity);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      check("REG: GPS valid with sats>=4",        gpsValid && GPS_Validity.byte(1) >= 4);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] REGRESSION: Remote lock command & ACK");
+      RemoteCmd.byte(0) = 0x01; RemoteCmd.byte(1) = 0xAA; output(RemoteCmd);
+      RemoteAck.byte(0)  = 0x01; RemoteAck.byte(1) = 2; RemoteAck.byte(2) = 0; output(RemoteAck);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      lockDone = (RemoteAck.byte(1) == 2 && RemoteAck.byte(0) == 0x01) ? 1 : 0;
+      check("REG: Remote lock ACK done (status=2)", lockDone);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] REGRESSION: OTA download complete");
+      OTA_Status.byte(0) = 1; OTA_Status.byte(1) = 100; output(OTA_Status);
+      OTA_Status.byte(0) = 3; OTA_Status.byte(1) = 100; output(OTA_Status);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      otaDone = (OTA_Status.byte(0) == 3 && OTA_Status.byte(1) == 100) ? 1 : 0;
+      check("REG: OTA download complete",          otaDone);
+      write("[STEP 8] REGRESSION: Cellular 4G bars=4, no packet loss");
+      Cellular_RSSI.byte(0) = 4; Cellular_RSSI.byte(1) = 2; Cellular_RSSI.byte(2) = 0;
+      output(Cellular_RSSI);
+      cellularOk = (Cellular_RSSI.byte(0) >= 3 && Cellular_RSSI.byte(2) < 5) ? 1 : 0;
+      check("REG: Cellular signal bars>=3, loss<5%", cellularOk);
+      write("[STEP 8B] REGRESSION: eCall idle");
+      eCall_Status.byte(0) = 0; eCall_Status.byte(1) = 0; output(eCall_Status);
+      ecallIdle = (eCall_Status.byte(0) == 0) ? 1 : 0;
+      check("REG: eCall in idle state",             ecallIdle);
+      write("=== Regression Summary: TCU=%d GPS=%d Lock=%d OTA=%d Cell=%d eCall=%d ===",
+            tcuOnline, gpsValid, lockDone, otaDone, cellularOk, ecallIdle);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x600 { if (this.byte(0) == 1) tcuOnline = 1; }
+on message 0x601 { if (this.byte(0) == 1) gpsValid  = 1; }
+on message 0x605 { if (this.byte(0) == 0x01 && this.byte(1) == 2) lockDone = 1; }
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

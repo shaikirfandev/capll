@@ -1,0 +1,101 @@
+/*
+ * File   : 28_vehicle_status_display.capl
+ * Purpose: Validate door ajar, fuel low, TPMS alert displayed on IVI HMI
+ * Tests  : TC01 Door ajar alert, TC02 Fuel low warning, TC03 TPMS alert, TC04 All clear, TC05 Multiple alerts
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  // Vehicle status message: byte0=doorAjar, byte1=fuelLow, byte2=TPMSAlert
+  message 0x402 msg_VehStatus;
+  message 0x407 msg_Bright;
+  msTimer stepTimer;
+
+  byte g_rxDoor    = 0;
+  byte g_rxFuel    = 0;
+  byte g_rxTPMS    = 0;
+  int  g_step      = 0;
+  int  g_pass      = 0;
+  int  g_fail      = 0;
+
+  const byte ALERT_OFF = 0;
+  const byte ALERT_ON  = 1;
+}
+
+on start {
+  write("=== TC: Vehicle Status Display ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Send door ajar alert");
+      msg_VehStatus.byte(0) = ALERT_ON;
+      msg_VehStatus.byte(1) = ALERT_OFF;
+      msg_VehStatus.byte(2) = ALERT_OFF;
+      output(msg_VehStatus);
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      check("DoorAjarDisplayed", (g_rxDoor == ALERT_ON) ? 1 : 0);
+      write("[STEP 2] Send fuel low warning");
+      msg_VehStatus.byte(0) = ALERT_OFF;
+      msg_VehStatus.byte(1) = ALERT_ON;
+      output(msg_VehStatus);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      check("FuelLowDisplayed", (g_rxFuel == ALERT_ON) ? 1 : 0);
+      write("[STEP 3] Send TPMS alert");
+      msg_VehStatus.byte(1) = ALERT_OFF;
+      msg_VehStatus.byte(2) = ALERT_ON;
+      output(msg_VehStatus);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      check("TPMSAlertDisplayed", (g_rxTPMS == ALERT_ON) ? 1 : 0);
+      write("[STEP 4] All alerts cleared");
+      msg_VehStatus.byte(0) = ALERT_OFF;
+      msg_VehStatus.byte(1) = ALERT_OFF;
+      msg_VehStatus.byte(2) = ALERT_OFF;
+      output(msg_VehStatus);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      check("AllAlertsCleared",
+            (g_rxDoor == ALERT_OFF && g_rxFuel == ALERT_OFF && g_rxTPMS == ALERT_OFF) ? 1 : 0);
+      write("[STEP 5] Multiple simultaneous alerts");
+      msg_VehStatus.byte(0) = ALERT_ON;
+      msg_VehStatus.byte(1) = ALERT_ON;
+      msg_VehStatus.byte(2) = ALERT_ON;
+      output(msg_VehStatus);
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      check("MultipleAlertsActive",
+            (g_rxDoor == ALERT_ON && g_rxFuel == ALERT_ON && g_rxTPMS == ALERT_ON) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on message 0x402 {
+  g_rxDoor = this.byte(0);
+  g_rxFuel = this.byte(1);
+  g_rxTPMS = this.byte(2);
+  write("[RX] DoorAjar=%d  FuelLow=%d  TPMS=%d", g_rxDoor, g_rxFuel, g_rxTPMS);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Vehicle Status Display Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

@@ -1,0 +1,93 @@
+/*
+ * File   : 21_power_mode_infotainment.capl
+ * Purpose: Validate IGN on, retain after off, sleep timer, wake on SWC key
+ * Tests  : TC01 IGN ON → HU ON, TC02 IGN OFF → Retain mode, TC03 Sleep after retain, TC04 Wake on SWC key
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x402 msg_HU_Power;
+  message 0x406 msg_SWC;
+  msTimer stepTimer;
+  msTimer sleepTimer;
+
+  byte g_rxPower  = 0;
+  int  g_step     = 0;
+  int  g_pass     = 0;
+  int  g_fail     = 0;
+  int  g_sleeping = 0;
+
+  const byte HU_OFF     = 0;
+  const byte HU_STANDBY = 1;
+  const byte HU_ON      = 2;
+  const byte HU_RETAIN  = 3;
+  const byte SWC_ANY    = 0x01;
+  const int  SLEEP_DELAY_MS = 1500;
+}
+
+on start {
+  write("=== TC: Power Mode Infotainment ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] IGN ON – HU power = ON");
+      msg_HU_Power.byte(0) = HU_ON;
+      output(msg_HU_Power);
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      check("HUPowerOn", (g_rxPower == HU_ON) ? 1 : 0);
+      write("[STEP 2] IGN OFF – HU enters Retain mode");
+      msg_HU_Power.byte(0) = HU_RETAIN;
+      output(msg_HU_Power);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      check("HURetainAfterIGNOff", (g_rxPower == HU_RETAIN) ? 1 : 0);
+      write("[STEP 3] Start sleep timer (%d ms)", SLEEP_DELAY_MS);
+      setTimer(sleepTimer, SLEEP_DELAY_MS);
+      g_step = 4; setTimer(stepTimer, 2000); break;
+
+    case 4:
+      check("HUSleepAfterRetain", (g_rxPower == HU_STANDBY || g_rxPower == HU_OFF) ? 1 : 0);
+      write("[STEP 4] Wake on SWC key press");
+      msg_SWC.byte(0) = SWC_ANY;
+      output(msg_SWC);
+      msg_HU_Power.byte(0) = HU_ON;
+      output(msg_HU_Power);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      check("WakeOnSWC", (g_rxPower == HU_ON) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on timer sleepTimer {
+  msg_HU_Power.byte(0) = HU_STANDBY;
+  output(msg_HU_Power);
+  g_sleeping = 1;
+  write("[INFO] Sleep timer elapsed – HU going to standby");
+}
+
+on message 0x402 {
+  g_rxPower = this.byte(0);
+  write("[RX] HU_PowerState = %d", g_rxPower);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Power Mode Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

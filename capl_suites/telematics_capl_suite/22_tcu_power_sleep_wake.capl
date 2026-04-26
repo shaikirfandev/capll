@@ -1,0 +1,106 @@
+/*
+ * File   : 22_tcu_power_sleep_wake.capl
+ * Purpose: IGN off→sleep delay, wakeup_reason=CAN, verify active mode
+ * CAN IDs: 0x609 TCU_PowerMode
+ */
+
+variables {
+  message 0x609 TCU_PowerMode;
+  msTimer stepTimer;
+  msTimer sleepDelay;
+  int passCount      = 0;
+  int failCount      = 0;
+  int testStep       = 0;
+  int seenSleep      = 0;
+  int seenActive     = 0;
+  int wakeupReason   = -1;
+  dword sleepAt      = 0;
+  dword wakeAt       = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 22_tcu_power_sleep_wake: Sleep/Wake Cycle Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] TCU in ACTIVE mode (IGN on, byte0=2)");
+      TCU_PowerMode.byte(0) = 2; TCU_PowerMode.byte(1) = 0x01;
+      output(TCU_PowerMode);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] IGN OFF – TCU entering STANDBY (byte0=1)");
+      TCU_PowerMode.byte(0) = 1; TCU_PowerMode.byte(1) = 0x00;
+      output(TCU_PowerMode);
+      setTimer(stepTimer, 2000);
+      break;
+    case 3:
+      write("[STEP 3] After delay, TCU enters SLEEP (byte0=0)");
+      TCU_PowerMode.byte(0) = 0; TCU_PowerMode.byte(1) = 0x00;
+      sleepAt = timeNow() / 100000;
+      output(TCU_PowerMode);
+      setTimer(sleepDelay, 3000);
+      setTimer(stepTimer, 4000);
+      break;
+    case 4:
+      write("[STEP 4] CAN bus activity wakes TCU (wakeup_reason=0x02=CAN)");
+      TCU_PowerMode.byte(0) = 2; TCU_PowerMode.byte(1) = 0x02;
+      wakeAt = timeNow() / 100000;
+      cancelTimer(sleepDelay);
+      output(TCU_PowerMode);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Verify sleep and active states seen");
+      check("TCU sleep state seen (byte0=0)",   seenSleep);
+      check("TCU active state seen after wake",  seenActive);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verify wakeup reason = CAN (0x02)");
+      check("Wakeup reason = CAN (0x02)", wakeupReason == 0x02);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify wake latency sane (<10s)");
+      {
+        dword latency = wakeAt - sleepAt;
+        check("Wake from sleep within 10s", latency <= 10000);
+        write("  Sleep→Wake latency: %d ms", latency);
+      }
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify TCU power mode byte in valid range (0-2)");
+      check("Power mode byte valid (0-2)", TCU_PowerMode.byte(0) <= 2);
+      break;
+    default:
+      break;
+  }
+}
+
+on msTimer sleepDelay {
+  write("[INFO] Sleep delay timer expired – waiting for CAN wakeup");
+}
+
+on message 0x609 {
+  if (this.byte(0) == 0) seenSleep   = 1;
+  if (this.byte(0) == 2) {
+    seenActive   = 1;
+    wakeupReason = this.byte(1);
+  }
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

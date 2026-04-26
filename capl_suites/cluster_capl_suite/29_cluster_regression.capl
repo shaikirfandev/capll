@@ -1,0 +1,151 @@
+/*
+ * File   : 29_cluster_regression.capl
+ * Purpose: Sequential test runner executing all sub-function validations
+ *          (speedometer, RPM, fuel, coolant, lamps, gear, TPMS, EV, power);
+ *          produces a consolidated pass/fail verdict.
+ */
+
+variables {
+  message 0x100 VehicleSpeed;
+  message 0x101 EngineRPM;
+  message 0x500 FuelLevel;
+  message 0x501 CoolantTemp;
+  message 0x502 GearPosition;
+  message 0x503 OilPressure;
+  message 0x504 ClusterPower;
+  message 0x505 WarningLamps;
+  message 0x506 TPMS_Status;
+  message 0x507 EV_SOC;
+  message 0x509 Brightness;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep  = 0;
+  int  passCount = 0;
+  int  failCount = 0;
+  byte lastLamp  = 0;
+  byte lastDisp  = 0;
+  byte lastFault = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+void sendSpeed(int kmh) {
+  int raw = kmh * 10;
+  VehicleSpeed.byte(0) = (raw >> 8) & 0xFF;
+  VehicleSpeed.byte(1) =  raw        & 0xFF;
+  output(VehicleSpeed);
+}
+
+void sendRPM(int rpm) {
+  int raw = rpm * 4;
+  EngineRPM.byte(0) = (raw >> 8) & 0xFF;
+  EngineRPM.byte(1) =  raw        & 0xFF;
+  output(EngineRPM);
+}
+
+on start {
+  write("=== 29_cluster_regression.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  ClusterPower.byte(0) = 0x02; output(ClusterPower);
+  setTimer(stepTimer, 500);
+}
+
+on timer stepTimer {
+  switch (testStep) {
+    case 0:
+      write("--- REG BLOCK 1: Power + Self-test ---");
+      WarningLamps.byte(0) = 0xFF; output(WarningLamps);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 1:
+      check("REG: Cluster self-test lamps ON", lastLamp == 0xFF);
+      WarningLamps.byte(0) = 0x00; output(WarningLamps);
+      setTimer(stepTimer, 300); testStep++; break;
+
+    case 2:
+      check("REG: Lamps clear post self-test", lastLamp == 0x00);
+      write("--- REG BLOCK 2: Speed 0→60→120 ---");
+      sendSpeed(0); setTimer(stepTimer, 200); testStep++; break;
+
+    case 3:
+      sendSpeed(60); setTimer(stepTimer, 300); testStep++; break;
+    case 4:
+      check("REG: 60 km/h ack", lastFault == 0);
+      sendSpeed(120); setTimer(stepTimer, 300); testStep++; break;
+    case 5:
+      check("REG: 120 km/h ack", lastFault == 0);
+      write("--- REG BLOCK 3: RPM sweep ---");
+      sendRPM(800); setTimer(stepTimer, 200); testStep++; break;
+    case 6:
+      sendRPM(4000); setTimer(stepTimer, 200); testStep++; break;
+    case 7:
+      check("REG: RPM 4000 ack", lastFault == 0);
+      sendRPM(7000); setTimer(stepTimer, 300); testStep++; break;
+    case 8:
+      check("REG: Redline ack", lastFault == 0);
+      write("--- REG BLOCK 4: Fuel + Coolant ---");
+      FuelLevel.byte(0) = 128; output(FuelLevel);
+      CoolantTemp.byte(0) = 80 + 40; output(CoolantTemp);
+      setTimer(stepTimer, 300); testStep++; break;
+    case 9:
+      check("REG: Fuel + coolant normal", lastFault == 0);
+      write("--- REG BLOCK 5: Warning lamps ---");
+      WarningLamps.byte(0) = 0x01; output(WarningLamps); /* MIL */
+      setTimer(stepTimer, 300); testStep++; break;
+    case 10:
+      check("REG: MIL lamp active", (lastLamp & 0x01) != 0);
+      WarningLamps.byte(0) = 0x00; output(WarningLamps);
+      setTimer(stepTimer, 200); testStep++; break;
+    case 11:
+      check("REG: MIL cleared", (lastLamp & 0x01) == 0);
+      write("--- REG BLOCK 6: Gear P→D ---");
+      GearPosition.byte(0) = 0; output(GearPosition);
+      setTimer(stepTimer, 200); testStep++; break;
+    case 12:
+      GearPosition.byte(0) = 3; output(GearPosition);
+      setTimer(stepTimer, 200); testStep++; break;
+    case 13:
+      check("REG: Gear D ack", lastFault == 0);
+      write("--- REG BLOCK 7: TPMS + EV ---");
+      TPMS_Status.byte(0) = 220; TPMS_Status.byte(1) = 220;
+      TPMS_Status.byte(2) = 220; TPMS_Status.byte(3) = 220;
+      TPMS_Status.byte(4) = 0x00; output(TPMS_Status);
+      EV_SOC.byte(0) = 80; EV_SOC.byte(1) = 2; output(EV_SOC);
+      setTimer(stepTimer, 400); testStep++; break;
+    case 14:
+      check("REG: TPMS+EV normal", lastFault == 0);
+      write("--- REG BLOCK 8: IGN OFF ---");
+      ClusterPower.byte(0) = 0x00; output(ClusterPower);
+      setTimer(stepTimer, 400); testStep++; break;
+    case 15:
+      check("REG: Cluster sleeps on IGN OFF", lastFault == 0);
+      testStep++; break;
+    default:
+      write("Regression runner complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [REG]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  int total = passCount + failCount;
+  write("=== SUMMARY: 29_cluster_regression ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, total);
+  if (failCount == 0)
+    write("*** REGRESSION VERDICT: PASS ***");
+  else
+    write("*** REGRESSION VERDICT: FAIL (%d failures) ***", failCount);
+}

@@ -1,0 +1,102 @@
+/*
+ * File   : 14_ecall_manual.capl
+ * Purpose: Manual eCall button press byte, verify same activated→sent→connected sequence
+ * CAN IDs: 0x608 eCall_Status, 0x650 TCU_Response
+ */
+
+variables {
+  message 0x608 eCall_Status;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount     = 0;
+  int failCount     = 0;
+  int testStep      = 0;
+  int manualTrigger = 0;
+  int seenActivated = 0;
+  int seenSent      = 0;
+  int seenConnected = 0;
+  dword pressedAt   = 0;
+  dword connectedAt = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 14_ecall_manual: Manual eCall Button Press Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] eCall idle, no crash (severity=0)");
+      eCall_Status.byte(0) = 0; eCall_Status.byte(1) = 0;
+      output(eCall_Status);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] Manual button press: severity=0x01, byte0=1 (ACTIVATED)");
+      eCall_Status.byte(0) = 1; eCall_Status.byte(1) = 1;
+      pressedAt = timeNow() / 100000;
+      output(eCall_Status);
+      setTimer(stepTimer, 2000);
+      break;
+    case 3:
+      write("[STEP 3] Manual eCall SENT (byte0=2)");
+      eCall_Status.byte(0) = 2; eCall_Status.byte(1) = 1;
+      output(eCall_Status);
+      setTimer(stepTimer, 2000);
+      break;
+    case 4:
+      write("[STEP 4] Manual eCall CONNECTED (byte0=3)");
+      eCall_Status.byte(0) = 3; eCall_Status.byte(1) = 1;
+      connectedAt = timeNow() / 100000;
+      output(eCall_Status);
+      setTimer(stepTimer, 1500);
+      break;
+    case 5:
+      write("[STEP 5] TCU confirms manual eCall on 0x650");
+      TCU_Response.byte(0) = 0xE1; TCU_Response.byte(1) = 0x03; TCU_Response.byte(2) = 0x01;
+      output(TCU_Response);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verify manual trigger state sequence same as automatic");
+      check("Manual eCall activated",  seenActivated);
+      check("Manual eCall sent",       seenSent);
+      check("Manual eCall connected",  seenConnected);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify manual trigger byte=1 (not crash severity=200)");
+      check("Manual trigger: severity=1 (not crash)", eCall_Status.byte(1) == 1);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify TCU acknowledged manual type on 0x650 (byte2=0x01)");
+      {
+        dword elapsed = connectedAt - pressedAt;
+        check("Manual eCall connected within 20s", elapsed <= 20000);
+        check("Manual eCall type = 0x01 in TCU ack", TCU_Response.byte(2) == 0x01);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x608 {
+  int state = this.byte(0);
+  if (state == 1) seenActivated = 1;
+  if (state == 2) seenSent      = 1;
+  if (state == 3) seenConnected = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

@@ -1,0 +1,103 @@
+/*
+ * File   : 23_tcu_standby_mode.capl
+ * Purpose: Parking mode standby, periodic wake for heartbeat check
+ * CAN IDs: 0x609 TCU_PowerMode, 0x650 TCU_Response
+ */
+
+variables {
+  message 0x609 TCU_PowerMode;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  msTimer heartbeatTimer;
+  int passCount       = 0;
+  int failCount       = 0;
+  int testStep        = 0;
+  int heartbeatCount  = 0;
+  int seenStandby     = 0;
+  int heartbeatOk     = 0;
+  dword standbyAt     = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 23_tcu_standby_mode: Standby Heartbeat Periodic Wake Test ===");
+  passCount = 0; failCount = 0; testStep = 0; heartbeatCount = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Park vehicle – TCU transitions to STANDBY (byte0=1)");
+      TCU_PowerMode.byte(0) = 1; TCU_PowerMode.byte(1) = 0x03;
+      standbyAt = timeNow() / 100000;
+      output(TCU_PowerMode);
+      setTimer(heartbeatTimer, 2000);
+      setTimer(stepTimer, 7000);
+      break;
+    case 2:
+      write("[STEP 2] Collect heartbeat count over ~6s window");
+      cancelTimer(heartbeatTimer);
+      write("  Heartbeat events received: %d", heartbeatCount);
+      setTimer(stepTimer, 1000);
+      break;
+    case 3:
+      write("[STEP 3] Verify >= 2 heartbeats in standby window");
+      check("At least 2 heartbeat wakes in 6s",   heartbeatCount >= 2);
+      check("TCU entered standby mode",            seenStandby);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] TCU heartbeat response on 0x650");
+      check("Heartbeat acknowledged on 0x650", heartbeatOk);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Wakeup reason = parking (byte1=0x03 = parking wakeup)");
+      check("Wakeup reason = parking (0x03)", TCU_PowerMode.byte(1) == 0x03);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Power mode returns to standby after heartbeat");
+      check("TCU back in standby after heartbeat", TCU_PowerMode.byte(0) == 1);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify heartbeat does not wake to full active");
+      check("Heartbeat keeps standby not full active", TCU_PowerMode.byte(0) <= 1);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify power mode byte = standby (1)");
+      check("Power mode = standby (1)", TCU_PowerMode.byte(0) == 1);
+      break;
+    default:
+      break;
+  }
+}
+
+on msTimer heartbeatTimer {
+  heartbeatCount++;
+  TCU_PowerMode.byte(0) = 1; TCU_PowerMode.byte(1) = 0x03;
+  output(TCU_PowerMode);
+  TCU_Response.byte(0) = 0xA5; TCU_Response.byte(1) = heartbeatCount; TCU_Response.byte(2) = 0;
+  output(TCU_Response);
+  setTimer(heartbeatTimer, 2000);
+}
+
+on message 0x609 {
+  if (this.byte(0) == 1) seenStandby = 1;
+}
+
+on message 0x650 {
+  if (this.byte(0) == 0xA5) heartbeatOk = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

@@ -1,0 +1,112 @@
+/*
+ * 22_ncap_automation.capl
+ * Euro NCAP AEB Test Sequence Automation – CCRs/CCRm/CCRb scenarios,
+ * test sequencer
+ * CAN: 0x100 (VehicleSpeed), 0x301 (AEB), 0x308 (Radar)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+  msTimer scenarioTimer;
+
+  // NCAP scenario IDs
+  const int CCRs = 1;  // Car-to-Car Rear stationary
+  const int CCRm = 2;  // Car-to-Car Rear moving
+  const int CCRb = 3;  // Car-to-Car Rear braking
+
+  int currentScenario  = 0;
+  int scenarioStep     = 0;
+
+  // Vehicle state
+  int egoSpeed         = 0;   // km/h
+  int targetSpeed      = 0;   // km/h
+  int targetDist       = 0;   // meters
+  int aebFired         = 0;
+  int collisionOccurred= 0;
+
+  const int AEB_EXPECTED_TTC = 2;  // seconds – brake before this TTC
+
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "NCAP_AEB_AutomationTest";
+  int stepCount = 0;
+
+  // Per-scenario results
+  int results[4] = {-1, -1, -1, -1};  // -1=not run, 0=fail, 1=pass
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+float calcTTC() {
+  int relSpeed;
+  if (targetSpeed >= egoSpeed) return 999.0;
+  relSpeed = egoSpeed - targetSpeed;
+  if (relSpeed <= 0) return 999.0;
+  return (float)targetDist / ((float)relSpeed / 3.6);
+}
+
+void runScenario(int scenario) {
+  message 0x301 aebMsg;
+  float ttc;
+  currentScenario = scenario;
+  aebFired = 0; collisionOccurred = 0;
+
+  if (scenario == CCRs) {
+    egoSpeed = 50; targetSpeed = 0;  targetDist = 30;
+    write("[NCAP] CCRs: ego=%d target=0 dist=%d", egoSpeed, targetDist);
+  } else if (scenario == CCRm) {
+    egoSpeed = 50; targetSpeed = 20; targetDist = 40;
+    write("[NCAP] CCRm: ego=%d target=%d dist=%d", egoSpeed, targetSpeed, targetDist);
+  } else if (scenario == CCRb) {
+    egoSpeed = 50; targetSpeed = 50; targetDist = 12;
+    // Target brakes hard
+    targetSpeed = 0;
+    write("[NCAP] CCRb: ego=%d target braking dist=%d", egoSpeed, targetDist);
+  }
+
+  ttc = calcTTC();
+  write("[NCAP] TTC=%.2fs", ttc);
+  if (ttc < AEB_EXPECTED_TTC) {
+    aebFired = 1;
+    aebMsg.byte(0) = 1;
+    output(aebMsg);
+    write("[NCAP] AEB FIRED for scenario %d", scenario);
+  }
+
+  if (ttc <= 1.5 && !aebFired) collisionOccurred = 1;
+
+  results[scenario] = (aebFired && !collisionOccurred) ? 1 : 0;
+  check("AEB_Fired_InTime", aebFired == 1);
+  check("NoCollision",      collisionOccurred == 0);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 600);
+}
+
+on timer stepTimer {
+  stepCount++;
+  if (stepCount == 1) runScenario(CCRs);
+  if (stepCount == 2) runScenario(CCRm);
+  if (stepCount == 3) runScenario(CCRb);
+  if (stepCount == 4) {
+    write("[NCAP] === Results Summary ===");
+    write("[NCAP] CCRs: %s", results[CCRs] == 1 ? "PASS" : "FAIL");
+    write("[NCAP] CCRm: %s", results[CCRm] == 1 ? "PASS" : "FAIL");
+    write("[NCAP] CCRb: %s", results[CCRb] == 1 ? "PASS" : "FAIL");
+    check("CCRs_Pass", results[CCRs] == 1);
+    check("CCRm_Pass", results[CCRm] == 1);
+    check("CCRb_Pass", results[CCRb] == 1);
+  }
+  if (stepCount < 5) setTimer(stepTimer, 600);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}

@@ -1,0 +1,120 @@
+/*
+ * File   : 25_cluster_animation.capl
+ * Purpose: Measure welcome animation start/end timing on cluster;
+ *          animation must complete within 2 seconds of IGN ON.
+ *  Animation triggered by ClusterPower ON (0x504 byte0=2).
+ *  Cluster signals animation complete via 0x550 byte2 bit7.
+ */
+
+variables {
+  message 0x504 ClusterPower;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+  msTimer animTimeoutTimer;
+
+  int  testStep      = 0;
+  int  passCount     = 0;
+  int  failCount     = 0;
+  byte lastLamp      = 0;
+  byte lastDisp      = 0;
+  byte lastFault     = 0;
+  long animStart     = 0;
+  long animEnd       = 0;
+  int  animDone      = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 25_cluster_animation.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  animDone  = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer animTimeoutTimer {
+  if (!animDone) {
+    write("[FAIL] Welcome animation timeout (>2000ms)");
+    failCount++;
+    animDone = 2; /* mark timeout */
+  }
+}
+
+on timer stepTimer {
+  long durationMs;
+  switch (testStep) {
+    case 0:
+      write("STEP 1: Ensure cluster in sleep");
+      ClusterPower.byte(0) = 0x00;
+      output(ClusterPower);
+      setTimer(stepTimer, 500); testStep++; break;
+
+    case 1:
+      check("Cluster in sleep state", lastFault == 0);
+      write("STEP 2: IGN ON – start welcome animation");
+      animStart = timeNow();
+      animDone  = 0;
+      ClusterPower.byte(0) = 0x02;
+      output(ClusterPower);
+      setTimer(animTimeoutTimer, 2000); /* 2s hard deadline */
+      setTimer(stepTimer, 2500); testStep++; break;
+
+    case 2:
+      if (animDone == 1) {
+        durationMs = (animEnd - animStart) / 10000;
+        write("Animation duration: %d ms", durationMs);
+        check("Animation completes within 2000ms", durationMs <= 2000);
+        check("Animation started on IGN ON", durationMs >= 10);
+      } else {
+        check("Animation completed flag set", animDone == 1);
+      }
+      write("STEP 3: Repeat animation cycle");
+      ClusterPower.byte(0) = 0x00;
+      output(ClusterPower);
+      setTimer(stepTimer, 500); testStep++; break;
+
+    case 3:
+      animStart = timeNow(); animDone = 0;
+      ClusterPower.byte(0) = 0x02;
+      output(ClusterPower);
+      setTimer(animTimeoutTimer, 2000);
+      setTimer(stepTimer, 2500); testStep++; break;
+
+    case 4:
+      check("Second animation cycle completes", animDone >= 1);
+      write("STEP 5: Verify cluster stable post-animation");
+      setTimer(stepTimer, 300); testStep++; break;
+
+    case 5:
+      check("No fault after animation sequence", lastFault == 0);
+      testStep++; break;
+
+    default:
+      write("Animation test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [Anim]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+  /* bit7 of fault byte indicates animation complete */
+  if ((this.byte(2) & 0x80) && animDone == 0) {
+    animEnd  = timeNow();
+    animDone = 1;
+    write("Animation complete signal received");
+  }
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 25_cluster_animation ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

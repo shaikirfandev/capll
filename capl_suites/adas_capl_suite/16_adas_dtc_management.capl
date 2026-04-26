@@ -1,0 +1,108 @@
+/*
+ * 16_adas_dtc_management.capl
+ * ADAS DTC Lifecycle – fault injection → DTC set → clear → readiness monitors
+ * CAN: 0x7DF/0x7E8 (UDS over CAN simulation), 0x316 (ADAS_DTC)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+
+  // DTC registry (simplified)
+  const int DTC_AEB_SENSOR_FAULT  = 0xC0A100;
+  const int DTC_LKA_CAM_BLOCKAGE  = 0xC0B200;
+  const int DTC_RADAR_MISALIGN    = 0xC0C300;
+
+  int dtcActive[3]    = {0, 0, 0};
+  int dtcPending[3]   = {0, 0, 0};
+  int dtcCleared[3]   = {0, 0, 0};
+  int readinessMonOK  = 0;
+
+  // Fault injection flags
+  int injectAEB   = 0;
+  int injectLKA   = 0;
+  int injectRadar = 0;
+
+  int stepCount = 0;
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "ADAS_DTC_ManagementTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void injectFault(int idx) {
+  dtcPending[idx] = 1;
+  write("[DTC] Fault injected – DTC[%d] pending", idx);
+}
+
+void confirmDTC(int idx) {
+  if (dtcPending[idx]) {
+    dtcActive[idx] = 1;
+    write("[DTC] DTC[%d] confirmed active", idx);
+  }
+}
+
+void clearDTCs() {
+  int i;
+  for (i = 0; i < 3; i++) {
+    dtcActive[i] = 0; dtcPending[i] = 0; dtcCleared[i] = 1;
+  }
+  write("[DTC] All DTCs cleared");
+}
+
+void evalReadiness() {
+  message 0x316 dtcMsg;
+  int allClear, i;
+  allClear = 1;
+  for (i = 0; i < 3; i++) if (dtcActive[i] || dtcPending[i]) { allClear = 0; break; }
+  readinessMonOK = allClear;
+  dtcMsg.byte(0) = dtcActive[0] | (dtcActive[1] << 1) | (dtcActive[2] << 2);
+  dtcMsg.byte(1) = dtcPending[0] | (dtcPending[1]<<1) | (dtcPending[2]<<2);
+  dtcMsg.byte(2) = readinessMonOK & 0xFF;
+  output(dtcMsg);
+  write("[DTC] active=0x%02X pending=0x%02X readiness=%d",
+        dtcMsg.byte(0), dtcMsg.byte(1), readinessMonOK);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 400);
+}
+
+on timer stepTimer {
+  stepCount++;
+
+  if (stepCount == 1) {
+    evalReadiness();
+    check("Initial_NoDTCs",          readinessMonOK == 1);
+  }
+  if (stepCount == 2) { injectFault(0); evalReadiness(); check("AEB_DTC_Pending", dtcPending[0] == 1); }
+  if (stepCount == 3) { confirmDTC(0);  evalReadiness(); check("AEB_DTC_Active",  dtcActive[0] == 1); }
+  if (stepCount == 4) { injectFault(1); confirmDTC(1);   evalReadiness(); check("LKA_DTC_Active", dtcActive[1] == 1); }
+  if (stepCount == 5) {
+    evalReadiness();
+    check("Readiness_NotOK_WithDTCs", readinessMonOK == 0);
+  }
+  if (stepCount == 6) { clearDTCs();   evalReadiness(); check("DTCs_Cleared",     dtcActive[0] == 0 && dtcActive[1] == 0); }
+  if (stepCount == 7) {
+    evalReadiness();
+    check("Readiness_OK_AfterClear",  readinessMonOK == 1);
+  }
+  if (stepCount == 8) { injectFault(2); confirmDTC(2);  evalReadiness(); check("Radar_DTC_Active", dtcActive[2] == 1); }
+
+  if (stepCount < 9) setTimer(stepTimer, 400);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on message 0x316 {
+  write("[RX 0x316] activeMask=0x%02X pendMask=0x%02X ready=%d",
+        this.byte(0), this.byte(1), this.byte(2));
+}

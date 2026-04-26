@@ -1,0 +1,101 @@
+/*
+ * File   : 19_geofence_entry_event.capl
+ * Purpose: Simulate fence_id=1 enter event, verify logging and alert on 0x650
+ * CAN IDs: 0x611 GeoFence_Event, 0x650 TCU_Response
+ */
+
+variables {
+  message 0x611 GeoFence_Event;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount     = 0;
+  int failCount     = 0;
+  int testStep      = 0;
+  int enterSeen     = 0;
+  int alertReceived = 0;
+  int fenceId       = 0;
+  int speedAtEntry  = 0;
+  dword entryTime   = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 19_geofence_entry_event: Geofence Enter Event Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Vehicle inside fence=1 (byte0=0, idle state)");
+      GeoFence_Event.byte(0) = 0; GeoFence_Event.byte(1) = 1; GeoFence_Event.byte(2) = 50;
+      output(GeoFence_Event);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] Vehicle exits fence and re-enters: ENTER event (byte0=2)");
+      GeoFence_Event.byte(0) = 2; GeoFence_Event.byte(1) = 1; GeoFence_Event.byte(2) = 45;
+      entryTime = timeNow() / 100000;
+      output(GeoFence_Event);
+      setTimer(stepTimer, 1500);
+      break;
+    case 3:
+      write("[STEP 3] TCU logs enter event and sends alert on 0x650");
+      TCU_Response.byte(0) = 0xC0; TCU_Response.byte(1) = 0x02; TCU_Response.byte(2) = 0x01;
+      output(TCU_Response);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] Verify enter event details captured");
+      check("Geofence ENTER event seen (byte0=2)", enterSeen);
+      check("Fence ID = 1",                        fenceId == 1);
+      check("Speed at entry captured > 0",         speedAtEntry > 0);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Verify alert generated on 0x650 for entry");
+      check("Alert received on 0x650 for entry",  alertReceived);
+      check("Alert byte1 = 2 (enter event type)", TCU_Response.byte(1) == 0x02);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verify fence ID in alert matches fence=1");
+      check("TCU alert fence_id = 1", TCU_Response.byte(2) == 0x01);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Vehicle transitions to inside after enter");
+      GeoFence_Event.byte(0) = 0; GeoFence_Event.byte(1) = 1; GeoFence_Event.byte(2) = 40;
+      output(GeoFence_Event);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Confirm state = inside after entry event");
+      check("Vehicle inside fence after entry (byte0=0)", GeoFence_Event.byte(0) == 0);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x611 {
+  if (this.byte(0) == 2) {
+    enterSeen    = 1;
+    fenceId      = this.byte(1);
+    speedAtEntry = this.byte(2);
+  }
+}
+
+on message 0x650 {
+  if (this.byte(0) == 0xC0) alertReceived = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

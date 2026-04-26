@@ -1,0 +1,97 @@
+/*
+ * File   : 05_android_auto_session.capl
+ * Purpose: Validate AA wired connection, wireless AA init, session timeout handling
+ * Tests  : TC01 AA connect, TC02 Source=AndroidAuto, TC03 Wireless init, TC04 Session timeout, TC05 Reconnect
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x401 msg_AudioSource;
+  message 0x402 msg_HU_Power;
+  msTimer stepTimer;
+  msTimer sessionTimer;
+
+  byte g_rxSource      = 0xFF;
+  int  g_step          = 0;
+  int  g_pass          = 0;
+  int  g_fail          = 0;
+  int  g_sessionActive = 0;
+
+  const byte SRC_AA    = 4;
+  const byte SRC_RADIO = 0;
+  const byte HU_ON     = 2;
+  const int  SESSION_TIMEOUT_MS = 2000;
+}
+
+on start {
+  write("=== TC: Android Auto Session ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] HU power ON");
+      msg_HU_Power.byte(0) = HU_ON;
+      output(msg_HU_Power);
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      write("[STEP 2] Wired AA connect – set source to AndroidAuto");
+      msg_AudioSource.byte(0) = SRC_AA;
+      output(msg_AudioSource);
+      g_sessionActive = 1;
+      g_step = 3; setTimer(stepTimer, 500); break;
+
+    case 3:
+      write("[STEP 3] Verify AA session active");
+      check("AASessionActive", (g_rxSource == SRC_AA) ? 1 : 0);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      write("[STEP 4] Simulate wireless AA init (no cable, WiFi auth)");
+      write("         WiFi_Status byte0=1 (AP active)");
+      g_step = 5; setTimer(stepTimer, 500); break;
+
+    case 5:
+      write("[STEP 5] Simulate session timeout – remove AA source");
+      msg_AudioSource.byte(0) = SRC_RADIO;
+      output(msg_AudioSource);
+      g_sessionActive = 0;
+      setTimer(sessionTimer, SESSION_TIMEOUT_MS);
+      g_step = 6; setTimer(stepTimer, 600); break;
+
+    case 6:
+      write("[STEP 6] Reconnect AA after timeout");
+      msg_AudioSource.byte(0) = SRC_AA;
+      output(msg_AudioSource);
+      g_step = 0; break;
+  }
+}
+
+on timer sessionTimer {
+  write("[INFO] Session timeout elapsed – AA session dropped");
+  check("AASessionTimeout", (g_sessionActive == 0) ? 1 : 0);
+}
+
+on message 0x401 {
+  g_rxSource = this.byte(0);
+  write("[RX] Audio_Source = %d", g_rxSource);
+  if (g_rxSource == SRC_AA) {
+    check("SourceIsAndroidAuto", 1);
+  }
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Android Auto Session Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

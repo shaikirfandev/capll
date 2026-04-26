@@ -1,0 +1,119 @@
+/*
+ * File   : 06_warning_lamps.capl
+ * Purpose: Toggle each bit of WarningLamps bitmask (0x505) individually;
+ *          verify cluster 0x550 lamp byte mirrors each activated bit.
+ *
+ *  Bitmask: bit0=MIL, bit1=OilWarn, bit2=BeltWarn, bit3=ParkBrake,
+ *           bit4=BattWarn, bit5=TempWarn, bit6=FuelWarn, bit7=TyrePressWarn
+ */
+
+variables {
+  message 0x505 WarningLamps;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep   = 0;
+  int  passCount  = 0;
+  int  failCount  = 0;
+  byte lastLamp   = 0;
+  byte currentBit = 0;
+
+  char lampNames[8][20] = {
+    "MIL", "OilWarn", "BeltWarn", "ParkBrake",
+    "BattWarn", "TempWarn", "FuelWarn", "TyrePressWarn"
+  };
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 06_warning_lamps.capl STARTED ===");
+  testStep   = 0;
+  passCount  = 0;
+  failCount  = 0;
+  currentBit = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  char label[80];
+  byte mask;
+
+  switch (testStep) {
+    case 0:
+      /* Clear all lamps first */
+      WarningLamps.byte(0) = 0x00;
+      output(WarningLamps);
+      write("STEP 1: All lamps cleared");
+      setTimer(stepTimer, 300); testStep++; break;
+
+    case 1:
+      check("All lamps OFF baseline", lastLamp == 0x00);
+      currentBit = 0;
+      testStep++;
+      /* fall through to bit iteration via timer */
+      setTimer(stepTimer, 100); break;
+
+    case 2:
+      if (currentBit < 8) {
+        mask = (1 << currentBit);
+        WarningLamps.byte(0) = mask;
+        output(WarningLamps);
+        write("STEP: Activate bit%d = %s (mask=0x%02X)", currentBit, lampNames[currentBit], mask);
+        setTimer(stepTimer, 350);
+        testStep = 3;
+      } else {
+        testStep = 10;
+        setTimer(stepTimer, 100);
+      }
+      break;
+
+    case 3:
+      mask = (1 << currentBit);
+      snprintf(label, elcount(label), "Lamp bit%d (%s) ON", currentBit, lampNames[currentBit]);
+      check(label, (lastLamp & mask) != 0);
+      /* Deactivate */
+      WarningLamps.byte(0) = 0x00;
+      output(WarningLamps);
+      setTimer(stepTimer, 200);
+      testStep = 4; break;
+
+    case 4:
+      mask = (1 << currentBit);
+      snprintf(label, elcount(label), "Lamp bit%d (%s) OFF", currentBit, lampNames[currentBit]);
+      check(label, (lastLamp & mask) == 0);
+      currentBit++;
+      testStep = 2;
+      setTimer(stepTimer, 100);
+      break;
+
+    case 10:
+      /* All lamps ON simultaneously */
+      WarningLamps.byte(0) = 0xFF;
+      output(WarningLamps);
+      write("STEP: All lamps ON simultaneously");
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 11:
+      check("All lamps ON together", lastLamp == 0xFF);
+      testStep++; break;
+
+    default:
+      write("Warning lamp test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp = this.byte(0);
+  write("ClusterStatus [Lamps]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        this.byte(0), this.byte(1), this.byte(2));
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 06_warning_lamps ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

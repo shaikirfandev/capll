@@ -1,0 +1,113 @@
+/*
+ * 08_parking_sensor.capl
+ * Parking Sensor Array – Front/Rear Ultrasonic, 4 Zones, Distance Thresholds,
+ * Alert Escalation, Park Aid Display Validation
+ * CAN: 0x310 (ParkingSensor)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+  msTimer alertTimer;
+
+  // Simulated distances (cm) for 4 sensors each side
+  int frontDist[4] = {200, 200, 200, 200};  // FL, FML, FMR, FR
+  int rearDist[4]  = {200, 200, 200, 200};  // RL, RML, RMR, RR
+
+  // Zone thresholds (cm)
+  const int ZONE_CRITICAL = 20;
+  const int ZONE_WARNING  = 60;
+  const int ZONE_CAUTION  = 120;
+  const int ZONE_CLEAR    = 200;
+
+  int  alertLevel    = 0;      // 0=none,1=caution,2=warning,3=critical
+  int  beepInterval  = 1000;   // ms
+  int  stepCount     = 0;
+  int  passCount     = 0;
+  int  failCount     = 0;
+  char testName[64]  = "ParkingSensorArrayTest";
+}
+
+/* ---- helper ---- */
+void check(char name[], int cond) {
+  if (cond) {
+    write("[PASS] %s", name);
+    passCount++;
+  } else {
+    write("[FAIL] %s", name);
+    failCount++;
+  }
+}
+
+int minArray(int arr[], int len) {
+  int i, m;
+  m = arr[0];
+  for (i = 1; i < len; i++) if (arr[i] < m) m = arr[i];
+  return m;
+}
+
+void evaluateZone(int minDist) {
+  if (minDist <= ZONE_CRITICAL) {
+    if (alertLevel != 3) { alertLevel = 3; beepInterval = 100; write("[PARK] CRITICAL – distance %d cm", minDist); }
+  } else if (minDist <= ZONE_WARNING) {
+    if (alertLevel != 2) { alertLevel = 2; beepInterval = 300; write("[PARK] WARNING  – distance %d cm", minDist); }
+  } else if (minDist <= ZONE_CAUTION) {
+    if (alertLevel != 1) { alertLevel = 1; beepInterval = 700; write("[PARK] CAUTION  – distance %d cm", minDist); }
+  } else {
+    if (alertLevel != 0) { alertLevel = 0; beepInterval = 1000; write("[PARK] CLEAR"); }
+  }
+}
+
+/* ---- on start ---- */
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 200);
+  setTimer(alertTimer, 1000);
+}
+
+/* ---- step sequencer ---- */
+on timer stepTimer {
+  message 0x310 parkMsg;
+  int minF, minR;
+
+  stepCount++;
+  // Simulate approach: reduce rear-center distances over time
+  if (stepCount <= 5)  { rearDist[1] = 200 - stepCount * 30; rearDist[2] = 200 - stepCount * 30; }
+  if (stepCount == 6)  { rearDist[1] = 15;  rearDist[2] = 15; }   // critical
+  if (stepCount == 8)  { rearDist[1] = 200; rearDist[2] = 200; }   // clear again
+
+  minF = minArray(frontDist, 4);
+  minR = minArray(rearDist,  4);
+  evaluateZone(minR < minF ? minR : minF);
+
+  // Pack CAN message
+  parkMsg.byte(0) = alertLevel & 0xFF;
+  parkMsg.byte(1) = (minR > 255 ? 255 : minR) & 0xFF;
+  parkMsg.byte(2) = (minF > 255 ? 255 : minF) & 0xFF;
+  output(parkMsg);
+
+  // Validations at specific steps
+  if (stepCount == 3)  check("CautionZone_Activated",  alertLevel == 1);
+  if (stepCount == 5)  check("WarningZone_Activated",  alertLevel == 2);
+  if (stepCount == 6)  check("CriticalZone_Activated", alertLevel == 3);
+  if (stepCount == 8)  check("ClearZone_Restored",     alertLevel == 0);
+  if (stepCount == 6)  check("BeepInterval_Critical",  beepInterval == 100);
+
+  if (stepCount < 10) setTimer(stepTimer, 200);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on timer alertTimer {
+  if (alertLevel > 0)
+    write("[PARK][BEEP] level=%d interval=%d ms", alertLevel, beepInterval);
+  setTimer(alertTimer, beepInterval);
+}
+
+on message 0x310 {
+  write("[RX 0x310] alertLevel=%d rearMin=%d frontMin=%d",
+        this.byte(0), this.byte(1), this.byte(2));
+}

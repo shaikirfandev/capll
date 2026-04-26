@@ -1,0 +1,93 @@
+/*
+ * File   : 22_remote_hmi_access.capl
+ * Purpose: Validate remote app command routing (horn, status, media control)
+ * Tests  : TC01 Remote connect, TC02 Horn command, TC03 Status request, TC04 Remote media play, TC05 Remote disconnect
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x406 msg_Cmd;
+  message 0x402 msg_HU;
+  message 0x400 msg_Vol;
+  msTimer stepTimer;
+
+  int  g_step        = 0;
+  int  g_pass        = 0;
+  int  g_fail        = 0;
+  int  g_remoteConn  = 0;
+  byte g_rxCmd       = 0;
+
+  const byte CMD_REMOTE_CONNECT    = 0x90;
+  const byte CMD_REMOTE_HORN       = 0x91;
+  const byte CMD_REMOTE_STATUS     = 0x92;
+  const byte CMD_REMOTE_MEDIA_PLAY = 0x93;
+  const byte CMD_REMOTE_DISCONNECT = 0x9F;
+}
+
+on start {
+  write("=== TC: Remote HMI Access ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Remote app connect");
+      msg_Cmd.byte(0) = CMD_REMOTE_CONNECT;
+      output(msg_Cmd);
+      g_remoteConn = 1;
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      check("RemoteConnected", g_remoteConn);
+      write("[STEP 2] Trigger remote horn");
+      msg_Cmd.byte(0) = CMD_REMOTE_HORN;
+      output(msg_Cmd);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      check("RemoteHornCmd", (g_rxCmd == CMD_REMOTE_HORN) ? 1 : 0);
+      write("[STEP 3] Request vehicle status via remote");
+      msg_Cmd.byte(0) = CMD_REMOTE_STATUS;
+      output(msg_Cmd);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      check("RemoteStatusRequest", (g_rxCmd == CMD_REMOTE_STATUS) ? 1 : 0);
+      write("[STEP 4] Remote media play command");
+      msg_Cmd.byte(0) = CMD_REMOTE_MEDIA_PLAY;
+      output(msg_Cmd);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      check("RemoteMediaPlay", (g_rxCmd == CMD_REMOTE_MEDIA_PLAY) ? 1 : 0);
+      write("[STEP 5] Remote app disconnect");
+      msg_Cmd.byte(0) = CMD_REMOTE_DISCONNECT;
+      output(msg_Cmd);
+      g_remoteConn = 0;
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      check("RemoteDisconnected", (g_remoteConn == 0) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on message 0x406 {
+  g_rxCmd = this.byte(0);
+  write("[RX] Remote CMD = 0x%02X", g_rxCmd);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Remote HMI Access Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

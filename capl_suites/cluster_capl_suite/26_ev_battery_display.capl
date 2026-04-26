@@ -1,0 +1,114 @@
+/*
+ * File   : 26_ev_battery_display.capl
+ * Purpose: Test EV SOC display via 0x507 at 100/20/5%; charging status;
+ *          power flow regen/drive indicator on cluster 0x550.
+ *  0x507 byte0 = SOC 0–100%
+ *  byte1 = status: 0=idle, 1=charging, 2=drive, 3=regen
+ */
+
+variables {
+  message 0x507 EV_SOC;
+  message 0x100 VehicleSpeed;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep  = 0;
+  int  passCount = 0;
+  int  failCount = 0;
+  byte lastLamp  = 0;
+  byte lastDisp  = 0;
+  byte lastFault = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+void sendSOC(byte soc, byte status) {
+  EV_SOC.byte(0) = soc;
+  EV_SOC.byte(1) = status;
+  output(EV_SOC);
+  write("SOC=%d%% status=%d", soc, status);
+}
+
+on start {
+  write("=== 26_ev_battery_display.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  int raw;
+  switch (testStep) {
+    case 0:
+      write("STEP 1: SOC=100%%, idle");
+      sendSOC(100, 0);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 1:
+      check("Full charge displayed – no warn", (lastLamp & 0x10) == 0);
+      write("STEP 2: SOC=100%%, charging");
+      sendSOC(100, 1);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 2:
+      check("Charging status ack", lastFault == 0);
+      write("STEP 3: SOC=60%%, drive mode");
+      sendSOC(60, 2);
+      raw = 80 * 10;
+      VehicleSpeed.byte(0) = (raw >> 8) & 0xFF;
+      VehicleSpeed.byte(1) =  raw        & 0xFF;
+      output(VehicleSpeed);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 3:
+      check("Drive mode ack – no fault", lastFault == 0);
+      write("STEP 4: SOC=60%%, regen braking");
+      sendSOC(62, 3); /* slight SOC increase during regen */
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 4:
+      check("Regen mode ack", lastFault == 0);
+      write("STEP 5: SOC=20%%, low battery warn threshold");
+      sendSOC(20, 2);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 5:
+      check("Low SOC warn at 20%%", (lastLamp & 0x10) != 0 || lastDisp != 0);
+      write("STEP 6: SOC=5%%, critical");
+      sendSOC(5, 2);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 6:
+      check("Critical SOC fault", lastFault != 0 || lastDisp != 0);
+      write("STEP 7: SOC=0%%, battery empty");
+      sendSOC(0, 0);
+      VehicleSpeed.byte(0) = 0; VehicleSpeed.byte(1) = 0;
+      output(VehicleSpeed);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 7:
+      check("Zero SOC handled gracefully", lastFault != 0 || lastLamp != 0);
+      testStep++; break;
+
+    default:
+      write("EV battery display test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [EV]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 26_ev_battery_display ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

@@ -1,0 +1,129 @@
+/*
+ * 20_object_distance_monitor.capl
+ * Real-time Object Distance Monitoring – multiple objects, priority sorting,
+ * distance logging
+ * CAN: 0x308 (RadarObject), 0x320 (DistanceMonitor output)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+  msTimer logTimer;
+
+  const int MAX_OBJ = 6;
+  int objID[6]     = {1,2,3,4,5,6};
+  int objDist[6]   = {80,50,30,120,20,200};  // meters
+  int objActive[6] = {1, 1, 1, 1, 1, 1};
+
+  // Priority-sorted indices (bubble sort result)
+  int sortIdx[6]   = {0,1,2,3,4,5};
+
+  // Closest object
+  int closestID    = 0;
+  int closestDist  = 999;
+
+  const int CRITICAL_DIST = 15;
+  const int WARNING_DIST  = 40;
+
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "ObjectDistanceMonitorTest";
+  int stepCount = 0;
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void sortByDistance() {
+  int i, j, tmp;
+  for (i = 0; i < MAX_OBJ; i++) sortIdx[i] = i;
+  // Bubble sort ascending distance
+  for (i = 0; i < MAX_OBJ - 1; i++) {
+    for (j = 0; j < MAX_OBJ - i - 1; j++) {
+      if (!objActive[sortIdx[j]] ||
+          (objActive[sortIdx[j+1]] && objDist[sortIdx[j]] > objDist[sortIdx[j+1]])) {
+        tmp = sortIdx[j]; sortIdx[j] = sortIdx[j+1]; sortIdx[j+1] = tmp;
+      }
+    }
+  }
+  closestDist = 999; closestID = 0;
+  for (i = 0; i < MAX_OBJ; i++) {
+    if (objActive[sortIdx[i]]) {
+      closestID   = objID[sortIdx[i]];
+      closestDist = objDist[sortIdx[i]];
+      break;
+    }
+  }
+}
+
+void publishOutput() {
+  message 0x320 distMsg;
+  distMsg.byte(0) = closestID & 0xFF;
+  distMsg.byte(1) = (closestDist > 255 ? 255 : closestDist) & 0xFF;
+  distMsg.byte(2) = (closestDist <= CRITICAL_DIST) ? 3 :
+                    (closestDist <= WARNING_DIST)  ? 2 : 1;
+  output(distMsg);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 300);
+  setTimer(logTimer,  600);
+}
+
+on timer stepTimer {
+  stepCount++;
+  sortByDistance();
+  publishOutput();
+
+  if (stepCount == 1) {
+    check("Closest_Object5_Dist20", closestID == 5 && closestDist == 20);
+  }
+  if (stepCount == 2) {
+    objDist[4] = 5; // obj5 moves to 5m
+    sortByDistance(); publishOutput();
+    check("NewClosest_Dist5", closestDist == 5);
+  }
+  if (stepCount == 3) {
+    objActive[4] = 0; // obj5 disappears
+    sortByDistance(); publishOutput();
+    check("Obj5_Gone_NextClosest", closestID != 5);
+  }
+  if (stepCount == 4) {
+    objDist[2] = 8;  // obj3 critical
+    sortByDistance(); publishOutput();
+    check("Obj3_Critical_Closest", closestDist <= CRITICAL_DIST);
+  }
+  if (stepCount == 5) {
+    objDist[2] = 50;
+    sortByDistance(); publishOutput();
+    check("Dist_Updated_NoCritical", closestDist > CRITICAL_DIST);
+  }
+
+  if (stepCount < 8) setTimer(stepTimer, 300);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on timer logTimer {
+  int i;
+  write("[DISTLOG] --- Priority ranked objects ---");
+  for (i = 0; i < MAX_OBJ; i++) {
+    if (objActive[sortIdx[i]])
+      write("[DISTLOG]  rank=%d id=%d dist=%dm", i+1, objID[sortIdx[i]], objDist[sortIdx[i]]);
+  }
+}
+
+on message 0x308 {
+  int idx;
+  idx = this.byte(0) - 1;
+  if (idx >= 0 && idx < MAX_OBJ) {
+    objDist[idx]   = this.byte(1);
+    objActive[idx] = this.byte(4);
+  }
+}

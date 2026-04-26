@@ -1,0 +1,117 @@
+/*
+ * 10_camera_fusion.capl
+ * Camera-Radar Sensor Fusion Validation – object fusion confidence,
+ * disagreement detection, fusion state machine
+ * CAN: 0x308 (Radar), 0x309 (Camera), 0x311 (FusedObject)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+
+  // Fusion state: 0=INIT, 1=RADAR_ONLY, 2=CAMERA_ONLY, 3=FUSED, 4=DISAGREEMENT
+  int fusionState = 0;
+
+  // Object data from each sensor
+  int radarRange   = 0;  int radarSpeed  = 0;  int radarValid = 0;
+  int cameraRange  = 0;  int cameraClass = 0;  int cameraValid = 0;
+
+  // Fusion output
+  int fusedRange      = 0;
+  int fusionConfidence = 0;   // 0-100 %
+
+  const int DISAGREE_THRESH = 15;  // cm tolerance
+
+  int stepCount = 0;
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "CameraRadarFusionTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void runFusion() {
+  message 0x311 fusedMsg;
+  if (radarValid && cameraValid) {
+    int diff;
+    diff = radarRange - cameraRange;
+    if (diff < 0) diff = -diff;
+    if (diff <= DISAGREE_THRESH) {
+      fusionState      = 3;  // FUSED
+      fusedRange       = (radarRange + cameraRange) / 2;
+      fusionConfidence = 90;
+    } else {
+      fusionState      = 4;  // DISAGREEMENT
+      fusedRange       = radarRange;  // trust radar
+      fusionConfidence = 40;
+      write("[FUSION] WARN: disagreement radar=%d cam=%d diff=%d", radarRange, cameraRange, diff);
+    }
+  } else if (radarValid) {
+    fusionState = 1; fusedRange = radarRange; fusionConfidence = 60;
+  } else if (cameraValid) {
+    fusionState = 2; fusedRange = cameraRange; fusionConfidence = 50;
+  } else {
+    fusionState = 0; fusedRange = 0; fusionConfidence = 0;
+  }
+  fusedMsg.byte(0) = fusionState & 0xFF;
+  fusedMsg.byte(1) = (fusedRange > 255 ? 255 : fusedRange) & 0xFF;
+  fusedMsg.byte(2) = fusionConfidence & 0xFF;
+  output(fusedMsg);
+  write("[FUSION] state=%d range=%d confidence=%d%%", fusionState, fusedRange, fusionConfidence);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  stepCount++;
+  if (stepCount == 1) {
+    radarValid = 1; radarRange = 80; radarSpeed = 60;
+    cameraValid = 0;
+    runFusion();
+    check("RadarOnly_State",      fusionState == 1);
+    check("RadarOnly_Confidence", fusionConfidence == 60);
+  }
+  if (stepCount == 2) {
+    cameraValid = 1; cameraRange = 82; cameraClass = 1;
+    runFusion();
+    check("Fused_State",          fusionState == 3);
+    check("Fused_Confidence_High",fusionConfidence >= 80);
+    check("FusedRange_Midpoint",  fusedRange == 81);
+  }
+  if (stepCount == 3) {
+    cameraRange = 120;  // big disagreement
+    runFusion();
+    check("Disagreement_Detected", fusionState == 4);
+    check("Confidence_Low_OnDisagree", fusionConfidence < 60);
+  }
+  if (stepCount == 4) {
+    radarValid = 0; cameraValid = 0;
+    runFusion();
+    check("NoSensor_INIT_State", fusionState == 0);
+  }
+  if (stepCount == 5) {
+    cameraValid = 1; cameraRange = 50; radarValid = 0;
+    runFusion();
+    check("CameraOnly_State", fusionState == 2);
+  }
+
+  if (stepCount < 6) setTimer(stepTimer, 300);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on message 0x308 { radarValid = 1; radarRange = this.byte(1); radarSpeed = this.byte(3); }
+on message 0x309 { cameraValid = 1; cameraRange = this.byte(1); cameraClass = this.byte(2); }
+on message 0x311 {
+  write("[RX 0x311] fusionState=%d range=%d confidence=%d",
+        this.byte(0), this.byte(1), this.byte(2));
+}

@@ -1,0 +1,94 @@
+/*
+ * File   : 25_clock_sync.capl
+ * Purpose: Validate GPS time message, IVI clock update, timezone offset, DST flag
+ * Tests  : TC01 GPS time received, TC02 IVI clock updated, TC03 Timezone offset applied, TC04 DST flag, TC05 Invalid time
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  // GPS time message: byte0=hour, byte1=min, byte2=sec, byte3=tzOffset, byte4=DSTflag
+  message 0x403 msg_GPS_Time;
+  msTimer stepTimer;
+
+  byte g_rxHour   = 0;
+  byte g_rxMin    = 0;
+  byte g_rxSec    = 0;
+  byte g_rxTZ     = 0;
+  byte g_rxDST    = 0;
+  int  g_step     = 0;
+  int  g_pass     = 0;
+  int  g_fail     = 0;
+
+  const byte DST_ON  = 1;
+  const byte DST_OFF = 0;
+}
+
+on start {
+  write("=== TC: Clock Sync ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Send GPS time: 14:30:00 UTC");
+      msg_GPS_Time.byte(0) = 14;
+      msg_GPS_Time.byte(1) = 30;
+      msg_GPS_Time.byte(2) = 0;
+      msg_GPS_Time.byte(3) = 0;   // UTC+0
+      msg_GPS_Time.byte(4) = DST_OFF;
+      output(msg_GPS_Time);
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      check("GPSTimeReceived", (g_rxHour == 14 && g_rxMin == 30) ? 1 : 0);
+      write("[STEP 2] Apply timezone UTC+2");
+      msg_GPS_Time.byte(3) = 2;
+      output(msg_GPS_Time);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      check("TimezoneApplied", (g_rxTZ == 2) ? 1 : 0);
+      write("[STEP 3] Enable DST flag");
+      msg_GPS_Time.byte(4) = DST_ON;
+      output(msg_GPS_Time);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      check("DSTFlagSet", (g_rxDST == DST_ON) ? 1 : 0);
+      write("[STEP 4] Send invalid time (hour=25)");
+      msg_GPS_Time.byte(0) = 25;
+      output(msg_GPS_Time);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      check("InvalidTimeRejected", (g_rxHour <= 23) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on message 0x403 {
+  g_rxHour = this.byte(0);
+  g_rxMin  = this.byte(1);
+  g_rxSec  = this.byte(2);
+  g_rxTZ   = this.byte(3);
+  g_rxDST  = this.byte(4);
+  write("[RX] Time=%02d:%02d:%02d  TZ=UTC+%d  DST=%d",
+        g_rxHour, g_rxMin, g_rxSec, g_rxTZ, g_rxDST);
+  check("TimeHourRange", (g_rxHour <= 23) ? 1 : 0);
+  check("TimeMinRange",  (g_rxMin  <= 59) ? 1 : 0);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Clock Sync Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

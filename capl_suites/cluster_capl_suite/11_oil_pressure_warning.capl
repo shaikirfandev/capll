@@ -1,0 +1,100 @@
+/*
+ * File   : 11_oil_pressure_warning.capl
+ * Purpose: Send normal/low/invalid oil pressure via 0x503;
+ *          verify OilWarn bit1 on cluster 0x550 activates below threshold.
+ */
+
+variables {
+  message 0x503 OilPressure;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep  = 0;
+  int  passCount = 0;
+  int  failCount = 0;
+  byte lastLamp  = 0;
+  byte lastDisp  = 0;
+  byte lastFault = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+void sendOilKPa(int kpa) {
+  OilPressure.byte(0) = (kpa >> 8) & 0xFF;
+  OilPressure.byte(1) =  kpa        & 0xFF;
+  output(OilPressure);
+}
+
+on start {
+  write("=== 11_oil_pressure_warning.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (testStep) {
+    case 0:
+      write("STEP 1: Normal pressure 250 kPa");
+      sendOilKPa(250);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 1:
+      check("OilWarn OFF at 250 kPa", (lastLamp & 0x02) == 0);
+      write("STEP 2: Marginal pressure 100 kPa");
+      sendOilKPa(100);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 2:
+      check("OilWarn OFF at 100 kPa (above threshold)", (lastLamp & 0x02) == 0);
+      write("STEP 3: Low pressure 50 kPa (below 70 kPa threshold)");
+      sendOilKPa(50);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 3:
+      check("OilWarn ON at 50 kPa", (lastLamp & 0x02) != 0);
+      write("STEP 4: Critical pressure 10 kPa");
+      sendOilKPa(10);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 4:
+      check("OilWarn ON at 10 kPa", (lastLamp & 0x02) != 0);
+      check("Fault flagged at critical pressure", lastFault != 0);
+      write("STEP 5: Sensor invalid (0xFFFF)");
+      OilPressure.byte(0) = 0xFF;
+      OilPressure.byte(1) = 0xFF;
+      output(OilPressure);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 5:
+      check("OilWarn ON for invalid sensor", (lastLamp & 0x02) != 0);
+      write("STEP 6: Restore normal pressure");
+      sendOilKPa(280);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 6:
+      check("OilWarn cleared after restore", (lastLamp & 0x02) == 0);
+      testStep++; break;
+
+    default:
+      write("Oil pressure test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [Oil]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 11_oil_pressure_warning ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

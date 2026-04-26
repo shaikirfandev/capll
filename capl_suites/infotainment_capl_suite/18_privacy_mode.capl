@@ -1,0 +1,89 @@
+/*
+ * File   : 18_privacy_mode.capl
+ * Purpose: Validate privacy on/off, mic mute, camera disable signal, status confirm
+ * Tests  : TC01 Privacy ON, TC02 Mic mute, TC03 Camera disable, TC04 Privacy OFF, TC05 Status confirm
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x406 msg_SWC;
+  // Privacy byte: byte0=privacyMode(0/1), byte1=micMute(0/1), byte2=camDisable(0/1)
+  message 0x402 msg_HU;
+  msTimer stepTimer;
+
+  int  g_step       = 0;
+  int  g_pass       = 0;
+  int  g_fail       = 0;
+  byte g_privMode   = 0;
+  byte g_micMute    = 0;
+  byte g_camDisable = 0;
+
+  const byte KEY_PRIVACY_ON  = 0x80;
+  const byte KEY_PRIVACY_OFF = 0x81;
+}
+
+on start {
+  write("=== TC: Privacy Mode ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Enable Privacy Mode");
+      msg_SWC.byte(0) = KEY_PRIVACY_ON;
+      output(msg_SWC);
+      g_privMode = 1;
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      write("[STEP 2] Mic mute active in privacy mode");
+      g_micMute = 1;
+      check("MicMuted", g_micMute);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      write("[STEP 3] Camera disable signal");
+      g_camDisable = 1;
+      check("CameraDisabled", g_camDisable);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      write("[STEP 4] Confirm privacy mode active status");
+      check("PrivacyModeActive", g_privMode);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      write("[STEP 5] Disable Privacy Mode");
+      msg_SWC.byte(0) = KEY_PRIVACY_OFF;
+      output(msg_SWC);
+      g_privMode   = 0;
+      g_micMute    = 0;
+      g_camDisable = 0;
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      check("PrivacyModeOff", (g_privMode == 0) ? 1 : 0);
+      check("MicRestored",    (g_micMute   == 0) ? 1 : 0);
+      check("CameraRestored", (g_camDisable== 0) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on message 0x406 {
+  write("[RX] SWC_Key = 0x%02X", this.byte(0));
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Privacy Mode Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

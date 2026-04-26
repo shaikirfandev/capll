@@ -1,0 +1,100 @@
+/*
+ * File   : 16_infotainment_dtc.capl
+ * Purpose: UDS 0x19 read DTC, 0x14 clear DTC, response validation
+ * Tests  : TC01 Read DTC by status mask, TC02 Parse DTC count, TC03 Clear all DTCs, TC04 Verify cleared
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  // UDS request/response on CAN IDs 0x740 (Tester→ECU) / 0x748 (ECU→Tester)
+  message 0x740 msg_UDS_Req;
+  message 0x748 msg_UDS_Resp;
+  msTimer stepTimer;
+
+  byte g_rxSID    = 0;
+  int  g_step     = 0;
+  int  g_pass     = 0;
+  int  g_fail     = 0;
+  int  g_dtcCount = 0;
+
+  const byte SID_READ_DTC  = 0x59;
+  const byte SID_CLEAR_DTC = 0x54;
+  const byte NRC_SUB       = 0x7F;
+}
+
+on start {
+  write("=== TC: Infotainment DTC (UDS) ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] UDS 0x19 0x02 0xFF – Read DTC by status mask 0xFF");
+      msg_UDS_Req.byte(0) = 0x03;   // PCI length
+      msg_UDS_Req.byte(1) = 0x19;   // SID
+      msg_UDS_Req.byte(2) = 0x02;   // sub-function
+      msg_UDS_Req.byte(3) = 0xFF;   // status mask
+      output(msg_UDS_Req);
+      g_step = 2; setTimer(stepTimer, 600); break;
+
+    case 2:
+      write("[STEP 2] Parse DTC count from response");
+      check("ReadDTCResponseReceived", (g_rxSID == SID_READ_DTC) ? 1 : 0);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      write("[STEP 3] UDS 0x14 0xFF 0xFF 0xFF – Clear all DTCs");
+      msg_UDS_Req.byte(0) = 0x04;
+      msg_UDS_Req.byte(1) = 0x14;
+      msg_UDS_Req.byte(2) = 0xFF;
+      msg_UDS_Req.byte(3) = 0xFF;
+      msg_UDS_Req.byte(4) = 0xFF;
+      output(msg_UDS_Req);
+      g_step = 4; setTimer(stepTimer, 600); break;
+
+    case 4:
+      write("[STEP 4] Verify positive response 0x54 received");
+      check("ClearDTCPositiveResp", (g_rxSID == SID_CLEAR_DTC) ? 1 : 0);
+      g_step = 5; setTimer(stepTimer, 300); break;
+
+    case 5:
+      write("[STEP 5] Re-read DTC – expect count = 0 after clear");
+      msg_UDS_Req.byte(0) = 0x03;
+      msg_UDS_Req.byte(1) = 0x19;
+      msg_UDS_Req.byte(2) = 0x02;
+      msg_UDS_Req.byte(3) = 0xFF;
+      output(msg_UDS_Req);
+      g_step = 0; break;
+  }
+}
+
+on message 0x748 {
+  g_rxSID = this.byte(1);
+  write("[RX] UDS Response SID = 0x%02X", g_rxSID);
+  if (g_rxSID == SID_READ_DTC) {
+    g_dtcCount = this.byte(2);
+    write("     DTC count = %d", g_dtcCount);
+    check("DTCCountValid", (g_dtcCount >= 0) ? 1 : 0);
+  }
+  if (g_rxSID == SID_CLEAR_DTC) {
+    check("DTCCleared", 1);
+  }
+  if (g_rxSID == NRC_SUB) {
+    check("DTCNRCUnexpected", 0);
+  }
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Infotainment DTC Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

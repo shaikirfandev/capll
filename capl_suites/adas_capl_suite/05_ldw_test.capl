@@ -1,0 +1,44 @@
+/*
+ * 05_ldw_test.capl
+ * Lane Departure Warning (LDW) – Alert timing and suppression validation
+ */
+variables {
+  message 0x304 LDW_Status;
+  message 0x309 CameraLane;
+  message 0x100 VehicleSpeed;
+  msTimer stepTimer;
+  int testStep=0, passCount=0, failCount=0;
+  float alertTime_ms=0, sendTime_ms=0;
+}
+void sendLane(float off, byte valid) {
+  int r=(int)(off*100+500); CameraLane.byte(0)=(r>>8)&0xFF; CameraLane.byte(1)=r&0xFF; CameraLane.byte(2)=valid;
+  sendTime_ms=timeNow()/10000.0; output(CameraLane);
+}
+void sendSpd(float s) { int r=(int)(s*10); VehicleSpeed.byte(0)=(r>>8)&0xFF; VehicleSpeed.byte(1)=r&0xFF; output(VehicleSpeed); }
+void check(char n[],int c){if(c){write("[PASS] %s",n);passCount++;}else{write("[FAIL] %s",n);failCount++;}}
+on start { write("=== LDW Test Suite ==="); sendSpd(80.0); setTimer(stepTimer,500); }
+on timer stepTimer {
+  testStep++;
+  switch(testStep) {
+    case 1: write("[S1] Right departure 0.1m – below threshold"); sendLane(0.1,0x03); setTimer(stepTimer,1500); break;
+    case 2: write("[S2] Right departure 0.3m – alert expected"); sendLane(0.3,0x03); setTimer(stepTimer,1500); break;
+    case 3: write("[S3] Left departure -0.4m – left alert"); sendLane(-0.4,0x03); setTimer(stepTimer,1500); break;
+    case 4: write("[S4] Departure but indicator ON – suppressed"); { message 0x320 T; T.byte(0)=0x01; output(T); } sendLane(0.4,0x03); setTimer(stepTimer,1500); break;
+    case 5: write("[S5] Speed 45 km/h – LDW off below 60 km/h"); sendSpd(45.0); sendLane(0.4,0x03); setTimer(stepTimer,1500); break;
+    case 6: write("[S6] Lines not detected – no alert"); sendLane(0.5,0x00); setTimer(stepTimer,1000); break;
+    case 7: write("=== LDW Done P=%d F=%d ===",passCount,failCount); break;
+  }
+}
+on message 0x304 {
+  int left=(this.byte(0)>>1)&0x01, right=this.byte(0)&0x01;
+  float delay=timeNow()/10000.0 - sendTime_ms;
+  switch(testStep) {
+    case 1: check("LDW_NoAlert_SmallOffset",    !left && !right); break;
+    case 2: check("LDW_RightAlert",              right && delay<=200); break;
+    case 3: check("LDW_LeftAlert",               left && delay<=200); break;
+    case 4: check("LDW_Suppressed_Indicator",   !left && !right); break;
+    case 5: check("LDW_Off_LowSpeed",           !left && !right); break;
+    case 6: check("LDW_Off_NoCameraLines",      !left && !right); break;
+  }
+}
+on stopMeasurement { write("LDW: P=%d F=%d",passCount,failCount); }

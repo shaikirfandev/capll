@@ -1,0 +1,95 @@
+/*
+ * File   : 20_system_update_ota.capl
+ * Purpose: Validate OTA download trigger, 0–100% progress, success/failure handling
+ * Tests  : TC01 OTA trigger, TC02 Progress 0→50%, TC03 Progress 50→100%, TC04 OTA success, TC05 OTA failure retry
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x408 msg_OTA;
+  msTimer stepTimer;
+
+  byte g_rxProgress = 0;
+  byte g_rxStatus   = 0;   // 0=Idle,1=Downloading,2=Success,3=Failed
+  int  g_step       = 0;
+  int  g_pass       = 0;
+  int  g_fail       = 0;
+
+  const byte OTA_IDLE        = 0;
+  const byte OTA_DOWNLOADING = 1;
+  const byte OTA_SUCCESS     = 2;
+  const byte OTA_FAILED      = 3;
+}
+
+on start {
+  write("=== TC: System Update OTA ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Trigger OTA download");
+      msg_OTA.byte(0) = 0;
+      msg_OTA.byte(1) = OTA_DOWNLOADING;
+      output(msg_OTA);
+      g_step = 2; setTimer(stepTimer, 500); break;
+
+    case 2:
+      write("[STEP 2] OTA progress: 25%%");
+      msg_OTA.byte(0) = 25;
+      msg_OTA.byte(1) = OTA_DOWNLOADING;
+      output(msg_OTA);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      write("[STEP 3] OTA progress: 50%%");
+      msg_OTA.byte(0) = 50;
+      msg_OTA.byte(1) = OTA_DOWNLOADING;
+      output(msg_OTA);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      write("[STEP 4] OTA progress: 100%% – success");
+      msg_OTA.byte(0) = 100;
+      msg_OTA.byte(1) = OTA_SUCCESS;
+      output(msg_OTA);
+      g_step = 5; setTimer(stepTimer, 500); break;
+
+    case 5:
+      check("OTAComplete", (g_rxStatus == OTA_SUCCESS && g_rxProgress == 100) ? 1 : 0);
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      write("[STEP 6] Simulate OTA failure – status = Failed");
+      msg_OTA.byte(0) = 60;
+      msg_OTA.byte(1) = OTA_FAILED;
+      output(msg_OTA);
+      g_step = 7; setTimer(stepTimer, 400); break;
+
+    case 7:
+      check("OTAFailureDetected", (g_rxStatus == OTA_FAILED) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on message 0x408 {
+  g_rxProgress = this.byte(0);
+  g_rxStatus   = this.byte(1);
+  write("[RX] OTA progress=%d%%  status=%d", g_rxProgress, g_rxStatus);
+  check("OTAProgressInRange", (g_rxProgress <= 100) ? 1 : 0);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== OTA Update Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

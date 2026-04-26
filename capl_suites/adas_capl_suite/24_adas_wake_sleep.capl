@@ -1,0 +1,111 @@
+/*
+ * 24_adas_wake_sleep.capl
+ * Wake/Sleep Cycle Validation – KL15 on/off, wake timers,
+ * sleep inhibit, standby current check
+ * CAN: 0x101 (Ignition/KL15), 0x324 (WakeSleep status)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+  msTimer wakeTimer;
+
+  // States: 0=SLEEP, 1=WAKEUP, 2=ACTIVE, 3=SHUTDOWN, 4=STANDBY
+  int ecuState       = 0;
+  int kl15State      = 0;    // 0=off, 1=on
+  int sleepInhibit   = 0;
+  int wakeSource     = 0;    // 1=kl15, 2=timer, 3=can
+  int standbyCurrent = 2;    // mA (target <5mA in sleep)
+  int wakeTimerArmed = 0;
+  int wakeTimerMs    = 0;
+
+  const int SHUTDOWN_DELAY_MS   = 1000;
+  const int SLEEP_CURRENT_MAX   = 5;    // mA
+
+  int stepCount = 0;
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "ADAS_WakeSleepCycleTest";
+  int shutdownCounter = 0;
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void setECUState(int newState) {
+  if (newState != ecuState)
+    write("[WS] ECU state %d -> %d kl15=%d", ecuState, newState, kl15State);
+  ecuState = newState;
+}
+
+void evalWakeSleep() {
+  message 0x324 wsMsg;
+  switch (ecuState) {
+    case 0: // SLEEP
+      standbyCurrent = 2;
+      if (kl15State == 1) { wakeSource = 1; setECUState(1); }
+      else if (wakeTimerArmed && wakeTimerMs <= 0) { wakeSource = 2; setECUState(1); }
+      break;
+    case 1: // WAKEUP
+      setECUState(2); break;
+    case 2: // ACTIVE
+      standbyCurrent = 150;
+      if (kl15State == 0 && !sleepInhibit) { shutdownCounter++; }
+      else { shutdownCounter = 0; }
+      if (shutdownCounter >= 2) setECUState(3);
+      break;
+    case 3: // SHUTDOWN
+      standbyCurrent = 10;
+      setECUState(4); break;
+    case 4: // STANDBY
+      standbyCurrent = 3;
+      if (!sleepInhibit) setECUState(0);
+      break;
+  }
+  wsMsg.byte(0) = ecuState & 0xFF;
+  wsMsg.byte(1) = kl15State & 0xFF;
+  wsMsg.byte(2) = wakeSource & 0xFF;
+  wsMsg.byte(3) = standbyCurrent & 0xFF;
+  output(wsMsg);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 400);
+}
+
+on timer stepTimer {
+  stepCount++;
+  if (stepCount == 1) { kl15State = 0; ecuState = 0; evalWakeSleep(); check("Initial_Sleep", ecuState == 0); }
+  if (stepCount == 2) { kl15State = 1; evalWakeSleep(); check("KL15_WakesECU", ecuState >= 1); }
+  if (stepCount == 3) { evalWakeSleep(); check("ECU_Active",        ecuState == 2); }
+  if (stepCount == 4) { kl15State = 0; evalWakeSleep(); }
+  if (stepCount == 5) { evalWakeSleep(); check("KL15Off_Shutdown",   ecuState == 3 || ecuState == 4); }
+  if (stepCount == 6) { evalWakeSleep(); check("Standby_Current_Low", standbyCurrent <= SLEEP_CURRENT_MAX + 2); }
+  if (stepCount == 7) { evalWakeSleep(); check("ECU_Sleep",          ecuState == 0); }
+  if (stepCount == 8) { evalWakeSleep(); check("Sleep_Current_OK",   standbyCurrent <= SLEEP_CURRENT_MAX); }
+  if (stepCount == 9) {
+    // Inhibit test – stay in standby despite attempts to sleep
+    ecuState = 4; sleepInhibit = 1; evalWakeSleep();
+    check("SleepInhibit_KeepStandby", ecuState == 4);
+  }
+  if (stepCount == 10) {
+    sleepInhibit = 0; evalWakeSleep();
+    check("InhibitCleared_GoToSleep", ecuState == 0);
+  }
+
+  if (stepCount < 11) setTimer(stepTimer, 400);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on message 0x101 { kl15State = this.byte(0); }
+on message 0x324 {
+  write("[RX 0x324] ecuState=%d kl15=%d wakeSource=%d standbyMA=%d",
+        this.byte(0), this.byte(1), this.byte(2), this.byte(3));
+}

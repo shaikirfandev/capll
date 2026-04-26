@@ -1,0 +1,88 @@
+/*
+ * File   : 02_media_source_switch.capl
+ * Purpose: Validate source cycling Radio→USB→BT→CarPlay→AndroidAuto and invalid source rejection
+ * Tests  : TC01 Radio, TC02 USB, TC03 BT, TC04 CarPlay, TC05 AndroidAuto, TC06 Invalid source
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x401 msg_AudioSource;
+  msTimer stepTimer;
+
+  byte g_rxSource  = 0xFF;
+  int  g_step      = 0;
+  int  g_pass      = 0;
+  int  g_fail      = 0;
+  byte g_txSource  = 0;
+
+  const byte SRC_RADIO  = 0;
+  const byte SRC_USB    = 1;
+  const byte SRC_BT     = 2;
+  const byte SRC_CP     = 3;
+  const byte SRC_AA     = 4;
+  const byte SRC_INVAL  = 0xFF;
+}
+
+on start {
+  write("=== TC: Media Source Switch ===");
+  g_step = 1;
+  setTimer(stepTimer, 200);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      sendSource(SRC_RADIO, "Radio");
+      g_step = 2; setTimer(stepTimer, 400); break;
+    case 2:
+      sendSource(SRC_USB, "USB");
+      g_step = 3; setTimer(stepTimer, 400); break;
+    case 3:
+      sendSource(SRC_BT, "Bluetooth");
+      g_step = 4; setTimer(stepTimer, 400); break;
+    case 4:
+      sendSource(SRC_CP, "CarPlay");
+      g_step = 5; setTimer(stepTimer, 400); break;
+    case 5:
+      sendSource(SRC_AA, "AndroidAuto");
+      g_step = 6; setTimer(stepTimer, 400); break;
+    case 6:
+      write("[STEP 6] Sending invalid source 0xFF – expect rejection");
+      msg_AudioSource.byte(0) = SRC_INVAL;
+      output(msg_AudioSource);
+      g_step = 7; setTimer(stepTimer, 400); break;
+    case 7:
+      write("[STEP 7] Source cycle complete. Awaiting validation.");
+      g_step = 0; break;
+  }
+}
+
+void sendSource(byte src, char name[]) {
+  write("[TX] Switching source to %s (0x%02X)", name, src);
+  msg_AudioSource.byte(0) = src;
+  output(msg_AudioSource);
+  g_txSource = src;
+}
+
+on message 0x401 {
+  g_rxSource = this.byte(0);
+  write("[RX] Audio_Source = 0x%02X", g_rxSource);
+  if (g_rxSource <= SRC_AA) {
+    check("ValidSource", 1);
+  } else {
+    check("InvalidSourceRejected", (g_rxSource == SRC_INVAL) ? 0 : 1);
+  }
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Media Source Switch Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

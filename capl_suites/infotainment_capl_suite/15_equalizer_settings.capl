@@ -1,0 +1,110 @@
+/*
+ * File   : 15_equalizer_settings.capl
+ * Purpose: Validate Bass/Mid/Treble range, preset (Rock/Pop/Flat), reset
+ * Tests  : TC01 Bass min/max, TC02 Mid range, TC03 Treble range, TC04 Rock preset, TC05 Pop preset, TC06 Reset Flat
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  // Custom EQ message: byte0=bass(-10..+10), byte1=mid, byte2=treble, byte3=preset(0=Flat,1=Rock,2=Pop)
+  message 0x400 msg_EQ;
+  msTimer stepTimer;
+
+  int  g_step   = 0;
+  int  g_pass   = 0;
+  int  g_fail   = 0;
+  byte g_rxBass = 0;
+  byte g_rxMid  = 0;
+  byte g_rxTrbl = 0;
+
+  const byte EQ_FLAT  = 0;
+  const byte EQ_ROCK  = 1;
+  const byte EQ_POP   = 2;
+  // Encoding: 0=−10, 10=0, 20=+10
+  const byte EQ_ZERO  = 10;
+  const byte EQ_MIN   = 0;
+  const byte EQ_MAX   = 20;
+}
+
+on start {
+  write("=== TC: Equalizer Settings ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Bass min (0 = -10 dB)");
+      msg_EQ.byte(0) = EQ_MIN;
+      msg_EQ.byte(1) = EQ_ZERO;
+      msg_EQ.byte(2) = EQ_ZERO;
+      msg_EQ.byte(3) = EQ_FLAT;
+      output(msg_EQ);
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      write("[STEP 2] Bass max (20 = +10 dB)");
+      msg_EQ.byte(0) = EQ_MAX;
+      output(msg_EQ);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      write("[STEP 3] Mid range test (15 = +5 dB)");
+      msg_EQ.byte(0) = EQ_ZERO;
+      msg_EQ.byte(1) = 15;
+      output(msg_EQ);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      write("[STEP 4] Rock preset – Bass+, Treble+, Mid-");
+      msg_EQ.byte(0) = 16;
+      msg_EQ.byte(1) = 7;
+      msg_EQ.byte(2) = 16;
+      msg_EQ.byte(3) = EQ_ROCK;
+      output(msg_EQ);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      write("[STEP 5] Pop preset – Mid+, punchy");
+      msg_EQ.byte(0) = 12;
+      msg_EQ.byte(1) = 15;
+      msg_EQ.byte(2) = 13;
+      msg_EQ.byte(3) = EQ_POP;
+      output(msg_EQ);
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      write("[STEP 6] Reset to Flat");
+      msg_EQ.byte(0) = EQ_ZERO;
+      msg_EQ.byte(1) = EQ_ZERO;
+      msg_EQ.byte(2) = EQ_ZERO;
+      msg_EQ.byte(3) = EQ_FLAT;
+      output(msg_EQ);
+      g_step = 0; break;
+  }
+}
+
+on message 0x400 {
+  g_rxBass = this.byte(0);
+  g_rxMid  = this.byte(1);
+  g_rxTrbl = this.byte(2);
+  write("[RX] EQ Bass=%d Mid=%d Treble=%d Preset=%d",
+        g_rxBass, g_rxMid, g_rxTrbl, this.byte(3));
+  check("EQBassRange", (g_rxBass <= EQ_MAX) ? 1 : 0);
+  check("EQMidRange",  (g_rxMid  <= EQ_MAX) ? 1 : 0);
+  check("EQTrebleRange",(g_rxTrbl<= EQ_MAX) ? 1 : 0);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Equalizer Settings Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

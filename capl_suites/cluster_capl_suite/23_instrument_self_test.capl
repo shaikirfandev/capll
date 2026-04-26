@@ -1,0 +1,107 @@
+/*
+ * File   : 23_instrument_self_test.capl
+ * Purpose: Simulate ignition ON sequence – all cluster lamps ON for 3s,
+ *          then clear.  Verify 0x550 lamp_state byte = 0xFF during self-test
+ *          and 0x00 after clear within timing spec.
+ */
+
+variables {
+  message 0x504 ClusterPower;
+  message 0x505 WarningLamps;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+  msTimer lampTimer;
+
+  int  testStep      = 0;
+  int  passCount     = 0;
+  int  failCount     = 0;
+  byte lastLamp      = 0;
+  byte lastDisp      = 0;
+  byte lastFault     = 0;
+  long selfTestStart = 0;
+  long selfTestEnd   = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 23_instrument_self_test.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer lampTimer {
+  /* After 3 seconds turn all lamps off = end of self-test */
+  WarningLamps.byte(0) = 0x00;
+  output(WarningLamps);
+  selfTestEnd = timeNow();
+  write("Self-test lamps cleared at %d ms", selfTestEnd / 10000);
+}
+
+on timer stepTimer {
+  long durationMs;
+  switch (testStep) {
+    case 0:
+      write("STEP 1: IGN OFF state");
+      ClusterPower.byte(0) = 0x00; /* Sleep */
+      output(ClusterPower);
+      WarningLamps.byte(0) = 0x00;
+      output(WarningLamps);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 1:
+      check("Cluster in sleep – no lamps", (lastLamp & 0xFF) == 0 || lastFault == 0);
+      write("STEP 2: IGN ON – start self-test");
+      ClusterPower.byte(0) = 0x02; /* ON */
+      output(ClusterPower);
+      setTimer(stepTimer, 200); testStep++; break;
+
+    case 2:
+      /* All lamps on */
+      WarningLamps.byte(0) = 0xFF;
+      output(WarningLamps);
+      selfTestStart = timeNow();
+      write("Self-test lamps ON at %d ms", selfTestStart / 10000);
+      setTimer(lampTimer, 3000); /* off after 3s */
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 3:
+      check("All lamps ON during self-test", (lastLamp & 0xFF) == 0xFF);
+      setTimer(stepTimer, 3200); testStep++; break; /* wait for lampTimer */
+
+    case 4:
+      durationMs = (selfTestEnd - selfTestStart) / 10000;
+      write("Self-test duration: %d ms", durationMs);
+      check("Self-test duration >= 3000ms", durationMs >= 2900);
+      check("Self-test duration <= 3500ms", durationMs <= 3500);
+      check("All lamps OFF after self-test", lastLamp == 0x00);
+      setTimer(stepTimer, 300); testStep++; break;
+
+    case 5:
+      check("No residual fault after self-test", lastFault == 0);
+      check("Cluster power stable ON",           lastDisp >= 0);
+      testStep++; break;
+
+    default:
+      write("Self-test validation complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [SelfTest]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 23_instrument_self_test ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

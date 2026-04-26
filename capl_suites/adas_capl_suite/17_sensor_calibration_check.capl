@@ -1,0 +1,121 @@
+/*
+ * 17_sensor_calibration_check.capl
+ * Sensor Calibration Status Validation – camera blockage, radar misalignment,
+ * calibration request/response
+ * CAN: 0x317 (CalibStatus)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+
+  // Calibration states: 0=OK, 1=DEGRADED, 2=BLOCKED, 3=MISALIGNED, 4=UNCALIBRATED
+  int camCalibState   = 0;
+  int radarCalibState = 0;
+  int lidarCalibState = 0;
+
+  int calibReqPending = 0;
+  int calibRespCode   = 0;   // 0=idle,1=in_progress,2=success,3=fail
+
+  int blockageLevel   = 0;   // 0-100%
+  int radarYawError   = 0;   // degrees*10
+
+  const int BLOCKAGE_THRESH   = 30;  // %
+  const int MISALIGN_THRESH   = 15;  // deg*10
+
+  int stepCount = 0;
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "SensorCalibrationTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void evalCalibration() {
+  message 0x317 calibMsg;
+
+  // Camera blockage evaluation
+  if (blockageLevel >= BLOCKAGE_THRESH)       camCalibState = 2;  // BLOCKED
+  else if (blockageLevel >= 10)               camCalibState = 1;  // DEGRADED
+  else                                        camCalibState = 0;
+
+  // Radar misalignment
+  int yawAbs;
+  yawAbs = radarYawError < 0 ? -radarYawError : radarYawError;
+  if (yawAbs >= MISALIGN_THRESH)              radarCalibState = 3; // MISALIGNED
+  else                                        radarCalibState = 0;
+
+  calibMsg.byte(0) = camCalibState   & 0xFF;
+  calibMsg.byte(1) = radarCalibState & 0xFF;
+  calibMsg.byte(2) = lidarCalibState & 0xFF;
+  calibMsg.byte(3) = calibReqPending & 0xFF;
+  calibMsg.byte(4) = calibRespCode   & 0xFF;
+  output(calibMsg);
+  write("[CALIB] cam=%d radar=%d lidar=%d req=%d resp=%d block=%d%% yawErr=%d",
+        camCalibState, radarCalibState, lidarCalibState,
+        calibReqPending, calibRespCode, blockageLevel, radarYawError);
+}
+
+void sendCalibRequest() {
+  calibReqPending = 1; calibRespCode = 1;
+  write("[CALIB] Calibration request sent");
+}
+
+void simulateCalibResponse(int success) {
+  calibRespCode   = success ? 2 : 3;
+  calibReqPending = 0;
+  if (success) { camCalibState = 0; radarCalibState = 0; }
+  write("[CALIB] Response received: %s", success ? "SUCCESS" : "FAIL");
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 350);
+}
+
+on timer stepTimer {
+  stepCount++;
+  if (stepCount == 1) {
+    blockageLevel = 0; radarYawError = 0;
+    evalCalibration();
+    check("Initial_AllCalibOK", camCalibState == 0 && radarCalibState == 0);
+  }
+  if (stepCount == 2) {
+    blockageLevel = 20; evalCalibration();
+    check("Camera_Degraded",     camCalibState == 1);
+  }
+  if (stepCount == 3) {
+    blockageLevel = 50; evalCalibration();
+    check("Camera_Blocked",      camCalibState == 2);
+  }
+  if (stepCount == 4) {
+    radarYawError = 20; evalCalibration();
+    check("Radar_Misaligned",    radarCalibState == 3);
+  }
+  if (stepCount == 5) {
+    sendCalibRequest(); evalCalibration();
+    check("CalibReq_Sent",       calibReqPending == 1);
+  }
+  if (stepCount == 6) {
+    simulateCalibResponse(1); blockageLevel = 0; radarYawError = 0;
+    evalCalibration();
+    check("CalibResp_Success",   calibRespCode == 2);
+    check("PostCalib_AllOK",     camCalibState == 0 && radarCalibState == 0);
+  }
+  if (stepCount == 7) {
+    sendCalibRequest();
+    simulateCalibResponse(0);
+    evalCalibration();
+    check("CalibResp_Fail",      calibRespCode == 3);
+  }
+
+  if (stepCount < 8) setTimer(stepTimer, 350);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}

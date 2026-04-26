@@ -1,0 +1,105 @@
+/*
+ * File   : 02_gps_fix_validation.capl
+ * Purpose: Wait for GPS valid signal, satellite count ≥4, position plausibility check
+ * CAN IDs: 0x601 GPS_Validity, 0x602 GPS_Latitude, 0x603 GPS_Longitude
+ */
+
+variables {
+  message 0x601 GPS_Validity;
+  message 0x602 GPS_Latitude;
+  message 0x603 GPS_Longitude;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount = 0;
+  int failCount = 0;
+  int testStep  = 0;
+  int gpsValid  = 0;
+  int satCount  = 0;
+  long latRaw   = 0;
+  long lonRaw   = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 02_gps_fix_validation: GPS Fix & Plausibility Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Inject GPS invalid state (byte0=0, sats=0)");
+      GPS_Validity.byte(0) = 0; GPS_Validity.byte(1) = 0;
+      output(GPS_Validity);
+      setTimer(stepTimer, 1500);
+      break;
+    case 2:
+      write("[STEP 2] Inject GPS poor state (byte0=2, sats=3)");
+      GPS_Validity.byte(0) = 2; GPS_Validity.byte(1) = 3;
+      output(GPS_Validity);
+      setTimer(stepTimer, 2000);
+      break;
+    case 3:
+      write("[STEP 3] Inject GPS valid state (byte0=1, sats=8)");
+      GPS_Validity.byte(0) = 1; GPS_Validity.byte(1) = 8;
+      output(GPS_Validity);
+      setTimer(stepTimer, 1500);
+      break;
+    case 4:
+      write("[STEP 4] Inject latitude: 37.774900 → 37774900 big endian");
+      GPS_Latitude.byte(0) = 0x02; GPS_Latitude.byte(1) = 0x40;
+      GPS_Latitude.byte(2) = 0xDA; GPS_Latitude.byte(3) = 0x14;
+      output(GPS_Latitude);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Inject longitude: -122.419400 → -122419400 big endian");
+      GPS_Longitude.byte(0) = 0xF8; GPS_Longitude.byte(1) = 0xA7;
+      GPS_Longitude.byte(2) = 0xC8; GPS_Longitude.byte(3) = 0x38;
+      output(GPS_Longitude);
+      setTimer(stepTimer, 1500);
+      break;
+    case 6:
+      write("[STEP 6] Verify GPS validity = 1 (valid)");
+      check("GPS state is valid (byte0=1)", GPS_Validity.byte(0) == 1);
+      check("Satellite count >= 4",        GPS_Validity.byte(1) >= 4);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify latitude plausibility (-90e6 to +90e6)");
+      {
+        long lat = (long)GPS_Latitude.byte(0) << 24 | GPS_Latitude.byte(1) << 16 |
+                   GPS_Latitude.byte(2) << 8  | GPS_Latitude.byte(3);
+        check("Latitude in plausible range", lat >= -90000000 && lat <= 90000000);
+        write("  Parsed latitude*1e6 = %d", lat);
+      }
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify longitude plausibility (-180e6 to +180e6)");
+      {
+        long lon = (long)GPS_Longitude.byte(0) << 24 | GPS_Longitude.byte(1) << 16 |
+                   GPS_Longitude.byte(2) << 8  | GPS_Longitude.byte(3);
+        check("Longitude in plausible range", lon >= -180000000 && lon <= 180000000);
+        write("  Parsed longitude*1e6 = %d", lon);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x601 {
+  gpsValid = this.byte(0);
+  satCount = this.byte(1);
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

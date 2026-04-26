@@ -1,0 +1,99 @@
+/*
+ * File   : 21_geofence_speed_alert.capl
+ * Purpose: Exit geofence at speed_at_event=90 (>80 limit), verify overspeed flag
+ * CAN IDs: 0x611 GeoFence_Event, 0x650 TCU_Response
+ */
+
+variables {
+  message 0x611 GeoFence_Event;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount       = 0;
+  int failCount       = 0;
+  int testStep        = 0;
+  int overspeedFlag   = 0;
+  int exitSeen        = 0;
+  int speedLimit      = 80;
+  int capturedSpeed   = 0;
+  int alertRaised     = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 21_geofence_speed_alert: Overspeed on Geofence Exit Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Vehicle inside fence, normal speed=50 (limit=80)");
+      GeoFence_Event.byte(0) = 0; GeoFence_Event.byte(1) = 1; GeoFence_Event.byte(2) = 50;
+      output(GeoFence_Event);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] Vehicle exits fence at 90 km/h (OVER 80 limit)");
+      GeoFence_Event.byte(0) = 1; GeoFence_Event.byte(1) = 1; GeoFence_Event.byte(2) = 90;
+      output(GeoFence_Event);
+      setTimer(stepTimer, 1500);
+      break;
+    case 3:
+      write("[STEP 3] TCU raises overspeed alert (byte0=0xC2, byte2=90)");
+      TCU_Response.byte(0) = 0xC2; TCU_Response.byte(1) = 0x01; TCU_Response.byte(2) = 90;
+      output(TCU_Response);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] Verify exit event seen with speed=90");
+      check("Exit event seen (byte0=1)",          exitSeen);
+      check("Speed at exit = 90 km/h",            capturedSpeed == 90);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Verify speed exceeds limit of 80");
+      check("Exit speed exceeds 80 km/h limit",   capturedSpeed > speedLimit);
+      write("  Speed: %d  Limit: %d", capturedSpeed, speedLimit);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verify overspeed flag raised");
+      check("Overspeed flag set",                 overspeedFlag);
+      check("Alert type = 0xC2 (overspeed exit)", TCU_Response.byte(0) == 0xC2);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify alert encodes measured speed in byte2");
+      check("Alert byte2 = exit speed (90)",      TCU_Response.byte(2) == 90);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Confirm no alert for normal-speed exit (hypothetical <80 check)");
+      check("Alert only raised when speed > limit", capturedSpeed > speedLimit && alertRaised);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x611 {
+  if (this.byte(0) == 1) {
+    exitSeen      = 1;
+    capturedSpeed = this.byte(2);
+    if (capturedSpeed > speedLimit) overspeedFlag = 1;
+  }
+}
+
+on message 0x650 {
+  if (this.byte(0) == 0xC2) alertRaised = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

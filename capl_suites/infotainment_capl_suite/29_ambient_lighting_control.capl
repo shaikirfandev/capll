@@ -1,0 +1,105 @@
+/*
+ * File   : 29_ambient_lighting_control.capl
+ * Purpose: Validate RGB zone set, brightness change, sync with theme
+ * Tests  : TC01 Set zone RED, TC02 Set zone BLUE, TC03 Brightness change, TC04 Theme sync, TC05 Zone off
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  // Ambient lighting: byte0=R, byte1=G, byte2=B, byte3=brightness, byte4=theme(0=Custom,1=Sport,2=Comfort)
+  message 0x407 msg_Ambient;
+  msTimer stepTimer;
+
+  byte g_rxR      = 0;
+  byte g_rxG      = 0;
+  byte g_rxB      = 0;
+  byte g_rxBright = 0;
+  byte g_rxTheme  = 0;
+  int  g_step     = 0;
+  int  g_pass     = 0;
+  int  g_fail     = 0;
+
+  const byte THEME_CUSTOM  = 0;
+  const byte THEME_SPORT   = 1;
+  const byte THEME_COMFORT = 2;
+}
+
+on start {
+  write("=== TC: Ambient Lighting Control ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Set ambient zone: RED");
+      msg_Ambient.byte(0) = 255;
+      msg_Ambient.byte(1) = 0;
+      msg_Ambient.byte(2) = 0;
+      msg_Ambient.byte(3) = 100;
+      msg_Ambient.byte(4) = THEME_CUSTOM;
+      output(msg_Ambient);
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      check("ZoneRed", (g_rxR == 255 && g_rxG == 0 && g_rxB == 0) ? 1 : 0);
+      write("[STEP 2] Set ambient zone: BLUE");
+      msg_Ambient.byte(0) = 0;
+      msg_Ambient.byte(2) = 255;
+      output(msg_Ambient);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      check("ZoneBlue", (g_rxR == 0 && g_rxB == 255) ? 1 : 0);
+      write("[STEP 3] Change brightness to 50");
+      msg_Ambient.byte(3) = 50;
+      output(msg_Ambient);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      check("BrightnessChnaged", (g_rxBright == 50) ? 1 : 0);
+      write("[STEP 4] Apply Sport theme (red/fast)");
+      msg_Ambient.byte(0) = 200;
+      msg_Ambient.byte(1) = 10;
+      msg_Ambient.byte(2) = 10;
+      msg_Ambient.byte(3) = 200;
+      msg_Ambient.byte(4) = THEME_SPORT;
+      output(msg_Ambient);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      check("ThemeSportApplied", (g_rxTheme == THEME_SPORT) ? 1 : 0);
+      write("[STEP 5] Turn zone off (brightness = 0)");
+      msg_Ambient.byte(3) = 0;
+      output(msg_Ambient);
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      check("ZoneOff", (g_rxBright == 0) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on message 0x407 {
+  g_rxR      = this.byte(0);
+  g_rxG      = this.byte(1);
+  g_rxB      = this.byte(2);
+  g_rxBright = this.byte(3);
+  g_rxTheme  = this.byte(4);
+  write("[RX] Ambient R=%d G=%d B=%d Bright=%d Theme=%d",
+        g_rxR, g_rxG, g_rxB, g_rxBright, g_rxTheme);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Ambient Lighting Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

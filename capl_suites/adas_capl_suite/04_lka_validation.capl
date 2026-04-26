@@ -1,0 +1,115 @@
+/*
+ * 04_lka_validation.capl
+ * Lane Keep Assist (LKA) Validation
+ * Tests: Activation, lateral offset detection, torque intervention, suppression conditions
+ */
+
+variables {
+  message 0x303 LKA_Status;
+  message 0x309 CameraLane;
+  message 0x102 SteeringAngle;
+  message 0x100 VehicleSpeed;
+
+  msTimer stepTimer;
+  int   testStep=0, passCount=0, failCount=0;
+  float laneOffset_m = 0.0;
+  int   lkaActive    = 0;
+  int   torqueApplied = 0;
+  float torqueNm     = 0.0;
+}
+
+void sendLaneData(float offset_m, byte linesValid) {
+  int raw = (int)(offset_m * 100 + 500);  // centered at 500 = 0m offset
+  CameraLane.byte(0) = (raw >> 8) & 0xFF;
+  CameraLane.byte(1) = raw & 0xFF;
+  CameraLane.byte(2) = linesValid;
+  output(CameraLane);
+}
+
+void sendSteer(float angle_deg) {
+  int raw = (int)(angle_deg * 10 + 1800);  // 1800 = 0 deg
+  SteeringAngle.byte(0) = (raw >> 8) & 0xFF;
+  SteeringAngle.byte(1) = raw & 0xFF;
+  output(SteeringAngle);
+}
+
+void sendSpeed(float spd) {
+  int raw = (int)(spd * 10);
+  VehicleSpeed.byte(0) = (raw >> 8) & 0xFF;
+  VehicleSpeed.byte(1) = raw & 0xFF;
+  output(VehicleSpeed);
+}
+
+void check(char n[], int c) { if(c){write("[PASS] %s",n);passCount++;}else{write("[FAIL] %s",n);failCount++;} }
+
+on start { write("=== LKA Validation Suite ==="); sendSpeed(80.0); setTimer(stepTimer, 500); }
+
+on timer stepTimer {
+  testStep++;
+  switch(testStep) {
+    case 1:
+      write("[S1] Normal driving – lane centred, no intervention");
+      sendLaneData(0.0, 0x03);  // 0m offset, both lines valid
+      sendSteer(0.0);
+      setTimer(stepTimer, 1500); break;
+    case 2:
+      write("[S2] Right drift 0.2m – below threshold, no correction");
+      sendLaneData(0.2, 0x03);
+      setTimer(stepTimer, 1500); break;
+    case 3:
+      write("[S3] Right drift 0.35m – above threshold, LKA corrects");
+      sendLaneData(0.35, 0x03);
+      setTimer(stepTimer, 1500); break;
+    case 4:
+      write("[S4] Left drift -0.4m – LKA corrects left");
+      sendLaneData(-0.4, 0x03);
+      setTimer(stepTimer, 1500); break;
+    case 5:
+      write("[S5] Speed < 60 km/h – LKA must deactivate");
+      sendSpeed(55.0);
+      sendLaneData(0.5, 0x03);
+      setTimer(stepTimer, 1500); break;
+    case 6:
+      write("[S6] Turn signal active – LKA suppressed during lane change");
+      { message 0x320 TurnSig; TurnSig.byte(0) = 0x01; output(TurnSig); }  // right indicator
+      sendLaneData(0.5, 0x03);
+      sendSpeed(80.0);
+      setTimer(stepTimer, 1500); break;
+    case 7:
+      write("[S7] Lane lines invalid – LKA must deactivate");
+      sendLaneData(0.4, 0x00);  // lines invalid
+      setTimer(stepTimer, 1500); break;
+    case 8:
+      write("[S8] Driver torque override – LKA releases");
+      sendLaneData(0.4, 0x03);
+      sendSteer(45.0);  // driver actively steering
+      setTimer(stepTimer, 1500); break;
+    case 9:
+      write("[S9] Resume after override – LKA reactivates");
+      sendSteer(0.0);
+      sendLaneData(0.35, 0x03);
+      setTimer(stepTimer, 1500); break;
+    case 10:
+      write("=== LKA Done PASS=%d FAIL=%d ===", passCount, failCount); break;
+  }
+}
+
+on message 0x303 {
+  lkaActive    = this.byte(0) & 0x01;
+  torqueApplied = (this.byte(0) >> 1) & 0x01;
+  torqueNm     = ((this.byte(1)*256) + this.byte(2)) / 10.0;
+
+  switch(testStep) {
+    case 1: check("LKA_NoDrift_NoIntervene",       lkaActive && !torqueApplied);  break;
+    case 2: check("LKA_SmallDrift_NoCorrection",   !torqueApplied); break;
+    case 3: check("LKA_RightDrift_Correction",     torqueApplied && torqueNm > 0); break;
+    case 4: check("LKA_LeftDrift_Correction",      torqueApplied); break;
+    case 5: check("LKA_Deactivate_LowSpeed",       !lkaActive); break;
+    case 6: check("LKA_Suppress_Indicator",        !torqueApplied); break;
+    case 7: check("LKA_Deactivate_NoCamLines",     !lkaActive); break;
+    case 8: check("LKA_Override_By_Driver",        !torqueApplied); break;
+    case 9: check("LKA_Resume_After_Override",     lkaActive); break;
+  }
+}
+
+on stopMeasurement { write("LKA: P=%d F=%d", passCount, failCount); }

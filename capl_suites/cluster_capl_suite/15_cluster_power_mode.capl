@@ -1,0 +1,107 @@
+/*
+ * File   : 15_cluster_power_mode.capl
+ * Purpose: Validate cluster power sequencing via 0x504 ClusterPower:
+ *          IGN OFF→Sleep delay, IGN ON→Wake-up timing, Accessory mode.
+ *          Byte0: 0=Sleep, 1=Standby, 2=On
+ */
+
+variables {
+  message 0x504 ClusterPower;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+  msTimer wakeTimer;
+
+  int  testStep   = 0;
+  int  passCount  = 0;
+  int  failCount  = 0;
+  byte lastLamp   = 0;
+  byte lastDisp   = 0;
+  byte lastFault  = 0;
+  long wakeStart  = 0;
+  long wakeEnd    = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 15_cluster_power_mode.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  long wakeMs;
+  switch (testStep) {
+    case 0:
+      write("STEP 1: Initial state – Cluster ON (2)");
+      ClusterPower.byte(0) = 2; /* On */
+      output(ClusterPower);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 1:
+      check("Cluster power ON acknowledged", lastDisp > 0 || lastFault == 0);
+      write("STEP 2: Set Standby (1) – accessory mode");
+      ClusterPower.byte(0) = 1;
+      output(ClusterPower);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 2:
+      check("Cluster enters standby", lastFault == 0);
+      write("STEP 3: Set Sleep (0) – IGN OFF");
+      ClusterPower.byte(0) = 0;
+      output(ClusterPower);
+      setTimer(stepTimer, 600); testStep++; break;
+
+    case 3:
+      check("Cluster enters sleep – display cleared", lastDisp == 0 || lastFault == 0);
+      write("STEP 4: Wake cluster – IGN ON (send power=2)");
+      wakeStart = timeNow();
+      ClusterPower.byte(0) = 2;
+      output(ClusterPower);
+      setTimer(stepTimer, 500); testStep++; break;
+
+    case 4:
+      wakeEnd = timeNow();
+      wakeMs  = (wakeEnd - wakeStart) / 10000; /* convert 100ns ticks to ms */
+      write("Wake latency: %d ms", wakeMs);
+      check("Wake latency <500ms", wakeMs < 500);
+      check("Cluster active after wake", lastFault == 0);
+      write("STEP 5: Accessory mode (1) without full IGN");
+      ClusterPower.byte(0) = 1;
+      output(ClusterPower);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 5:
+      check("Standby mode stable", lastFault == 0);
+      write("STEP 6: Back to full ON");
+      ClusterPower.byte(0) = 2;
+      output(ClusterPower);
+      setTimer(stepTimer, 300); testStep++; break;
+
+    case 6:
+      check("Cluster fully ON restored", lastFault == 0);
+      testStep++; break;
+
+    default:
+      write("Cluster power mode test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [Power]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 15_cluster_power_mode ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

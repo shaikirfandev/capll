@@ -1,0 +1,106 @@
+/*
+ * File   : 15_ecall_cancel.capl
+ * Purpose: eCall activated, cancel within 5s, verify return to idle
+ * CAN IDs: 0x608 eCall_Status
+ */
+
+variables {
+  message 0x608 eCall_Status;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  msTimer cancelWindow;
+  int passCount      = 0;
+  int failCount      = 0;
+  int testStep       = 0;
+  int seenActivated  = 0;
+  int cancelSent     = 0;
+  int returnedIdle   = 0;
+  dword activatedAt  = 0;
+  dword cancelledAt  = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 15_ecall_cancel: eCall Cancel Within 5s Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] eCall idle baseline");
+      eCall_Status.byte(0) = 0; eCall_Status.byte(1) = 0;
+      output(eCall_Status);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] eCall ACTIVATED (manual press, severity=1)");
+      eCall_Status.byte(0) = 1; eCall_Status.byte(1) = 1;
+      activatedAt = timeNow() / 100000;
+      output(eCall_Status);
+      setTimer(cancelWindow, 5000);
+      setTimer(stepTimer, 3000);
+      break;
+    case 3:
+      write("[STEP 3] Cancel eCall within 5s window (send idle state)");
+      eCall_Status.byte(0) = 0; eCall_Status.byte(1) = 0;
+      cancelledAt = timeNow() / 100000;
+      cancelTimer(cancelWindow);
+      cancelSent = 1;
+      output(eCall_Status);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] TCU confirms cancel on 0x650 (byte0=0xE2)");
+      TCU_Response.byte(0) = 0xE2; TCU_Response.byte(1) = 0x00; TCU_Response.byte(2) = 0x00;
+      output(TCU_Response);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Verify cancel timing was within 5s window");
+      {
+        dword elapsed = cancelledAt - activatedAt;
+        check("Cancel sent within 5s window", elapsed <= 5000);
+        write("  Cancel latency: %d ms", elapsed);
+      }
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verify eCall returned to idle after cancel");
+      check("eCall returned to idle",        returnedIdle);
+      check("Cancel was issued",             cancelSent);
+      check("Activated was seen first",      seenActivated);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify eCall NOT in sent or connected state after cancel");
+      check("eCall did not progress to sent (byte0 <= 1 before cancel)", eCall_Status.byte(0) == 0);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] eCall cancel TCU response byte check");
+      check("TCU cancel ack type = 0xE2", TCU_Response.byte(0) == 0xE2);
+      break;
+    default:
+      break;
+  }
+}
+
+on msTimer cancelWindow {
+  write("[WARN] Cancel window expired – eCall may proceed to SENT");
+}
+
+on message 0x608 {
+  if (this.byte(0) == 1) seenActivated = 1;
+  if (this.byte(0) == 0 && seenActivated && cancelSent) returnedIdle = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

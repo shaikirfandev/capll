@@ -1,0 +1,100 @@
+/*
+ * File   : 11_cellular_signal_quality.capl
+ * Purpose: RSSI bars 0→2→4→5; technology handoff 2G→3G→4G→5G
+ * CAN IDs: 0x607 Cellular_RSSI
+ */
+
+variables {
+  message 0x607 Cellular_RSSI;
+  msTimer stepTimer;
+  int passCount    = 0;
+  int failCount    = 0;
+  int testStep     = 0;
+  int lastBars     = -1;
+  int lastTech     = -1;
+  int saw2G        = 0;
+  int saw3G        = 0;
+  int saw4G        = 0;
+  int saw5G        = 0;
+  int barsReached5 = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 11_cellular_signal_quality: RSSI Bars & Technology Handoff ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Signal bars=0, 2G, packet_loss=50%");
+      Cellular_RSSI.byte(0) = 0; Cellular_RSSI.byte(1) = 0; Cellular_RSSI.byte(2) = 50;
+      output(Cellular_RSSI);
+      setTimer(stepTimer, 1500);
+      break;
+    case 2:
+      write("[STEP 2] Signal bars=2, switching to 3G, packet_loss=20%");
+      Cellular_RSSI.byte(0) = 2; Cellular_RSSI.byte(1) = 1; Cellular_RSSI.byte(2) = 20;
+      output(Cellular_RSSI);
+      setTimer(stepTimer, 1500);
+      break;
+    case 3:
+      write("[STEP 3] Signal bars=4, switching to 4G, packet_loss=5%");
+      Cellular_RSSI.byte(0) = 4; Cellular_RSSI.byte(1) = 2; Cellular_RSSI.byte(2) = 5;
+      output(Cellular_RSSI);
+      setTimer(stepTimer, 1500);
+      break;
+    case 4:
+      write("[STEP 4] Signal bars=5, switching to 5G, packet_loss=0%");
+      Cellular_RSSI.byte(0) = 5; Cellular_RSSI.byte(1) = 3; Cellular_RSSI.byte(2) = 0;
+      output(Cellular_RSSI);
+      setTimer(stepTimer, 1500);
+      break;
+    case 5:
+      write("[STEP 5] Verify all technology transitions seen");
+      check("2G technology seen",  saw2G);
+      check("3G technology seen",  saw3G);
+      check("4G technology seen",  saw4G);
+      check("5G technology seen",  saw5G);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verify bar progression reached max (5)");
+      check("Signal bars reached 5", barsReached5);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify packet loss drops as signal improves");
+      check("Packet loss = 0% on 5G full signal", Cellular_RSSI.byte(2) == 0);
+      check("Signal bars valid range (0-5)",      Cellular_RSSI.byte(0) <= 5);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify technology byte within range (0-3)");
+      check("Technology enum valid (0-3)", Cellular_RSSI.byte(1) <= 3);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x607 {
+  lastBars = this.byte(0);
+  lastTech = this.byte(1);
+  if (lastTech == 0) saw2G = 1;
+  if (lastTech == 1) saw3G = 1;
+  if (lastTech == 2) saw4G = 1;
+  if (lastTech == 3) saw5G = 1;
+  if (lastBars == 5) barsReached5 = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

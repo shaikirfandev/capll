@@ -1,0 +1,97 @@
+/*
+ * File   : 07_remote_horn_lights.capl
+ * Purpose: Send horn 0x05 then lights 0x06 cmd, verify ACK for each sequentially
+ * CAN IDs: 0x604 RemoteCmd, 0x605 RemoteAck
+ */
+
+variables {
+  message 0x604 RemoteCmd;
+  message 0x605 RemoteAck;
+  msTimer stepTimer;
+  int passCount    = 0;
+  int failCount    = 0;
+  int testStep     = 0;
+  int hornAckDone  = 0;
+  int lightsAckDone= 0;
+  int lastCmd      = 0;
+  int lastStatus   = -1;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 07_remote_horn_lights: Horn & Lights Command Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] TCU online, send HORN command (byte0=0x05, auth=0xEE)");
+      RemoteCmd.byte(0) = 0x05; RemoteCmd.byte(1) = 0xEE;
+      output(RemoteCmd);
+      setTimer(stepTimer, 1500);
+      break;
+    case 2:
+      write("[STEP 2] ECU ACK horn processing");
+      RemoteAck.byte(0) = 0x05; RemoteAck.byte(1) = 1; RemoteAck.byte(2) = 0x00;
+      output(RemoteAck);
+      setTimer(stepTimer, 1000);
+      break;
+    case 3:
+      write("[STEP 3] ECU ACK horn done");
+      RemoteAck.byte(0) = 0x05; RemoteAck.byte(1) = 2; RemoteAck.byte(2) = 0x00;
+      output(RemoteAck);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] Verify horn ACK done and cmd_echo = 0x05");
+      check("Horn ACK received",          hornAckDone);
+      check("Horn cmd_echo = 0x05",       RemoteAck.byte(0) == 0x05);
+      check("Horn no fault (byte2=0x00)", RemoteAck.byte(2) == 0x00);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Send LIGHTS command (byte0=0x06, auth=0xEE)");
+      RemoteCmd.byte(0) = 0x06; RemoteCmd.byte(1) = 0xEE;
+      output(RemoteCmd);
+      setTimer(stepTimer, 1500);
+      break;
+    case 6:
+      write("[STEP 6] ECU ACK lights processing then done");
+      RemoteAck.byte(0) = 0x06; RemoteAck.byte(1) = 1; RemoteAck.byte(2) = 0x00;
+      output(RemoteAck);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] ECU ACK lights done");
+      RemoteAck.byte(0) = 0x06; RemoteAck.byte(1) = 2; RemoteAck.byte(2) = 0x00;
+      output(RemoteAck);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify lights ACK done and both cmds completed");
+      check("Lights ACK received",           lightsAckDone);
+      check("Lights cmd_echo = 0x06",        RemoteAck.byte(0) == 0x06);
+      check("Both horn and lights executed", hornAckDone && lightsAckDone);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x605 {
+  lastCmd    = this.byte(0);
+  lastStatus = this.byte(1);
+  if (lastCmd == 0x05 && lastStatus == 2) hornAckDone   = 1;
+  if (lastCmd == 0x06 && lastStatus == 2) lightsAckDone = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

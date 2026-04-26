@@ -1,0 +1,97 @@
+/*
+ * File   : 05_mil_check_engine.capl
+ * Purpose: Send DTC count to cluster, verify MIL (bit0 of 0x505) turns ON;
+ *          clear DTCs, verify MIL turns OFF on cluster response 0x550.
+ */
+
+variables {
+  message 0x505 WarningLamps;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep  = 0;
+  int  passCount = 0;
+  int  failCount = 0;
+  byte lastLamp  = 0;
+  byte lastDisp  = 0;
+  byte lastFault = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 05_mil_check_engine.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (testStep) {
+    case 0:
+      write("STEP 1: Clear all warning lamps – MIL should be OFF");
+      WarningLamps.byte(0) = 0x00;
+      output(WarningLamps);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 1:
+      check("MIL OFF initial state", (lastLamp & 0x01) == 0);
+      write("STEP 2: Set MIL bit (DTC present)");
+      WarningLamps.byte(0) = 0x01;
+      output(WarningLamps);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 2:
+      check("MIL ON after DTC set", (lastLamp & 0x01) != 0);
+      write("STEP 3: Additional DTC – MIL stays ON");
+      WarningLamps.byte(0) = 0x01;
+      output(WarningLamps);
+      setTimer(stepTimer, 300); testStep++; break;
+
+    case 3:
+      check("MIL remains ON with multiple DTCs", (lastLamp & 0x01) != 0);
+      write("STEP 4: Clear DTCs – MIL should extinguish");
+      WarningLamps.byte(0) = 0x00;
+      output(WarningLamps);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 4:
+      check("MIL OFF after DTC clear", (lastLamp & 0x01) == 0);
+      check("No residual fault after clear", lastFault == 0);
+      write("STEP 5: Rapid MIL toggle – lamp must follow");
+      WarningLamps.byte(0) = 0x01;
+      output(WarningLamps);
+      setTimer(stepTimer, 200); testStep++; break;
+
+    case 5:
+      check("MIL responds to rapid set", (lastLamp & 0x01) != 0);
+      WarningLamps.byte(0) = 0x00;
+      output(WarningLamps);
+      setTimer(stepTimer, 200); testStep++; break;
+
+    case 6:
+      check("MIL responds to rapid clear", (lastLamp & 0x01) == 0);
+      testStep++; break;
+
+    default:
+      write("MIL test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [MIL]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 05_mil_check_engine ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

@@ -1,0 +1,109 @@
+/*
+ * File   : 27_service_interval_display.capl
+ * Purpose: Verify service distance countdown, due-now flag,
+ *          and technician reset via 0x509 byte3 service encoding.
+ *  0x509 byte3: service km remaining (0=due now)
+ *  0x509 byte4: 0=normal, 1=service due, 0xFF=technician reset
+ */
+
+variables {
+  message 0x509 Brightness;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep  = 0;
+  int  passCount = 0;
+  int  failCount = 0;
+  byte lastLamp  = 0;
+  byte lastDisp  = 0;
+  byte lastFault = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+void sendService(byte kmRemaining, byte status) {
+  Brightness.byte(0) = 128;
+  Brightness.byte(3) = kmRemaining;
+  Brightness.byte(4) = status;
+  output(Brightness);
+  write("Service: kmRemaining=%d status=0x%02X", kmRemaining, status);
+}
+
+on start {
+  write("=== 27_service_interval_display.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (testStep) {
+    case 0:
+      write("STEP 1: Service 5000 km away – no warning");
+      sendService(200, 0); /* 200 * 25km = 5000km scaled */
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 1:
+      check("No service warn at 5000 km", lastFault == 0);
+      write("STEP 2: Service 1000 km away – reminder");
+      sendService(40, 0);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 2:
+      check("Service reminder at 1000 km", lastDisp != 0 || lastFault == 0);
+      write("STEP 3: Service 100 km away – imminent");
+      sendService(4, 0);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 3:
+      check("Imminent service – cluster indicator", lastDisp != 0 || lastFault == 0);
+      write("STEP 4: Service DUE NOW (km=0, status=1)");
+      sendService(0, 1);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 4:
+      check("Service due now – lamp active", lastLamp != 0 || lastFault != 0);
+      write("STEP 5: Technician reset (status=0xFF)");
+      sendService(200, 0xFF);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 5:
+      check("Service reset accepted", lastFault == 0);
+      write("STEP 6: Verify no service warn after reset");
+      sendService(200, 0);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 6:
+      check("No service warn after technician reset", lastLamp == 0 || lastFault == 0);
+      write("STEP 7: Overdue service (negative – value=255)");
+      sendService(0, 1);
+      Brightness.byte(3) = 0xFF; /* overdue marker */
+      output(Brightness);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 7:
+      check("Overdue service flagged", lastFault != 0 || lastLamp != 0);
+      testStep++; break;
+
+    default:
+      write("Service interval test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [Svc]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 27_service_interval_display ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

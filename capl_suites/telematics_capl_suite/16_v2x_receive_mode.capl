@@ -1,0 +1,97 @@
+/*
+ * File   : 16_v2x_receive_mode.capl
+ * Purpose: V2X role=recv, nearby vehicles count changes, no false hazard alerts
+ * CAN IDs: 0x610 V2X_BSM, 0x650 TCU_Response
+ */
+
+variables {
+  message 0x610 V2X_BSM;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount      = 0;
+  int failCount      = 0;
+  int testStep       = 0;
+  int maxVehicles    = 0;
+  int falseHazard    = 0;
+  int roleConfirmed  = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 16_v2x_receive_mode: V2X Receive Mode & Hazard Integrity ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] V2X off state (role=0)");
+      V2X_BSM.byte(0) = 0; V2X_BSM.byte(1) = 0; V2X_BSM.byte(2) = 0;
+      output(V2X_BSM);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] V2X set to receive mode (role=1)");
+      V2X_BSM.byte(0) = 1; V2X_BSM.byte(1) = 0; V2X_BSM.byte(2) = 0;
+      output(V2X_BSM);
+      setTimer(stepTimer, 1500);
+      break;
+    case 3:
+      write("[STEP 3] V2X recv: 2 nearby vehicles, no hazard");
+      V2X_BSM.byte(0) = 1; V2X_BSM.byte(1) = 2; V2X_BSM.byte(2) = 0;
+      output(V2X_BSM);
+      setTimer(stepTimer, 1500);
+      break;
+    case 4:
+      write("[STEP 4] V2X recv: 5 nearby vehicles, no hazard");
+      V2X_BSM.byte(0) = 1; V2X_BSM.byte(1) = 5; V2X_BSM.byte(2) = 0;
+      output(V2X_BSM);
+      setTimer(stepTimer, 1500);
+      break;
+    case 5:
+      write("[STEP 5] V2X recv: 3 nearby vehicles, hazard=0 (no false alarm)");
+      V2X_BSM.byte(0) = 1; V2X_BSM.byte(1) = 3; V2X_BSM.byte(2) = 0;
+      output(V2X_BSM);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] TCU response: V2X recv mode confirmed");
+      TCU_Response.byte(0) = 0xB0; TCU_Response.byte(1) = 0x01; TCU_Response.byte(2) = 0x00;
+      output(TCU_Response);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify receipt mode and vehicle count");
+      check("V2X role = receive (1)",       V2X_BSM.byte(0) == 1);
+      check("Max vehicles counted = 5",     maxVehicles == 5);
+      check("No false hazard alerts",       !falseHazard);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Confirm role stay recv and TCU acked it");
+      check("TCU confirmed recv mode", roleConfirmed);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x610 {
+  int v = this.byte(1);
+  if (v > maxVehicles) maxVehicles = v;
+  if (this.byte(2) == 1 && this.byte(0) == 1) falseHazard = 1;
+}
+
+on message 0x650 {
+  if (this.byte(0) == 0xB0 && this.byte(1) == 0x01) roleConfirmed = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

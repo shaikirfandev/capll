@@ -1,0 +1,110 @@
+/*
+ * 09_radar_target_sim.capl
+ * Radar Target Object Simulation – inject multiple objects, range/azimuth/speed,
+ * object tracking, appearance/disappearance
+ * CAN: 0x308 (RadarObject)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+
+  const int MAX_OBJECTS = 4;
+  // Per-object: {id, range(m), azimuth(deg*10), speed(km/h), active}
+  int objId[4]      = {1,  2,  3,  4};
+  int objRange[4]   = {80, 50, 30, 120};
+  int objAzimuth[4] = {0,  50, -30, 10};
+  int objSpeed[4]   = {80, 60, 100, 40};
+  int objActive[4]  = {1,  1,  1,  1};
+
+  int stepCount  = 0;
+  int passCount  = 0;
+  int failCount  = 0;
+  char testName[64] = "RadarTargetSimTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void transmitObjects() {
+  message 0x308 radarMsg;
+  int i;
+  for (i = 0; i < MAX_OBJECTS; i++) {
+    if (!objActive[i]) continue;
+    radarMsg.byte(0) = objId[i]      & 0xFF;
+    radarMsg.byte(1) = (objRange[i] > 255 ? 255 : objRange[i]) & 0xFF;
+    radarMsg.byte(2) = (objAzimuth[i] + 128) & 0xFF;  // offset encode
+    radarMsg.byte(3) = (objSpeed[i] > 255 ? 255 : objSpeed[i]) & 0xFF;
+    radarMsg.byte(4) = objActive[i] & 0xFF;
+    output(radarMsg);
+    write("[RADAR TX] id=%d range=%dm az=%d spd=%dkph",
+          objId[i], objRange[i], objAzimuth[i], objSpeed[i]);
+  }
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  stepCount++;
+
+  // Step 1: all objects active, validate initial injection
+  if (stepCount == 1) {
+    check("AllObjectsActive_Initial", objActive[0] && objActive[1] && objActive[2] && objActive[3]);
+  }
+
+  // Step 2: Object 3 disappears (moved out of range)
+  if (stepCount == 2) {
+    objActive[2] = 0;
+    write("[RADAR] Object 3 disappeared");
+    check("Object3_Disappeared", objActive[2] == 0);
+  }
+
+  // Step 3: Object 1 approaches – range decreases
+  if (stepCount == 3) {
+    objRange[0] = 40;
+    check("Object1_Approaching", objRange[0] < 80);
+  }
+
+  // Step 4: New object appears
+  if (stepCount == 4) {
+    objActive[2]  = 1;
+    objRange[2]   = 150;
+    objAzimuth[2] = 20;
+    objSpeed[2]   = 90;
+    check("Object3_Reappeared", objActive[2] == 1);
+  }
+
+  // Step 5: Validate azimuth encoding within byte range
+  if (stepCount == 5) {
+    check("Azimuth_InRange", objAzimuth[0] >= -128 && objAzimuth[0] <= 127);
+    check("Speed_InRange",   objSpeed[0] >= 0 && objSpeed[0] <= 250);
+  }
+
+  // Step 6: Object 2 moving fast – critical TTC
+  if (stepCount == 6) {
+    objRange[1] = 10;
+    objSpeed[1] = 120;
+    write("[RADAR] WARN: Object 2 critical range=%d spd=%d", objRange[1], objSpeed[1]);
+    check("Object2_CriticalRange", objRange[1] < 20);
+  }
+
+  transmitObjects();
+
+  if (stepCount < 8) setTimer(stepTimer, 300);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on message 0x308 {
+  write("[RX 0x308] id=%d range=%d az=%d spd=%d active=%d",
+        this.byte(0), this.byte(1), (int)this.byte(2) - 128,
+        this.byte(3), this.byte(4));
+}

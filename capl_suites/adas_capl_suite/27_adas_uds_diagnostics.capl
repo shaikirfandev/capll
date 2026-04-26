@@ -1,0 +1,146 @@
+/*
+ * 27_adas_uds_diagnostics.capl
+ * UDS Diagnostics for ADAS ECU – ReadDTCInfo 0x19, ClearDTC 0x14,
+ * ReadData 0x22, ECU Reset 0x11
+ * CAN: 0x7DF (UDS request), 0x7E8 (UDS response)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+  msTimer responseTimeoutTimer;
+
+  // UDS state
+  int udsReqSent    = 0;
+  int udsRespCode   = 0;   // 0=idle, 1=positive, 2=NRC
+  int udsNRC        = 0;
+  int udsService    = 0;
+
+  // DID 0x1234 data (ADAS software version)
+  int didData[4]    = {0x01, 0x05, 0x0A, 0x00};
+
+  // DTC data
+  int dtcPresent    = 1;
+  int dtcCode       = 0xC0A100;
+
+  int responseReceived = 0;
+  int stepCount     = 0;
+  int passCount     = 0;
+  int failCount     = 0;
+  char testName[64] = "ADAS_UDS_DiagnosticsTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void sendUDSRequest(int service, int subFunc, int param) {
+  message 0x7DF reqMsg;
+  udsService    = service;
+  udsReqSent    = 1;
+  responseReceived = 0;
+  reqMsg.byte(0) = 0x03;          // length
+  reqMsg.byte(1) = service & 0xFF;
+  reqMsg.byte(2) = subFunc & 0xFF;
+  reqMsg.byte(3) = param & 0xFF;
+  output(reqMsg);
+  write("[UDS TX] SID=0x%02X subFunc=0x%02X param=0x%02X", service, subFunc, param);
+  setTimer(responseTimeoutTimer, 300);
+}
+
+void simulateECUResponse() {
+  message 0x7E8 respMsg;
+  if (udsService == 0x19) {  // ReadDTCInfo
+    if (dtcPresent) {
+      respMsg.byte(0) = 0x59;
+      respMsg.byte(1) = 0x02;
+      respMsg.byte(2) = (dtcCode >> 16) & 0xFF;
+      respMsg.byte(3) = (dtcCode >> 8)  & 0xFF;
+      respMsg.byte(4) = dtcCode & 0xFF;
+      respMsg.byte(5) = 0x09;  // status: confirmed
+      udsRespCode = 1;
+    }
+  } else if (udsService == 0x14) {  // ClearDTC
+    dtcPresent = 0;
+    respMsg.byte(0) = 0x54;
+    udsRespCode = 1;
+    write("[UDS] DTCs cleared by 0x14");
+  } else if (udsService == 0x22) {  // ReadDataByIdentifier
+    respMsg.byte(0) = 0x62;
+    respMsg.byte(1) = 0x12; respMsg.byte(2) = 0x34;  // DID 0x1234
+    respMsg.byte(3) = didData[0]; respMsg.byte(4) = didData[1];
+    udsRespCode = 1;
+  } else if (udsService == 0x11) {  // ECUReset
+    respMsg.byte(0) = 0x51;
+    respMsg.byte(1) = 0x01;
+    udsRespCode = 1;
+    write("[UDS] ECU Reset acknowledged");
+  } else {
+    respMsg.byte(0) = 0x7F;
+    respMsg.byte(1) = udsService & 0xFF;
+    respMsg.byte(2) = 0x11;  // serviceNotSupported
+    udsRespCode = 2; udsNRC = 0x11;
+  }
+  output(respMsg);
+  responseReceived = 1;
+  cancelTimer(responseTimeoutTimer);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 500);
+}
+
+on timer stepTimer {
+  stepCount++;
+  if (stepCount == 1) {
+    sendUDSRequest(0x19, 0x02, 0xFF);  // ReadDTCInfo – all active
+    simulateECUResponse();
+    check("ReadDTC_PositiveResponse", udsRespCode == 1);
+    check("DTC_Present",              dtcPresent == 1);
+  }
+  if (stepCount == 2) {
+    sendUDSRequest(0x22, 0x12, 0x34);  // ReadDataByIdentifier DID 0x1234
+    simulateECUResponse();
+    check("ReadDID_PositiveResponse", udsRespCode == 1);
+  }
+  if (stepCount == 3) {
+    sendUDSRequest(0x14, 0xFF, 0xFF);  // ClearDTC all groups
+    simulateECUResponse();
+    check("ClearDTC_Acknowledged", udsRespCode == 1);
+    check("DTC_Cleared",           dtcPresent == 0);
+  }
+  if (stepCount == 4) {
+    sendUDSRequest(0x19, 0x02, 0xFF);  // ReadDTC again – should be empty
+    simulateECUResponse();
+    check("DTC_Empty_AfterClear", dtcPresent == 0);
+  }
+  if (stepCount == 5) {
+    sendUDSRequest(0x11, 0x01, 0x00);  // ECU Hard Reset
+    simulateECUResponse();
+    check("ECUReset_Acknowledged", udsRespCode == 1);
+  }
+  if (stepCount == 6) {
+    sendUDSRequest(0xAA, 0x00, 0x00);  // Unknown service
+    simulateECUResponse();
+    check("UnknownSID_NRC",        udsRespCode == 2 && udsNRC == 0x11);
+  }
+
+  if (stepCount < 7) setTimer(stepTimer, 500);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on timer responseTimeoutTimer {
+  write("[UDS] TIMEOUT – no response for SID=0x%02X", udsService);
+  failCount++;
+}
+
+on message 0x7E8 {
+  write("[RX 0x7E8] b0=0x%02X b1=0x%02X b2=0x%02X",
+        this.byte(0), this.byte(1), this.byte(2));
+}

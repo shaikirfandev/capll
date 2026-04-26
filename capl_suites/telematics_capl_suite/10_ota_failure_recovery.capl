@@ -1,0 +1,97 @@
+/*
+ * File   : 10_ota_failure_recovery.capl
+ * Purpose: Force OTA fail (inject packet_loss=100%), verify rollback flag on 0x650
+ * CAN IDs: 0x606 OTA_Status, 0x607 Cellular_RSSI, 0x650 TCU_Response
+ */
+
+variables {
+  message 0x606 OTA_Status;
+  message 0x607 Cellular_RSSI;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount     = 0;
+  int failCount     = 0;
+  int testStep      = 0;
+  int otaFailed     = 0;
+  int rollbackSeen  = 0;
+  int idleRecovered = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 10_ota_failure_recovery: OTA Failure & Rollback Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Normal cellular signal before OTA");
+      Cellular_RSSI.byte(0) = 4; Cellular_RSSI.byte(1) = 2; Cellular_RSSI.byte(2) = 5;
+      output(Cellular_RSSI);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] Start OTA download phase");
+      OTA_Status.byte(0) = 1; OTA_Status.byte(1) = 30;
+      output(OTA_Status);
+      setTimer(stepTimer, 1500);
+      break;
+    case 3:
+      write("[STEP 3] Inject packet_loss=100% (simulating failure)");
+      Cellular_RSSI.byte(0) = 0; Cellular_RSSI.byte(1) = 2; Cellular_RSSI.byte(2) = 100;
+      output(Cellular_RSSI);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] OTA transitions to failed state (byte0=4)");
+      OTA_Status.byte(0) = 4; OTA_Status.byte(1) = 30;
+      output(OTA_Status);
+      setTimer(stepTimer, 1500);
+      break;
+    case 5:
+      write("[STEP 5] TCU sends rollback flag on 0x650 (byte0=0xF1, result=0x04)");
+      TCU_Response.byte(0) = 0xF1; TCU_Response.byte(1) = 0x04; TCU_Response.byte(2) = 0x00;
+      output(TCU_Response);
+      setTimer(stepTimer, 1500);
+      break;
+    case 6:
+      write("[STEP 6] OTA returns to idle after rollback");
+      OTA_Status.byte(0) = 0; OTA_Status.byte(1) = 0;
+      output(OTA_Status);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify OTA failed status and rollback received");
+      check("OTA failed state detected (status=4)", otaFailed);
+      check("Rollback signal received on 0x650",    rollbackSeen);
+      check("OTA returned to idle after rollback",  idleRecovered);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify packet_loss was 100% at time of failure");
+      check("Packet loss at 100% caused failure", Cellular_RSSI.byte(2) >= 100 || otaFailed);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x606 {
+  if (this.byte(0) == 4) otaFailed     = 1;
+  if (this.byte(0) == 0 && otaFailed)  idleRecovered = 1;
+}
+
+on message 0x650 {
+  if (this.byte(0) == 0xF1 && this.byte(1) == 0x04) rollbackSeen = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

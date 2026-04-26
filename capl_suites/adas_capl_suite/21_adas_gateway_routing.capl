@@ -1,0 +1,107 @@
+/*
+ * 21_adas_gateway_routing.capl
+ * ADAS Gateway CAN Routing Validation – cross-domain signal routing,
+ * latency measurement
+ * CAN: 0x100 (PowertrainBus), 0x500 (ADASBus routed), 0x501 (BodyBus routed)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+
+  dword txTimestamp[8];   // store send timestamps keyed by msg index
+  dword rxTimestamp[8];
+  dword latencyMs[8];
+
+  int routeOK[8]      = {0,0,0,0,0,0,0,0};
+  int latencyIdx      = 0;
+
+  const dword MAX_LATENCY_MS = 10;  // max allowed gateway latency
+
+  // Track routed message count
+  int routedCount     = 0;
+  int lateCount       = 0;
+
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "ADAS_GatewayRoutingTest";
+  int stepCount = 0;
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void sendWithTimestamp(int idx, int msgId) {
+  message 0x100 srcMsg;
+  txTimestamp[idx] = timeNow() / 100000; // ms
+  srcMsg.byte(0)   = idx & 0xFF;
+  srcMsg.byte(1)   = msgId & 0xFF;
+  output(srcMsg);
+  write("[GW TX] idx=%d msgId=0x%03X ts=%d", idx, msgId, txTimestamp[idx]);
+}
+
+void recordRx(int idx) {
+  dword lat;
+  rxTimestamp[idx] = timeNow() / 100000;
+  if (rxTimestamp[idx] >= txTimestamp[idx])
+    lat = rxTimestamp[idx] - txTimestamp[idx];
+  else
+    lat = 0;
+  latencyMs[idx] = lat;
+  routedCount++;
+  if (lat > MAX_LATENCY_MS) {
+    lateCount++;
+    write("[GW] LATE route idx=%d latency=%dms (max=%d)", idx, lat, MAX_LATENCY_MS);
+    routeOK[idx] = 0;
+  } else {
+    routeOK[idx] = 1;
+    write("[GW] OK route idx=%d latency=%dms", idx, lat);
+  }
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 200);
+}
+
+on timer stepTimer {
+  stepCount++;
+
+  if (stepCount == 1)  sendWithTimestamp(0, 0x100);
+  if (stepCount == 2)  sendWithTimestamp(1, 0x302);
+  if (stepCount == 3)  sendWithTimestamp(2, 0x303);
+  if (stepCount == 4)  sendWithTimestamp(3, 0x308);
+
+  // Simulate gateway forwarding with small delay
+  if (stepCount == 2)  { recordRx(0); check("Route_0x100_Latency", routeOK[0] == 1); }
+  if (stepCount == 3)  { recordRx(1); check("Route_0x302_Latency", routeOK[1] == 1); }
+  if (stepCount == 4)  { recordRx(2); check("Route_0x303_Latency", routeOK[2] == 1); }
+  if (stepCount == 5)  { recordRx(3); check("Route_0x308_Latency", routeOK[3] == 1); }
+
+  // Simulate a late message
+  if (stepCount == 6)  {
+    sendWithTimestamp(4, 0x309);
+    txTimestamp[4] -= 15;   // force latency > 10ms
+  }
+  if (stepCount == 7)  {
+    recordRx(4);
+    check("LateRoute_Detected", routeOK[4] == 0);
+    check("LateCount_Incremented", lateCount >= 1);
+  }
+  if (stepCount == 8)  {
+    check("TotalRouted_Count", routedCount >= 4);
+    write("[GW] Total routed=%d late=%d", routedCount, lateCount);
+  }
+
+  if (stepCount < 9) setTimer(stepTimer, 200);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on message 0x500 { write("[RX 0x500] ADAS bus routed msg: byte0=%d", this.byte(0)); }
+on message 0x501 { write("[RX 0x501] Body bus routed msg: byte0=%d", this.byte(0)); }

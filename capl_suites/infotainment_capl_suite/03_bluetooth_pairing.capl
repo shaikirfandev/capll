@@ -1,0 +1,94 @@
+/*
+ * File   : 03_bluetooth_pairing.capl
+ * Purpose: Validate BT scan, pair, connect, disconnect, unpair, max-device-limit
+ * Tests  : TC01 BT Scan, TC02 Pair, TC03 Connect, TC04 Disconnect, TC05 Unpair, TC06 Max-device limit
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x404 msg_BT_Status;
+  msTimer stepTimer;
+
+  byte g_rxBTState   = 0xFF;
+  int  g_step        = 0;
+  int  g_pass        = 0;
+  int  g_fail        = 0;
+  int  g_pairedCount = 0;
+
+  const byte BT_DISCONNECTED = 0;
+  const byte BT_SCANNING     = 1;
+  const byte BT_PAIRED       = 2;
+  const byte BT_CONNECTED    = 3;
+  const int  BT_MAX_DEVICES  = 7;
+}
+
+on start {
+  write("=== TC: Bluetooth Pairing ===");
+  g_step = 1;
+  setTimer(stepTimer, 200);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Trigger BT scan");
+      msg_BT_Status.byte(0) = BT_SCANNING;
+      output(msg_BT_Status);
+      g_step = 2; setTimer(stepTimer, 500); break;
+
+    case 2:
+      write("[STEP 2] Simulate pairing response");
+      msg_BT_Status.byte(0) = BT_PAIRED;
+      output(msg_BT_Status);
+      g_pairedCount++;
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      write("[STEP 3] Connect BT device");
+      msg_BT_Status.byte(0) = BT_CONNECTED;
+      output(msg_BT_Status);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      write("[STEP 4] Disconnect BT device");
+      msg_BT_Status.byte(0) = BT_DISCONNECTED;
+      output(msg_BT_Status);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      write("[STEP 5] Unpair device (return to disconnected state)");
+      msg_BT_Status.byte(0) = BT_DISCONNECTED;
+      output(msg_BT_Status);
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      write("[STEP 6] Simulate exceeding max device limit (%d)", BT_MAX_DEVICES);
+      check("MaxDeviceLimit", (g_pairedCount <= BT_MAX_DEVICES) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on message 0x404 {
+  g_rxBTState = this.byte(0);
+  write("[RX] BT_Status = %d", g_rxBTState);
+  switch (g_rxBTState) {
+    case BT_SCANNING:    check("BTScanning",    1); break;
+    case BT_PAIRED:      check("BTPaired",      1); break;
+    case BT_CONNECTED:   check("BTConnected",   1); break;
+    case BT_DISCONNECTED:check("BTDisconnected",1); break;
+    default:             check("BTUnknownState",0); break;
+  }
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Bluetooth Pairing Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

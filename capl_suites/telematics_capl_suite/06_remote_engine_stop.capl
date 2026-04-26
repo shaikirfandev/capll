@@ -1,0 +1,97 @@
+/*
+ * File   : 06_remote_engine_stop.capl
+ * Purpose: Send engine_stop 0x04, verify ACK done; dual auth token validation
+ * CAN IDs: 0x604 RemoteCmd, 0x605 RemoteAck
+ */
+
+variables {
+  message 0x604 RemoteCmd;
+  message 0x605 RemoteAck;
+  msTimer stepTimer;
+  int passCount       = 0;
+  int failCount       = 0;
+  int testStep        = 0;
+  int ackStatus       = -1;
+  int faultCode       = 0;
+  int badAuthRejected = 0;
+  int goodAuthOk      = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 06_remote_engine_stop: Engine Stop + Dual Auth Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Engine is running (pre-condition)");
+      {
+        message 0x600 TCU_Status;
+        TCU_Status.byte(0) = 1; TCU_Status.byte(1) = 88;
+        output(TCU_Status);
+      }
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] Send ENGINE_STOP with WRONG auth token (byte1=0x00)");
+      RemoteCmd.byte(0) = 0x04; RemoteCmd.byte(1) = 0x00;
+      output(RemoteCmd);
+      setTimer(stepTimer, 1500);
+      break;
+    case 3:
+      write("[STEP 3] ECU rejects bad auth: error ACK (byte1=3, fault=0x01)");
+      RemoteAck.byte(0) = 0x04; RemoteAck.byte(1) = 3; RemoteAck.byte(2) = 0x01;
+      output(RemoteAck);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] Verify bad auth token was rejected");
+      check("Bad auth rejected: status=error(3)", ackStatus == 3);
+      check("Fault code 0x01 for bad auth",       faultCode == 0x01);
+      badAuthRejected = (ackStatus == 3 && faultCode == 0x01) ? 1 : 0;
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Send ENGINE_STOP with CORRECT auth token (byte1=0xDD)");
+      RemoteCmd.byte(0) = 0x04; RemoteCmd.byte(1) = 0xDD;
+      output(RemoteCmd);
+      setTimer(stepTimer, 2000);
+      break;
+    case 6:
+      write("[STEP 6] ECU processes then confirms engine stop done");
+      RemoteAck.byte(0) = 0x04; RemoteAck.byte(1) = 2; RemoteAck.byte(2) = 0x00;
+      output(RemoteAck);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify valid auth engine stop ACK = done, no fault");
+      check("Good auth engine stop: status=done(2)", ackStatus == 2);
+      check("No fault code on good auth stop",       faultCode == 0x00);
+      check("Bad auth was correctly rejected first", badAuthRejected);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Dual auth validation summary");
+      check("Dual auth: bad rejected, good accepted", badAuthRejected && ackStatus == 2);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x605 {
+  ackStatus = this.byte(1);
+  faultCode = this.byte(2);
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

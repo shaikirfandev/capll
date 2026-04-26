@@ -1,0 +1,111 @@
+/*
+ * 13_pedestrian_detection.capl
+ * Pedestrian Detection Validation – object classification, TTC for pedestrian,
+ * low-speed detection
+ * CAN: 0x308 (Radar), 0x309 (Camera), 0x313 (PedDetect)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+
+  // Object data
+  int objClass    = 0;   // 0=unknown,1=vehicle,2=pedestrian,3=cyclist
+  int objRange    = 0;   // meters
+  int objSpeedRel = 0;   // km/h (relative, closing positive)
+  int objValid    = 0;
+
+  // TTC calculation
+  float ttcSec    = 0.0;
+  const float TTC_WARN_THRESH  = 2.5;  // seconds
+  const float TTC_BRAKE_THRESH = 1.5;
+  const int   PED_SLOW_SPEED   = 8;    // km/h – low-speed ped
+
+  int pedWarn  = 0;
+  int pedBrake = 0;
+  int pedSlow  = 0;
+
+  int stepCount = 0;
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "PedestrianDetectionTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void evalPed() {
+  message 0x313 pedMsg;
+  pedWarn = 0; pedBrake = 0; pedSlow = 0;
+  if (objValid && objClass == 2) {
+    if (objSpeedRel > 0) {
+      ttcSec = (float)objRange / ((float)objSpeedRel / 3.6);
+    } else {
+      ttcSec = 999.0;
+    }
+    if (ttcSec < TTC_BRAKE_THRESH) pedBrake = 1;
+    else if (ttcSec < TTC_WARN_THRESH) pedWarn = 1;
+    if (objSpeedRel <= PED_SLOW_SPEED) pedSlow = 1;
+    write("[PED] range=%dm spd=%dkph ttc=%.2fs warn=%d brake=%d slow=%d",
+          objRange, objSpeedRel, ttcSec, pedWarn, pedBrake, pedSlow);
+  }
+  pedMsg.byte(0) = objClass & 0xFF;
+  pedMsg.byte(1) = (objRange > 255 ? 255 : objRange) & 0xFF;
+  pedMsg.byte(2) = pedWarn & 0xFF;
+  pedMsg.byte(3) = pedBrake & 0xFF;
+  pedMsg.byte(4) = pedSlow & 0xFF;
+  output(pedMsg);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 350);
+}
+
+on timer stepTimer {
+  stepCount++;
+  if (stepCount == 1) {
+    objValid = 1; objClass = 1; objRange = 40; objSpeedRel = 50;
+    evalPed();
+    check("VehicleClass_NoAlert", pedWarn == 0 && pedBrake == 0);
+  }
+  if (stepCount == 2) {
+    objClass = 2; objRange = 30; objSpeedRel = 40;
+    evalPed();
+    check("Ped_Detected_Class2",  objClass == 2);
+    check("Ped_TTC_OK_NoWarn",    pedWarn == 0 && pedBrake == 0);
+  }
+  if (stepCount == 3) {
+    objRange = 8; objSpeedRel = 12;
+    evalPed();
+    check("Ped_TTC_Warn",         pedWarn == 1 || pedBrake == 1);
+  }
+  if (stepCount == 4) {
+    objRange = 4; objSpeedRel = 10;
+    evalPed();
+    check("Ped_TTC_Brake",        pedBrake == 1);
+  }
+  if (stepCount == 5) {
+    objRange = 10; objSpeedRel = 5;
+    evalPed();
+    check("Ped_SlowSpeed_Flag",   pedSlow == 1);
+  }
+  if (stepCount == 6) {
+    objValid = 0;
+    evalPed();
+    check("NoObject_NoBrake",     pedBrake == 0 && pedWarn == 0);
+  }
+
+  if (stepCount < 7) setTimer(stepTimer, 350);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on message 0x309 {
+  objClass = this.byte(2); objRange = this.byte(1); objValid = 1;
+}

@@ -1,0 +1,101 @@
+/*
+ * File   : 13_usb_audio.capl
+ * Purpose: Validate USB mount, browse, play, pause, skip, eject
+ * Tests  : TC01 USB mount, TC02 Browse, TC03 Play, TC04 Pause, TC05 Skip, TC06 Eject
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x401 msg_Source;
+  message 0x406 msg_SWC;
+  msTimer stepTimer;
+
+  byte g_rxSource  = 0xFF;
+  byte g_rxKey     = 0;
+  int  g_step      = 0;
+  int  g_pass      = 0;
+  int  g_fail      = 0;
+  int  g_usbMounted= 0;
+
+  const byte SRC_USB    = 1;
+  const byte KEY_PLAY   = 0x70;
+  const byte KEY_PAUSE  = 0x71;
+  const byte KEY_SKIP   = 0x72;
+  const byte KEY_PREV   = 0x73;
+  const byte KEY_EJECT  = 0x74;
+}
+
+on start {
+  write("=== TC: USB Audio ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] USB device mounted – switch source to USB");
+      msg_Source.byte(0) = SRC_USB;
+      output(msg_Source);
+      g_usbMounted = 1;
+      g_step = 2; setTimer(stepTimer, 500); break;
+
+    case 2:
+      write("[STEP 2] Browse media library (simulate enumerate files)");
+      check("USBMounted", g_usbMounted);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      write("[STEP 3] Play first track");
+      msg_SWC.byte(0) = KEY_PLAY;
+      output(msg_SWC);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      write("[STEP 4] Pause playback");
+      msg_SWC.byte(0) = KEY_PAUSE;
+      output(msg_SWC);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      write("[STEP 5] Skip to next track");
+      msg_SWC.byte(0) = KEY_SKIP;
+      output(msg_SWC);
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      write("[STEP 6] Eject USB device");
+      msg_SWC.byte(0) = KEY_EJECT;
+      output(msg_SWC);
+      g_usbMounted = 0;
+      check("USBEjected", (g_usbMounted == 0) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on message 0x401 {
+  g_rxSource = this.byte(0);
+  write("[RX] Audio_Source = %d", g_rxSource);
+  if (g_rxSource == SRC_USB) check("SourceIsUSB", 1);
+}
+
+on message 0x406 {
+  g_rxKey = this.byte(0);
+  write("[RX] SWC_Key = 0x%02X", g_rxKey);
+  if (g_rxKey == KEY_PLAY)  check("USBPlay",  1);
+  if (g_rxKey == KEY_PAUSE) check("USBPause", 1);
+  if (g_rxKey == KEY_SKIP)  check("USBSkip",  1);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== USB Audio Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

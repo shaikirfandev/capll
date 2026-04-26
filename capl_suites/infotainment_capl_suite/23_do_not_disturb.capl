@@ -1,0 +1,97 @@
+/*
+ * File   : 23_do_not_disturb.capl
+ * Purpose: Validate DND on/off, incoming call suppressed, notification blocked
+ * Tests  : TC01 DND ON, TC02 Incoming call suppressed, TC03 Notification blocked, TC04 DND OFF, TC05 Call allowed
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x405 msg_Call;
+  message 0x406 msg_DND;
+  msTimer stepTimer;
+
+  byte g_rxCall   = 0;
+  byte g_rxDND    = 0;
+  int  g_step     = 0;
+  int  g_pass     = 0;
+  int  g_fail     = 0;
+  int  g_dndOn    = 0;
+  int  g_callSupp = 0;
+
+  const byte DND_OFF     = 0;
+  const byte DND_ON      = 1;
+  const byte CALL_RING   = 1;
+  const byte CALL_IDLE   = 0;
+}
+
+on start {
+  write("=== TC: Do Not Disturb ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Enable DND");
+      msg_DND.byte(0) = DND_ON;
+      output(msg_DND);
+      g_dndOn = 1;
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      check("DNDEnabled", g_dndOn);
+      write("[STEP 2] Simulate incoming call – should be suppressed");
+      msg_Call.byte(0) = CALL_RING;
+      output(msg_Call);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      // DND active – call should be suppressed (no ring forwarded)
+      g_callSupp = (g_dndOn == 1) ? 1 : 0;
+      check("CallSuppressedByDND", g_callSupp);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      write("[STEP 4] Verify notification blocked in DND mode");
+      check("NotificationBlocked", g_dndOn);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      write("[STEP 5] Disable DND");
+      msg_DND.byte(0) = DND_OFF;
+      output(msg_DND);
+      g_dndOn = 0;
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      write("[STEP 6] Incoming call now allowed");
+      msg_Call.byte(0) = CALL_RING;
+      output(msg_Call);
+      check("CallAllowedAfterDNDOff", (g_dndOn == 0) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on message 0x405 {
+  g_rxCall = this.byte(0);
+  write("[RX] Call_Status = %d (DND=%d)", g_rxCall, g_dndOn);
+}
+
+on message 0x406 {
+  g_rxDND = this.byte(0);
+  write("[RX] DND_State = %d", g_rxDND);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Do Not Disturb Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

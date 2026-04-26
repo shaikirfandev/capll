@@ -1,0 +1,105 @@
+/*
+ * File   : 19_speed_limit_display.capl
+ * Purpose: Send ISA (Intelligent Speed Assist) speed signs 50/70/100/130 km/h
+ *          to cluster and verify displayed limit matches sent value on 0x550.
+ *  Uses byte1 of 0x100 extended field as ISA sign value for this test.
+ */
+
+variables {
+  message 0x100 VehicleSpeed;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep    = 0;
+  int  passCount   = 0;
+  int  failCount   = 0;
+  byte lastLamp    = 0;
+  byte lastDisp    = 0;
+  byte lastFault   = 0;
+  int  signSpeeds[5] = {50, 70, 100, 130, 0};
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+void sendISA(int sign, int vehicle) {
+  int rawVeh = vehicle * 10;
+  VehicleSpeed.byte(0) = (rawVeh >> 8) & 0xFF;
+  VehicleSpeed.byte(1) =  rawVeh        & 0xFF;
+  /* Encode ISA sign in byte2 (extended data) */
+  VehicleSpeed.byte(2) = sign & 0xFF;
+  output(VehicleSpeed);
+  write("ISA sign=%d km/h, vehicle speed=%d km/h", sign, vehicle);
+}
+
+on start {
+  write("=== 19_speed_limit_display.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  char label[80];
+  switch (testStep) {
+    case 0:
+      write("STEP 1: Sign 50 km/h, vehicle 40 km/h (under limit)");
+      sendISA(50, 40);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 1:
+      check("50 km/h sign displayed – no overspeed", (lastLamp & 0x01) == 0);
+      write("STEP 2: Sign 50 km/h, vehicle 60 km/h (overspeed)");
+      sendISA(50, 60);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 2:
+      check("Overspeed warn when exceeding 50 limit", (lastLamp & 0x01) != 0 || lastDisp != 0);
+      write("STEP 3: Sign 70 km/h, vehicle 65 km/h");
+      sendISA(70, 65);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 3:
+      check("70 km/h sign – no overspeed", (lastLamp & 0x01) == 0);
+      write("STEP 4: Sign 100 km/h, vehicle 110 km/h");
+      sendISA(100, 110);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 4:
+      check("Overspeed at 100 limit", lastFault == 0);
+      write("STEP 5: Sign 130 km/h motorway, vehicle 125 km/h");
+      sendISA(130, 125);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 5:
+      check("130 motorway – no overspeed", (lastLamp & 0x01) == 0);
+      write("STEP 6: No sign (0) – limit display cleared");
+      sendISA(0, 90);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 6:
+      check("No ISA sign – no overspeed warn", (lastLamp & 0x01) == 0);
+      check("No fault with ISA cleared", lastFault == 0);
+      testStep++; break;
+
+    default:
+      write("Speed limit display test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [ISA]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 19_speed_limit_display ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

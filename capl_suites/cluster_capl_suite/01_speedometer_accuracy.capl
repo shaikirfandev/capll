@@ -1,0 +1,99 @@
+/*
+ * File   : 01_speedometer_accuracy.capl
+ * Purpose: Send vehicle speed 0,30,60,90,120,160 km/h via 0x100 and
+ *          verify cluster ECU response on 0x550 within ±2% tolerance.
+ */
+
+variables {
+  message 0x100 VehicleSpeed;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep   = 0;
+  int  passCount  = 0;
+  int  failCount  = 0;
+
+  int  speeds[6]  = {0, 30, 60, 90, 120, 160};
+  int  lastSentSpeed = 0;
+  byte lastDisplayVal = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 01_speedometer_accuracy.capl STARTED ===");
+  testStep = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 200);
+}
+
+on timer stepTimer {
+  int   rawSpeed;
+  float sentKmh;
+  float displayKmh;
+  float errorPct;
+  char  label[64];
+
+  switch (testStep) {
+    case 0: case 1: case 2: case 3: case 4: case 5:
+      rawSpeed = speeds[testStep] * 10;
+      VehicleSpeed.byte(0) = (rawSpeed >> 8) & 0xFF;
+      VehicleSpeed.byte(1) =  rawSpeed        & 0xFF;
+      output(VehicleSpeed);
+      lastSentSpeed = speeds[testStep];
+      write("STEP %d: Sending speed %d km/h (raw=0x%04X)", testStep+1, speeds[testStep], rawSpeed);
+      setTimer(stepTimer, 300);
+      testStep++;
+      break;
+
+    case 6:
+      write("All speed steps sent. Awaiting final cluster validation...");
+      setTimer(stepTimer, 500);
+      testStep++;
+      break;
+
+    case 7:
+      sentKmh    = (float)lastSentSpeed;
+      displayKmh = (float)lastDisplayVal;
+      if (sentKmh > 0)
+        errorPct = ((displayKmh - sentKmh) / sentKmh) * 100.0;
+      else
+        errorPct = (displayKmh == 0) ? 0.0 : 100.0;
+      snprintf(label, elcount(label),
+               "Speed accuracy last step (%d km/h, err=%.1f%%)", lastSentSpeed, errorPct);
+      check(label, errorPct >= -2.0 && errorPct <= 2.0);
+      testStep++;
+      break;
+
+    default:
+      write("All speedometer steps complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastDisplayVal = this.byte(1);
+  write("ClusterStatus: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        this.byte(0), this.byte(1), this.byte(2));
+
+  if (testStep > 0 && testStep <= 6) {
+    float sentKmh    = (float)speeds[testStep - 1];
+    float displayKmh = (float)this.byte(1);
+    float errorPct   = 0.0;
+    char  label[64];
+    if (sentKmh > 0)
+      errorPct = ((displayKmh - sentKmh) / sentKmh) * 100.0;
+    snprintf(label, elcount(label),
+             "Speed step %d (%d km/h ±2%%)", testStep, speeds[testStep-1]);
+    check(label, errorPct >= -2.0 && errorPct <= 2.0);
+  }
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 01_speedometer_accuracy ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

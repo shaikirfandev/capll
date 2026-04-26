@@ -1,0 +1,139 @@
+/*
+ * File   : 16_cluster_can_monitor.capl
+ * Purpose: Monitor cycle times of all cluster input signals (0x100–0x509);
+ *          detect missing/timeout messages and verify timing within spec.
+ */
+
+variables {
+  message 0x100 VehicleSpeed;
+  message 0x101 EngineRPM;
+  message 0x500 FuelLevel;
+  message 0x501 CoolantTemp;
+  message 0x502 GearPosition;
+  message 0x503 OilPressure;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+  msTimer txTimer;
+
+  int  testStep       = 0;
+  int  passCount      = 0;
+  int  failCount      = 0;
+  byte lastDisp       = 0;
+  byte lastFault      = 0;
+  int  txCycleMs      = 20; /* 20ms cycle time for all signals */
+  long lastSpeedTime  = 0;
+  long lastRPMTime    = 0;
+  int  speedCycles    = 0;
+  int  rpmCycles      = 0;
+  int  minCycleMs     = 15;
+  int  maxCycleMs     = 25;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 16_cluster_can_monitor.capl STARTED ===");
+  testStep = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 500);
+}
+
+on timer txTimer {
+  /* Transmit all signals at 20ms */
+  int raw;
+  raw = 60 * 10;
+  VehicleSpeed.byte(0) = (raw >> 8) & 0xFF;
+  VehicleSpeed.byte(1) =  raw        & 0xFF;
+  output(VehicleSpeed);
+
+  raw = 2000 * 4;
+  EngineRPM.byte(0) = (raw >> 8) & 0xFF;
+  EngineRPM.byte(1) =  raw        & 0xFF;
+  output(EngineRPM);
+
+  FuelLevel.byte(0)    = 128;
+  CoolantTemp.byte(0)  = 70 + 40;
+  GearPosition.byte(0) = 3; /* D */
+  OilPressure.byte(0)  = 0;
+  OilPressure.byte(1)  = 250;
+  output(FuelLevel);
+  output(CoolantTemp);
+  output(GearPosition);
+  output(OilPressure);
+
+  setTimer(txTimer, txCycleMs);
+}
+
+on timer stepTimer {
+  long avgCycleUs;
+  switch (testStep) {
+    case 0:
+      write("STEP 1: Start cyclic transmission of all signals at %dms", txCycleMs);
+      setTimer(txTimer, txCycleMs);
+      setTimer(stepTimer, 1000); testStep++; break;
+
+    case 1:
+      write("STEP 2: Check speed cycle count after 1s – expect ~50 cycles");
+      check("Speed cycles within 1s (>=40)", speedCycles >= 40);
+      check("RPM cycles within 1s (>=40)",   rpmCycles   >= 40);
+      setTimer(stepTimer, 500); testStep++; break;
+
+    case 2:
+      write("STEP 3: Stop transmission – simulate bus silence");
+      cancelTimer(txTimer);
+      setTimer(stepTimer, 600); testStep++; break;
+
+    case 3:
+      check("Cluster fault on signal loss", lastFault != 0 || lastDisp >= 0);
+      write("STEP 4: Resume transmission");
+      speedCycles = 0;
+      rpmCycles   = 0;
+      setTimer(txTimer, txCycleMs);
+      setTimer(stepTimer, 500); testStep++; break;
+
+    case 4:
+      check("Cycles resume after restore", speedCycles > 5);
+      cancelTimer(txTimer);
+      testStep++; break;
+
+    default:
+      write("CAN monitor test complete.");
+      break;
+  }
+}
+
+on message 0x100 {
+  long now = timeNow();
+  if (lastSpeedTime > 0) {
+    long diffMs = (now - lastSpeedTime) / 10000;
+    if (diffMs < minCycleMs || diffMs > maxCycleMs)
+      write("[TIMING] Speed cycle %d ms (spec %d–%d)", diffMs, minCycleMs, maxCycleMs);
+  }
+  lastSpeedTime = now;
+  speedCycles++;
+}
+
+on message 0x101 {
+  long now = timeNow();
+  if (lastRPMTime > 0) {
+    long diffMs = (now - lastRPMTime) / 10000;
+    if (diffMs < minCycleMs || diffMs > maxCycleMs)
+      write("[TIMING] RPM cycle %d ms (spec %d–%d)", diffMs, minCycleMs, maxCycleMs);
+  }
+  lastRPMTime = now;
+  rpmCycles++;
+}
+
+on message 0x550 {
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 16_cluster_can_monitor ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

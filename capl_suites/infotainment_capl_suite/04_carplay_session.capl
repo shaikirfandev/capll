@@ -1,0 +1,87 @@
+/*
+ * File   : 04_carplay_session.capl
+ * Purpose: Validate CarPlay cable connect, session init, projection active, disconnect
+ * Tests  : TC01 Cable detect, TC02 Session init, TC03 Projection active, TC04 Source=CarPlay, TC05 Disconnect
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x401 msg_AudioSource;
+  message 0x402 msg_HU_Power;
+  msTimer stepTimer;
+
+  byte g_rxSource = 0xFF;
+  int  g_step     = 0;
+  int  g_pass     = 0;
+  int  g_fail     = 0;
+
+  const byte SRC_CARPLAY = 3;
+  const byte SRC_RADIO   = 0;
+  const byte HU_ON       = 2;
+}
+
+on start {
+  write("=== TC: CarPlay Session ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] HU power ON");
+      msg_HU_Power.byte(0) = HU_ON;
+      output(msg_HU_Power);
+      g_step = 2; setTimer(stepTimer, 500); break;
+
+    case 2:
+      write("[STEP 2] Simulate USB-C CarPlay cable detected");
+      write("         External trigger: CP_CABLE_DETECT = 1");
+      g_step = 3; setTimer(stepTimer, 600); break;
+
+    case 3:
+      write("[STEP 3] Session init – switch source to CarPlay");
+      msg_AudioSource.byte(0) = SRC_CARPLAY;
+      output(msg_AudioSource);
+      g_step = 4; setTimer(stepTimer, 600); break;
+
+    case 4:
+      write("[STEP 4] Verify projection active (source == CarPlay)");
+      check("CarPlayProjectionActive", (g_rxSource == SRC_CARPLAY) ? 1 : 0);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      write("[STEP 5] Simulate cable disconnect – restore source to Radio");
+      msg_AudioSource.byte(0) = SRC_RADIO;
+      output(msg_AudioSource);
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      write("[STEP 6] Confirm source returned to Radio after disconnect");
+      check("CarPlayDisconnect", (g_rxSource == SRC_RADIO) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on message 0x401 {
+  g_rxSource = this.byte(0);
+  write("[RX] Audio_Source = %d", g_rxSource);
+  if (g_rxSource == SRC_CARPLAY) {
+    check("SourceIsCarPlay", 1);
+  } else if (g_rxSource == SRC_RADIO) {
+    check("SourceRestoredToRadio", 1);
+  }
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== CarPlay Session Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

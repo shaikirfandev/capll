@@ -1,0 +1,114 @@
+/*
+ * File   : 12_seatbelt_reminder.capl
+ * Purpose: Verify seatbelt warning (bit2 of 0x505) activates when belt
+ *          unfastened + speed >20 km/h; clears when belt is fastened.
+ */
+
+variables {
+  message 0x505 WarningLamps;
+  message 0x100 VehicleSpeed;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep  = 0;
+  int  passCount = 0;
+  int  failCount = 0;
+  byte lastLamp  = 0;
+  byte lastDisp  = 0;
+  byte lastFault = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+void sendSpeed(int kmh) {
+  int raw = kmh * 10;
+  VehicleSpeed.byte(0) = (raw >> 8) & 0xFF;
+  VehicleSpeed.byte(1) =  raw        & 0xFF;
+  output(VehicleSpeed);
+}
+
+on start {
+  write("=== 12_seatbelt_reminder.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (testStep) {
+    case 0:
+      write("STEP 1: Belt fastened, speed=0 – no warning");
+      WarningLamps.byte(0) = 0x00; /* bit2=0 = belt fastened */
+      sendSpeed(0);
+      output(WarningLamps);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 1:
+      check("No belt warn when fastened at rest", (lastLamp & 0x04) == 0);
+      write("STEP 2: Belt unfastened, speed=0 – no warning (speed too low)");
+      WarningLamps.byte(0) = 0x04; /* bit2=1 = unfastened */
+      sendSpeed(0);
+      output(WarningLamps);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 2:
+      check("No belt warn when unfastened at rest", (lastLamp & 0x04) == 0 || lastDisp == 0);
+      write("STEP 3: Belt unfastened, speed=25 km/h – warning!");
+      WarningLamps.byte(0) = 0x04;
+      sendSpeed(25);
+      output(WarningLamps);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 3:
+      check("Belt warn active at 25 km/h unfastened", (lastLamp & 0x04) != 0);
+      write("STEP 4: Fasten belt at speed – warning clears");
+      WarningLamps.byte(0) = 0x00;
+      output(WarningLamps);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 4:
+      check("Belt warn cleared after fastening", (lastLamp & 0x04) == 0);
+      write("STEP 5: Unfasten again at 60 km/h");
+      WarningLamps.byte(0) = 0x04;
+      sendSpeed(60);
+      output(WarningLamps);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 5:
+      check("Belt warn active at 60 km/h unfastened", (lastLamp & 0x04) != 0);
+      write("STEP 6: Stop vehicle – warning should persist until belt");
+      sendSpeed(0);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 6:
+      check("Belt warn persists at speed=0 when unfastened", (lastLamp & 0x04) != 0);
+      WarningLamps.byte(0) = 0x00;
+      output(WarningLamps);
+      setTimer(stepTimer, 300); testStep++; break;
+
+    case 7:
+      check("Belt warn cleared after fasten", (lastLamp & 0x04) == 0);
+      testStep++; break;
+
+    default:
+      write("Seatbelt reminder test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [Belt]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 12_seatbelt_reminder ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

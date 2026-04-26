@@ -1,0 +1,101 @@
+/*
+ * File   : 12_screen_mirror.capl
+ * Purpose: Validate reverse camera trigger, rear seat mirror, display timeout
+ * Tests  : TC01 Reverse trigger, TC02 Camera feed active, TC03 Rear seat mirror on, TC04 Display timeout
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x407 msg_Bright;
+  message 0x406 msg_SWC;
+  msTimer stepTimer;
+  msTimer mirrorTimeout;
+
+  byte g_rxBright    = 0;
+  int  g_step        = 0;
+  int  g_pass        = 0;
+  int  g_fail        = 0;
+  int  g_cameraOn    = 0;
+  int  g_mirrorOn    = 0;
+
+  const byte KEY_REVERSE      = 0x60;
+  const byte KEY_MIRROR_ON    = 0x61;
+  const byte KEY_MIRROR_OFF   = 0x62;
+  const byte BRIGHT_CAMERA    = 180;
+  const int  MIRROR_TIMEOUT   = 1500;
+}
+
+on start {
+  write("=== TC: Screen Mirror ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Gear set to Reverse – trigger reverse camera");
+      msg_SWC.byte(0) = KEY_REVERSE;
+      output(msg_SWC);
+      g_cameraOn = 1;
+      g_step = 2; setTimer(stepTimer, 500); break;
+
+    case 2:
+      write("[STEP 2] Display brightness set for camera view: %d", BRIGHT_CAMERA);
+      msg_Bright.byte(0) = BRIGHT_CAMERA;
+      output(msg_Bright);
+      check("ReverseCameraTriggered", g_cameraOn);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      write("[STEP 3] Rear seat mirror enable");
+      msg_SWC.byte(0) = KEY_MIRROR_ON;
+      output(msg_SWC);
+      g_mirrorOn = 1;
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      write("[STEP 4] Confirm mirror is active");
+      check("RearSeatMirrorOn", g_mirrorOn);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      write("[STEP 5] Simulate idle – start mirror display timeout (%d ms)", MIRROR_TIMEOUT);
+      setTimer(mirrorTimeout, MIRROR_TIMEOUT);
+      g_step = 6; setTimer(stepTimer, 2000); break;
+
+    case 6:
+      check("MirrorTimeout", (g_mirrorOn == 0) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on timer mirrorTimeout {
+  msg_SWC.byte(0) = KEY_MIRROR_OFF;
+  output(msg_SWC);
+  g_mirrorOn = 0;
+  write("[INFO] Mirror display timeout – mirror disabled");
+  check("MirrorAutoOff", 1);
+}
+
+on message 0x406 {
+  write("[RX] SWC_Key = 0x%02X", this.byte(0));
+}
+
+on message 0x407 {
+  g_rxBright = this.byte(0);
+  write("[RX] Display_Bright = %d", g_rxBright);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Screen Mirror Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

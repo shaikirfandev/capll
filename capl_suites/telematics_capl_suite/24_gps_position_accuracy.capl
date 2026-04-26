@@ -1,0 +1,105 @@
+/*
+ * File   : 24_gps_position_accuracy.capl
+ * Purpose: Send lat/lon pair, verify parsed value within ±0.0001 degree tolerance
+ * CAN IDs: 0x602 GPS_Latitude, 0x603 GPS_Longitude
+ */
+
+variables {
+  message 0x602 GPS_Latitude;
+  message 0x603 GPS_Longitude;
+  msTimer stepTimer;
+  int passCount  = 0;
+  int failCount  = 0;
+  int testStep   = 0;
+  long refLat    = 37774900;   // 37.774900 * 1e6
+  long refLon    = -122419400; // -122.419400 * 1e6
+  long tolerance = 100;        // 0.0001 deg = 100 in units of 1e-6
+  long parsedLat = 0;
+  long parsedLon = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+long absLong(long v) {
+  return (v < 0) ? -v : v;
+}
+
+on start {
+  write("=== 24_gps_position_accuracy: GPS Lat/Lon Tolerance Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Inject reference latitude 37.774900 (big-endian int32)");
+      GPS_Latitude.byte(0) = 0x02; GPS_Latitude.byte(1) = 0x40;
+      GPS_Latitude.byte(2) = 0xDA; GPS_Latitude.byte(3) = 0x14;
+      output(GPS_Latitude);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] Inject reference longitude -122.419400 (big-endian int32)");
+      GPS_Longitude.byte(0) = 0xF8; GPS_Longitude.byte(1) = 0xA7;
+      GPS_Longitude.byte(2) = 0xC8; GPS_Longitude.byte(3) = 0x38;
+      output(GPS_Longitude);
+      setTimer(stepTimer, 1000);
+      break;
+    case 3:
+      write("[STEP 3] Parse received latitude bytes");
+      parsedLat = (long)GPS_Latitude.byte(0) << 24 | (long)GPS_Latitude.byte(1) << 16 |
+                  (long)GPS_Latitude.byte(2) << 8  | (long)GPS_Latitude.byte(3);
+      write("  Parsed lat*1e6 = %d  Ref = %d", parsedLat, refLat);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] Parse received longitude bytes");
+      parsedLon = (long)GPS_Longitude.byte(0) << 24 | (long)GPS_Longitude.byte(1) << 16 |
+                  (long)GPS_Longitude.byte(2) << 8  | (long)GPS_Longitude.byte(3);
+      write("  Parsed lon*1e6 = %d  Ref = %d", parsedLon, refLon);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Verify latitude within ±0.0001 degree");
+      check("Latitude within ±0.0001 deg tolerance", absLong(parsedLat - refLat) <= tolerance);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verify longitude within ±0.0001 degree");
+      check("Longitude within ±0.0001 deg tolerance", absLong(parsedLon - refLon) <= tolerance);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify latitude hemisphere plausibility (positive = north)");
+      check("Latitude positive (northern hemisphere)", parsedLat > 0);
+      check("Longitude negative (western hemisphere)", parsedLon < 0);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify both coordinates within valid global range");
+      check("Lat in range [-90e6, +90e6]",   parsedLat >= -90000000  && parsedLat <= 90000000);
+      check("Lon in range [-180e6, +180e6]",  parsedLon >= -180000000 && parsedLon <= 180000000);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x602 {
+  parsedLat = (long)this.byte(0) << 24 | (long)this.byte(1) << 16 |
+              (long)this.byte(2) << 8  | (long)this.byte(3);
+}
+
+on message 0x603 {
+  parsedLon = (long)this.byte(0) << 24 | (long)this.byte(1) << 16 |
+              (long)this.byte(2) << 8  | (long)this.byte(3);
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

@@ -1,0 +1,105 @@
+/*
+ * File   : 22_tpms_display.capl
+ * Purpose: Send all 4 tyre pressures via 0x506 TPMS_Status;
+ *          verify cluster shows normal/low-pressure alert on 0x550.
+ *  byte0=FL, byte1=FR, byte2=RL, byte3=RR (kPa); byte4=alert bitmask
+ */
+
+variables {
+  message 0x506 TPMS_Status;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep  = 0;
+  int  passCount = 0;
+  int  failCount = 0;
+  byte lastLamp  = 0;
+  byte lastDisp  = 0;
+  byte lastFault = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+void sendTPMS(int fl, int fr, int rl, int rr, byte alert) {
+  TPMS_Status.byte(0) = fl  & 0xFF;
+  TPMS_Status.byte(1) = fr  & 0xFF;
+  TPMS_Status.byte(2) = rl  & 0xFF;
+  TPMS_Status.byte(3) = rr  & 0xFF;
+  TPMS_Status.byte(4) = alert;
+  output(TPMS_Status);
+  write("TPMS FL=%d FR=%d RL=%d RR=%d alert=0x%02X", fl, fr, rl, rr, alert);
+}
+
+on start {
+  write("=== 22_tpms_display.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (testStep) {
+    case 0:
+      write("STEP 1: All tyres normal 220 kPa");
+      sendTPMS(220, 220, 220, 220, 0x00);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 1:
+      check("No TPMS warn – all normal", (lastLamp & 0x80) == 0);
+      write("STEP 2: FL low 180 kPa (below 200 kPa threshold)");
+      sendTPMS(180, 220, 220, 220, 0x01); /* alert bit0=FL */
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 2:
+      check("TPMS warn – FL low", (lastLamp & 0x80) != 0);
+      check("FL alert bit set", (lastDisp & 0x01) != 0 || lastFault != 0 || lastLamp != 0);
+      write("STEP 3: FR also low 180 kPa");
+      sendTPMS(180, 180, 220, 220, 0x03); /* bit0=FL, bit1=FR */
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 3:
+      check("TPMS warn – FL+FR low", (lastLamp & 0x80) != 0);
+      write("STEP 4: All tyres critically low 150 kPa");
+      sendTPMS(150, 150, 150, 150, 0x0F);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 4:
+      check("TPMS critical all tyres", (lastLamp & 0x80) != 0);
+      check("Fault raised at critical pressure", lastFault != 0);
+      write("STEP 5: Inflate all to 230 kPa");
+      sendTPMS(230, 230, 230, 230, 0x00);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 5:
+      check("TPMS warn cleared after inflate", (lastLamp & 0x80) == 0);
+      write("STEP 6: RR puncture simulation 100 kPa");
+      sendTPMS(230, 230, 230, 100, 0x08);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 6:
+      check("TPMS warn – RR puncture", (lastLamp & 0x80) != 0);
+      check("No fault cleared prematurely", lastFault != 0 || lastDisp != 0);
+      testStep++; break;
+
+    default:
+      write("TPMS display test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [TPMS]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 22_tpms_display ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

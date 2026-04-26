@@ -1,0 +1,121 @@
+/*
+ * 25_sensor_health_monitor.capl
+ * Sensor Health and Heartbeat Monitoring – timeout detection,
+ * error counters, degraded mode
+ * CAN: 0x308 (Radar HB), 0x309 (Camera HB), 0x325 (HealthStatus)
+ */
+
+includes { }
+
+variables {
+  msTimer heartbeatTimer;
+  msTimer watchdogTimer;
+
+  // Sensor health states: 0=OK, 1=DEGRADED, 2=LOST
+  int radarHealth  = 0;
+  int cameraHealth = 0;
+  int lidarHealth  = 0;
+  int imuHealth    = 0;
+
+  // Heartbeat timestamps (ms)
+  dword hbLast_Radar  = 0;
+  dword hbLast_Camera = 0;
+  dword hbLast_Lidar  = 0;
+  dword hbLast_IMU    = 0;
+
+  // Error counters
+  int errCnt_Radar  = 0;
+  int errCnt_Camera = 0;
+
+  const dword HB_TIMEOUT_WARN =  300;  // ms
+  const dword HB_TIMEOUT_LOST = 1000;  // ms
+  const int   ERR_DEGRADE_THRESH = 3;
+  const int   ERR_LOST_THRESH    = 10;
+
+  int systemDegradedMode = 0;
+
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "SensorHealthMonitorTest";
+  int stepCount = 0;
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void evalSensorHealth(char name[], dword lastHB, int errCnt, int health[]) {
+  dword now, delta;
+  now   = timeNow() / 100000;
+  delta = (lastHB > 0) ? (now - lastHB) : 9999;
+
+  if (delta > HB_TIMEOUT_LOST || errCnt >= ERR_LOST_THRESH)       health[0] = 2;
+  else if (delta > HB_TIMEOUT_WARN || errCnt >= ERR_DEGRADE_THRESH) health[0] = 1;
+  else                                                              health[0] = 0;
+
+  write("[HEALTH] %s delta=%dms errCnt=%d state=%d", name, delta, errCnt, health[0]);
+}
+
+void publishHealthStatus() {
+  message 0x325 hMsg;
+  int degraded;
+  int rh, ch;
+  rh = radarHealth; ch = cameraHealth;
+  evalSensorHealth("Radar",  hbLast_Radar,  errCnt_Radar,  rh);
+  evalSensorHealth("Camera", hbLast_Camera, errCnt_Camera, ch);
+  radarHealth  = rh;
+  cameraHealth = ch;
+  degraded = (radarHealth > 0 || cameraHealth > 0 || lidarHealth > 0);
+  systemDegradedMode = degraded;
+  hMsg.byte(0) = radarHealth  & 0xFF;
+  hMsg.byte(1) = cameraHealth & 0xFF;
+  hMsg.byte(2) = lidarHealth  & 0xFF;
+  hMsg.byte(3) = systemDegradedMode & 0xFF;
+  output(hMsg);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  hbLast_Radar  = timeNow() / 100000;
+  hbLast_Camera = timeNow() / 100000;
+  setTimer(heartbeatTimer, 100);
+  setTimer(watchdogTimer,  400);
+}
+
+on timer heartbeatTimer {
+  stepCount++;
+  // Simulate: camera HB stops after step 3
+  if (stepCount <= 3) hbLast_Camera = timeNow() / 100000;
+  // Radar HB continues
+  hbLast_Radar = timeNow() / 100000;
+
+  if (stepCount < 15) setTimer(heartbeatTimer, 100);
+}
+
+on timer watchdogTimer {
+  publishHealthStatus();
+  if (stepCount == 2)  check("AllSensors_OK_Initially", radarHealth == 0 && cameraHealth == 0);
+  if (stepCount == 6)  check("Camera_Degraded_OnTimeout", cameraHealth >= 1);
+  if (stepCount == 12) check("Camera_Lost_LongTimeout",   cameraHealth == 2);
+  if (stepCount == 12) check("SystemDegraded_Active",     systemDegradedMode == 1);
+  if (stepCount == 12) check("Radar_Still_OK",            radarHealth == 0);
+
+  // Error counter test
+  if (stepCount == 8) {
+    errCnt_Radar = 4;
+    publishHealthStatus();
+    check("Radar_ErrCnt_Degraded", radarHealth >= 1);
+    errCnt_Radar = 0;
+  }
+
+  if (stepCount >= 13) {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  } else {
+    setTimer(watchdogTimer, 400);
+  }
+}
+
+on message 0x308 { hbLast_Radar  = timeNow() / 100000; errCnt_Radar  = 0; }
+on message 0x309 { hbLast_Camera = timeNow() / 100000; errCnt_Camera = 0; }

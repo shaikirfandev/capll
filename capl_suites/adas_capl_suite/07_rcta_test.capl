@@ -1,0 +1,34 @@
+/*
+ * 07_rcta_test.capl – Rear Cross Traffic Alert Validation
+ * Tests alert during reversing when cross traffic detected
+ */
+variables {
+  message 0x306 RCTA_Status; message 0x100 VehicleSpeed; message 0x330 GearStatus;
+  msTimer stepTimer; int testStep=0,passCount=0,failCount=0;
+}
+void setGear(byte g){GearStatus.byte(0)=g;output(GearStatus);}
+void sendSpeed(float s){int r=(int)(s*10);VehicleSpeed.byte(0)=(r>>8)&0xFF;VehicleSpeed.byte(1)=r&0xFF;output(VehicleSpeed);}
+void simCrossTraffic(byte side,byte detected){message 0x361 RCTA_In;RCTA_In.byte(0)=side;RCTA_In.byte(1)=detected;output(RCTA_In);}
+void check(char n[],int c){if(c){write("[PASS] %s",n);passCount++;}else{write("[FAIL] %s",n);failCount++;}}
+on start{write("=== RCTA Test Suite ===");sendSpeed(5.0);setGear(0x07);setTimer(stepTimer,500);}
+on timer stepTimer{
+  testStep++;
+  switch(testStep){
+    case 1: write("[S1] Reverse + left traffic"); simCrossTraffic(0x01,1); setTimer(stepTimer,1500); break;
+    case 2: write("[S2] Reverse + right traffic"); simCrossTraffic(0x01,0); simCrossTraffic(0x02,1); setTimer(stepTimer,1500); break;
+    case 3: write("[S3] Drive gear – RCTA must be off"); setGear(0x04); simCrossTraffic(0x01,1); setTimer(stepTimer,1500); break;
+    case 4: write("[S4] No cross traffic – no alert"); setGear(0x07); simCrossTraffic(0x01,0); simCrossTraffic(0x02,0); setTimer(stepTimer,1000); break;
+    case 5: write("[S5] Speed >10 km/h reverse – inhibit"); sendSpeed(12.0); simCrossTraffic(0x02,1); setTimer(stepTimer,1000); break;
+    case 6: write("=== RCTA Done P=%d F=%d ===",passCount,failCount); break;
+  }
+}
+on message 0x306{int la=this.byte(0)&0x01,ra=(this.byte(0)>>1)&0x01;
+  switch(testStep){
+    case 1:check("RCTA_Left_Alert",la);break;
+    case 2:check("RCTA_Right_Alert",ra);break;
+    case 3:check("RCTA_Off_DriveGear",!la&&!ra);break;
+    case 4:check("RCTA_Off_NoTraffic",!la&&!ra);break;
+    case 5:check("RCTA_Off_HighRevSpeed",!la&&!ra);break;
+  }
+}
+on stopMeasurement{write("RCTA: P=%d F=%d",passCount,failCount);}

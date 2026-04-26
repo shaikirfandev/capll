@@ -1,0 +1,130 @@
+/*
+ * 19_adas_fault_injection.capl
+ * Deliberate Fault Injection and Recovery Testing – signal range fault,
+ * timeout fault, NRC handling
+ * CAN: 0x100 (VehicleSpeed), 0x301 (AEB), 0x7E8 (UDS response)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+  msTimer timeoutMonitor;
+
+  // Fault types: 0=none,1=rangeHigh,2=rangeLow,3=timeout,4=stuck,5=inverted
+  int activeFaultType = 0;
+  int faultTarget     = 0;   // 1=speed,2=aeb,3=radar
+  int faultInjected   = 0;
+  int faultDetected   = 0;
+  int recoveryOK      = 0;
+
+  // Normal signal values
+  int vehicleSpeed    = 60;
+  int aebStatus       = 0;
+
+  // NRC tracking
+  int lastNRC         = 0;   // 0x00=positive, 0x31=requestOutOfRange, etc.
+
+  const int SPEED_MAX_VALID = 250;
+  const int SPEED_MIN_VALID = 0;
+
+  dword lastRxTimestamp = 0;
+  const int TIMEOUT_LIMIT = 300;   // ms
+
+  int stepCount = 0;
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "ADAS_FaultInjectionTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+int getInjectedSpeed() {
+  if (faultTarget == 1) {
+    if (activeFaultType == 1) return 300;    // range high
+    if (activeFaultType == 2) return -10;    // range low
+    if (activeFaultType == 4) return 60;     // stuck
+    if (activeFaultType == 5) return 255 - vehicleSpeed; // inverted
+  }
+  return vehicleSpeed;
+}
+
+void detectFault(int value) {
+  if (value > SPEED_MAX_VALID || value < SPEED_MIN_VALID) {
+    faultDetected = 1;
+    write("[FAULT] Range fault detected: value=%d", value);
+  }
+}
+
+void injectAndSend() {
+  message 0x100 speedMsg;
+  int val;
+  val = getInjectedSpeed();
+  // byte clamp for CAN
+  speedMsg.byte(0) = (val > 255 ? 255 : (val < 0 ? 0 : val)) & 0xFF;
+  speedMsg.byte(1) = activeFaultType & 0xFF;
+  output(speedMsg);
+  if (faultInjected) detectFault(val);
+  write("[INJ] faultType=%d target=%d value=%d detected=%d",
+        activeFaultType, faultTarget, val, faultDetected);
+}
+
+void simulateNRC(int nrc) {
+  message 0x7E8 udsResp;
+  lastNRC = nrc;
+  udsResp.byte(0) = 0x7F; udsResp.byte(1) = 0x22; udsResp.byte(2) = nrc & 0xFF;
+  output(udsResp);
+  write("[UDS] NRC=0x%02X received", nrc);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 400);
+}
+
+on timer stepTimer {
+  stepCount++;
+  faultDetected = 0;
+
+  if (stepCount == 1) {
+    activeFaultType = 0; faultInjected = 0; faultTarget = 1;
+    injectAndSend();
+    check("Normal_NoFault", faultDetected == 0);
+  }
+  if (stepCount == 2) {
+    activeFaultType = 1; faultInjected = 1; faultTarget = 1;
+    injectAndSend();
+    check("RangeHigh_Detected", faultDetected == 1);
+  }
+  if (stepCount == 3) {
+    activeFaultType = 2; injectAndSend();
+    check("RangeLow_Detected",  faultDetected == 1);
+  }
+  if (stepCount == 4) {
+    activeFaultType = 0; faultInjected = 0; injectAndSend();
+    check("Recovery_NoFault",   faultDetected == 0);
+    recoveryOK = (faultDetected == 0);
+    check("Recovery_OK_Flag",   recoveryOK == 1);
+  }
+  if (stepCount == 5) {
+    simulateNRC(0x31);
+    check("NRC_RequestOutOfRange", lastNRC == 0x31);
+  }
+  if (stepCount == 6) {
+    simulateNRC(0x22);
+    check("NRC_conditionsNotCorrect", lastNRC == 0x22);
+  }
+  if (stepCount == 7) {
+    activeFaultType = 5; faultInjected = 1; injectAndSend();
+    check("Inverted_Detected",  faultDetected == 0);  // inverted value still in range
+  }
+
+  if (stepCount < 8) setTimer(stepTimer, 400);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}

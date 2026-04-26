@@ -1,0 +1,103 @@
+/*
+ * File   : 13_ecall_trigger.capl
+ * Purpose: Simulate crash (severity=200), verify eCall state activated→sent→connected
+ * CAN IDs: 0x608 eCall_Status
+ */
+
+variables {
+  message 0x608 eCall_Status;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount      = 0;
+  int failCount      = 0;
+  int testStep       = 0;
+  int seenActivated  = 0;
+  int seenSent       = 0;
+  int seenConnected  = 0;
+  int crashSeverity  = 0;
+  dword activatedAt  = 0;
+  dword connectedAt  = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 13_ecall_trigger: Crash eCall Activation State Machine ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] eCall idle pre-crash (byte0=0, severity=0)");
+      eCall_Status.byte(0) = 0; eCall_Status.byte(1) = 0;
+      output(eCall_Status);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] Simulate crash – severity=200, eCall ACTIVATED (byte0=1)");
+      eCall_Status.byte(0) = 1; eCall_Status.byte(1) = 200;
+      activatedAt = timeNow() / 100000;
+      output(eCall_Status);
+      setTimer(stepTimer, 2000);
+      break;
+    case 3:
+      write("[STEP 3] eCall SENT to PSAP (byte0=2)");
+      eCall_Status.byte(0) = 2; eCall_Status.byte(1) = 200;
+      output(eCall_Status);
+      setTimer(stepTimer, 2000);
+      break;
+    case 4:
+      write("[STEP 4] eCall CONNECTED to PSAP (byte0=3)");
+      eCall_Status.byte(0) = 3; eCall_Status.byte(1) = 200;
+      connectedAt = timeNow() / 100000;
+      output(eCall_Status);
+      setTimer(stepTimer, 1500);
+      break;
+    case 5:
+      write("[STEP 5] TCU response: eCall session acknowledged");
+      TCU_Response.byte(0) = 0xE0; TCU_Response.byte(1) = 0x03; TCU_Response.byte(2) = 0x00;
+      output(TCU_Response);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verify state sequence activated→sent→connected");
+      check("eCall activated state seen",  seenActivated);
+      check("eCall sent state seen",       seenSent);
+      check("eCall connected state seen",  seenConnected);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify crash severity >= 200 triggered eCall");
+      check("Crash severity >= 200",       crashSeverity >= 200);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify connection achieved within 20s of activation");
+      {
+        dword elapsed = connectedAt - activatedAt;
+        check("eCall connected within 20s", elapsed <= 20000);
+        write("  eCall connect latency: %d ms", elapsed);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x608 {
+  int state = this.byte(0);
+  if (this.byte(1) > crashSeverity) crashSeverity = this.byte(1);
+  if (state == 1) seenActivated = 1;
+  if (state == 2) seenSent      = 1;
+  if (state == 3) seenConnected = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

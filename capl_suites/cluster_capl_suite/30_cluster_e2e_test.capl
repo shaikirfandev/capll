@@ -1,0 +1,200 @@
+/*
+ * File   : 30_cluster_e2e_test.capl
+ * Purpose: Full end-to-end test: IGN ON → self-test → 50 km/h drive →
+ *          warning activation → gear change → IGN OFF; validates entire
+ *          cluster operational lifecycle on CAN bus.
+ */
+
+variables {
+  message 0x100 VehicleSpeed;
+  message 0x101 EngineRPM;
+  message 0x500 FuelLevel;
+  message 0x501 CoolantTemp;
+  message 0x502 GearPosition;
+  message 0x503 OilPressure;
+  message 0x504 ClusterPower;
+  message 0x505 WarningLamps;
+  message 0x506 TPMS_Status;
+  message 0x507 EV_SOC;
+  message 0x509 Brightness;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+  msTimer driveTimer;
+
+  int  testStep    = 0;
+  int  passCount   = 0;
+  int  failCount   = 0;
+  byte lastLamp    = 0;
+  byte lastDisp    = 0;
+  byte lastFault   = 0;
+  int  driveCount  = 0;
+  long e2eStart    = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+void sendSpeed(int kmh) {
+  int raw = kmh * 10;
+  VehicleSpeed.byte(0) = (raw >> 8) & 0xFF;
+  VehicleSpeed.byte(1) =  raw        & 0xFF;
+  output(VehicleSpeed);
+}
+
+void sendRPM(int rpm) {
+  int raw = rpm * 4;
+  EngineRPM.byte(0) = (raw >> 8) & 0xFF;
+  EngineRPM.byte(1) =  raw        & 0xFF;
+  output(EngineRPM);
+}
+
+on start {
+  write("=== 30_cluster_e2e_test.capl STARTED ===");
+  e2eStart  = timeNow();
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer driveTimer {
+  /* Maintain 50 km/h + 1800 RPM during drive phase */
+  sendSpeed(50);
+  sendRPM(1800);
+  driveCount++;
+  if (driveCount < 15)
+    setTimer(driveTimer, 100);
+  else
+    write("[E2E] Drive phase complete: %d speed/RPM frames sent", driveCount);
+}
+
+on timer stepTimer {
+  long elapsedMs;
+  switch (testStep) {
+
+    /* ---- PHASE 1: IGN ON ---- */
+    case 0:
+      write("=== E2E PHASE 1: IGN OFF baseline ===");
+      ClusterPower.byte(0) = 0x00; output(ClusterPower);
+      WarningLamps.byte(0) = 0x00; output(WarningLamps);
+      sendSpeed(0); sendRPM(0);
+      setTimer(stepTimer, 500); testStep++; break;
+
+    case 1:
+      check("E2E: Cluster in sleep state", lastFault == 0);
+
+    /* ---- PHASE 2: Self-test ---- */
+    case 2:
+      write("=== E2E PHASE 2: IGN ON + Self-test ===");
+      ClusterPower.byte(0) = 0x02; output(ClusterPower);
+      WarningLamps.byte(0) = 0xFF; output(WarningLamps);
+      setTimer(stepTimer, 400); testStep = 3; break;
+
+    case 3:
+      check("E2E: Self-test all lamps ON", lastLamp == 0xFF);
+      WarningLamps.byte(0) = 0x00; output(WarningLamps);
+      setTimer(stepTimer, 300); testStep++; break;
+
+    case 4:
+      check("E2E: Self-test lamps cleared", lastLamp == 0x00);
+
+    /* ---- PHASE 3: Init signals ---- */
+    case 5:
+      write("=== E2E PHASE 3: Init conditions ===");
+      FuelLevel.byte(0)    = (60 * 255) / 100; output(FuelLevel);
+      CoolantTemp.byte(0)  = 80 + 40;          output(CoolantTemp);
+      OilPressure.byte(0)  = 0; OilPressure.byte(1) = 250; output(OilPressure);
+      TPMS_Status.byte(0)  = 220; TPMS_Status.byte(1) = 220;
+      TPMS_Status.byte(2)  = 220; TPMS_Status.byte(3) = 220;
+      TPMS_Status.byte(4)  = 0x00; output(TPMS_Status);
+      Brightness.byte(0)   = 180; output(Brightness);
+      GearPosition.byte(0) = 0; output(GearPosition); /* P */
+      setTimer(stepTimer, 400); testStep = 6; break;
+
+    case 6:
+      check("E2E: Init signals accepted", lastFault == 0);
+
+    /* ---- PHASE 4: Drive at 50 km/h ---- */
+    case 7:
+      write("=== E2E PHASE 4: Drive – 50 km/h ===");
+      GearPosition.byte(0) = 3; output(GearPosition); /* D */
+      driveCount = 0;
+      setTimer(driveTimer, 100);
+      setTimer(stepTimer, 2000); testStep = 8; break;
+
+    case 8:
+      check("E2E: Drive phase stable", driveCount >= 10);
+      check("E2E: No fault during drive", lastFault == 0);
+
+    /* ---- PHASE 5: Warnings ---- */
+    case 9:
+      write("=== E2E PHASE 5: Trigger warnings ===");
+      WarningLamps.byte(0) = 0x01; output(WarningLamps); /* MIL */
+      setTimer(stepTimer, 400); testStep = 10; break;
+
+    case 10:
+      check("E2E: MIL active while driving", (lastLamp & 0x01) != 0);
+      WarningLamps.byte(0) = 0x08; output(WarningLamps); /* ParkBrake */
+      setTimer(stepTimer, 300); testStep++; break;
+
+    case 11:
+      check("E2E: Park brake warn at speed", (lastLamp & 0x08) != 0);
+      WarningLamps.byte(0) = 0x00; output(WarningLamps);
+      setTimer(stepTimer, 300); testStep++; break;
+
+    case 12:
+      check("E2E: Warnings cleared", lastLamp == 0x00);
+
+    /* ---- PHASE 6: Gear change ---- */
+    case 13:
+      write("=== E2E PHASE 6: Gear sequence D→N→P ===");
+      GearPosition.byte(0) = 2; output(GearPosition); /* N */
+      sendSpeed(0);
+      setTimer(stepTimer, 300); testStep = 14; break;
+
+    case 14:
+      check("E2E: Neutral gear displayed", lastFault == 0);
+      GearPosition.byte(0) = 0; output(GearPosition); /* P */
+      setTimer(stepTimer, 300); testStep++; break;
+
+    case 15:
+      check("E2E: Park gear displayed", lastFault == 0);
+
+    /* ---- PHASE 7: IGN OFF ---- */
+    case 16:
+      write("=== E2E PHASE 7: IGN OFF ===");
+      ClusterPower.byte(0) = 0x00; output(ClusterPower);
+      setTimer(stepTimer, 600); testStep = 17; break;
+
+    case 17:
+      check("E2E: Cluster sleeps on IGN OFF", lastFault == 0);
+      elapsedMs = (timeNow() - e2eStart) / 10000;
+      write("Total E2E test duration: %d ms", elapsedMs);
+      check("E2E: Total duration <15000ms", elapsedMs < 15000);
+      testStep++; break;
+
+    default:
+      write("E2E test sequence complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [E2E]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  int total = passCount + failCount;
+  write("=== SUMMARY: 30_cluster_e2e_test ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, total);
+  if (failCount == 0)
+    write("*** E2E VERDICT: ALL PASS ***");
+  else
+    write("*** E2E VERDICT: FAIL – %d test(s) failed ***", failCount);
+}

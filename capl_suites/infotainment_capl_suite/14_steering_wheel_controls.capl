@@ -1,0 +1,86 @@
+/*
+ * File   : 14_steering_wheel_controls.capl
+ * Purpose: Validate volume up/down/mute/next/prev/call/VR SWC key validation
+ * Tests  : TC01 Vol+, TC02 Vol-, TC03 Mute, TC04 Next, TC05 Prev, TC06 Call, TC07 VR
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x406 msg_SWC;
+  message 0x400 msg_Vol;
+  msTimer stepTimer;
+
+  byte g_rxKey  = 0;
+  int  g_step   = 0;
+  int  g_pass   = 0;
+  int  g_fail   = 0;
+
+  const byte SWC_VOL_UP   = 0x01;
+  const byte SWC_VOL_DOWN = 0x02;
+  const byte SWC_MUTE     = 0x03;
+  const byte SWC_NEXT     = 0x04;
+  const byte SWC_PREV     = 0x05;
+  const byte SWC_CALL     = 0x06;
+  const byte SWC_VR       = 0x07;
+}
+
+on start {
+  write("=== TC: Steering Wheel Controls ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      sendSWC(SWC_VOL_UP,   "[STEP 1] Vol+");
+      g_step = 2; setTimer(stepTimer, 400); break;
+    case 2:
+      sendSWC(SWC_VOL_DOWN, "[STEP 2] Vol-");
+      g_step = 3; setTimer(stepTimer, 400); break;
+    case 3:
+      sendSWC(SWC_MUTE,     "[STEP 3] Mute");
+      g_step = 4; setTimer(stepTimer, 400); break;
+    case 4:
+      sendSWC(SWC_NEXT,     "[STEP 4] Next track");
+      g_step = 5; setTimer(stepTimer, 400); break;
+    case 5:
+      sendSWC(SWC_PREV,     "[STEP 5] Prev track");
+      g_step = 6; setTimer(stepTimer, 400); break;
+    case 6:
+      sendSWC(SWC_CALL,     "[STEP 6] Call accept");
+      g_step = 7; setTimer(stepTimer, 400); break;
+    case 7:
+      sendSWC(SWC_VR,       "[STEP 7] VR activate");
+      g_step = 0; break;
+  }
+}
+
+void sendSWC(byte key, char label[]) {
+  write("%s (keycode=0x%02X)", label, key);
+  msg_SWC.byte(0) = key;
+  output(msg_SWC);
+}
+
+on message 0x406 {
+  g_rxKey = this.byte(0);
+  write("[RX] SWC_Key = 0x%02X", g_rxKey);
+  if (g_rxKey >= SWC_VOL_UP && g_rxKey <= SWC_VR) {
+    check("SWCKeyValid", 1);
+  } else {
+    check("SWCKeyValid", 0);
+  }
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Steering Wheel Controls Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

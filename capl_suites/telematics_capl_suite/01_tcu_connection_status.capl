@@ -1,0 +1,102 @@
+/*
+ * File   : 01_tcu_connection_status.capl
+ * Purpose: Verify TCU goes offline→connecting→online sequence within 30s
+ * CAN IDs: 0x600 TCU_Status, 0x650 TCU_Response
+ */
+
+variables {
+  message 0x600 TCU_Status;
+  message 0x601 GPS_Validity;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount = 0;
+  int failCount = 0;
+  int testStep  = 0;
+  int lastState = -1;
+  int seenOffline    = 0;
+  int seenConnecting = 0;
+  int seenOnline     = 0;
+  dword startTime    = 0;
+  dword onlineTime   = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 01_tcu_connection_status: TCU Sequence Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  seenOffline = 0; seenConnecting = 0; seenOnline = 0;
+  startTime = timeNow() / 100000; // ms
+  setTimer(stepTimer, 2000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Injecting TCU offline state (byte0=0)");
+      TCU_Status.byte(0) = 0; TCU_Status.byte(1) = 0;
+      output(TCU_Status);
+      setTimer(stepTimer, 2000);
+      break;
+    case 2:
+      write("[STEP 2] Injecting TCU connecting state (byte0=2)");
+      TCU_Status.byte(0) = 2; TCU_Status.byte(1) = 10;
+      output(TCU_Status);
+      setTimer(stepTimer, 3000);
+      break;
+    case 3:
+      write("[STEP 3] Injecting TCU online state (byte0=1, signal=85)");
+      TCU_Status.byte(0) = 1; TCU_Status.byte(1) = 85;
+      onlineTime = timeNow() / 100000;
+      output(TCU_Status);
+      setTimer(stepTimer, 2000);
+      break;
+    case 4:
+      write("[STEP 4] Verifying state sequence offline→connecting→online");
+      check("TCU saw offline state",    seenOffline);
+      check("TCU saw connecting state", seenConnecting);
+      check("TCU saw online state",     seenOnline);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Verifying sequence timing under 30 seconds");
+      {
+        dword elapsed = onlineTime - startTime;
+        check("Online achieved within 30s", elapsed < 30000);
+        write("  Elapsed to online: %d ms", elapsed);
+      }
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verifying signal quality in online state (expect >0)");
+      check("Signal quality > 0 when online", TCU_Status.byte(1) > 0);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verifying no invalid state byte present");
+      check("TCU state byte valid (0-2)", TCU_Status.byte(0) <= 2);
+      setTimer(stepTimer, 500);
+      break;
+    case 8:
+      write("[STEP 8] Final: online state stable");
+      check("TCU still in online state", TCU_Status.byte(0) == 1);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x600 {
+  byte st = this.byte(0);
+  if (st == 0) seenOffline    = 1;
+  if (st == 2) seenConnecting = 1;
+  if (st == 1) seenOnline     = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

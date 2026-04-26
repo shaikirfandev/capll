@@ -1,0 +1,97 @@
+/*
+ * File   : 11_display_brightness.capl
+ * Purpose: Validate auto brightness steps, manual override, night mode, turn-off delay
+ * Tests  : TC01 Auto step (day), TC02 Auto step (night), TC03 Manual override, TC04 Night mode, TC05 Turn-off delay
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x407 msg_Bright;
+  msTimer stepTimer;
+  msTimer displayOffTimer;
+
+  byte g_rxBright    = 0;
+  int  g_step        = 0;
+  int  g_pass        = 0;
+  int  g_fail        = 0;
+  int  g_displayOn   = 1;
+
+  const byte BRIGHT_DAY    = 200;
+  const byte BRIGHT_NIGHT  = 40;
+  const byte BRIGHT_MANUAL = 120;
+  const byte BRIGHT_OFF    = 0;
+  const int  DISPLAY_TIMEOUT_MS = 1500;
+}
+
+on start {
+  write("=== TC: Display Brightness ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Auto brightness – daytime: %d", BRIGHT_DAY);
+      msg_Bright.byte(0) = BRIGHT_DAY;
+      output(msg_Bright);
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      write("[STEP 2] Auto brightness – nighttime: %d", BRIGHT_NIGHT);
+      msg_Bright.byte(0) = BRIGHT_NIGHT;
+      output(msg_Bright);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      write("[STEP 3] Manual override: %d", BRIGHT_MANUAL);
+      msg_Bright.byte(0) = BRIGHT_MANUAL;
+      output(msg_Bright);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      write("[STEP 4] Night mode – force brightness to %d", BRIGHT_NIGHT);
+      msg_Bright.byte(0) = BRIGHT_NIGHT;
+      output(msg_Bright);
+      check("NightModeBrightness", (g_rxBright <= BRIGHT_NIGHT + 10) ? 1 : 0);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      write("[STEP 5] Simulate display idle – start turn-off delay (%d ms)", DISPLAY_TIMEOUT_MS);
+      setTimer(displayOffTimer, DISPLAY_TIMEOUT_MS);
+      g_step = 6; setTimer(stepTimer, 2000); break;
+
+    case 6:
+      check("DisplayTurnedOff", (g_displayOn == 0) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on timer displayOffTimer {
+  msg_Bright.byte(0) = BRIGHT_OFF;
+  output(msg_Bright);
+  g_displayOn = 0;
+  write("[INFO] Display turn-off delay elapsed");
+  check("DisplayOffTimeout", 1);
+}
+
+on message 0x407 {
+  g_rxBright = this.byte(0);
+  write("[RX] Display_Bright = %d", g_rxBright);
+  if (g_rxBright >= 0 && g_rxBright <= 255) {
+    check("BrightnessInRange", 1);
+  }
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Display Brightness Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

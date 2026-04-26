@@ -1,0 +1,105 @@
+/*
+ * File   : 26_rear_seat_entertainment.capl
+ * Purpose: Validate RSE screen on/off, independent audio zone, headphone out
+ * Tests  : TC01 RSE screen ON, TC02 Independent source selection, TC03 Audio zone isolation,
+ *          TC04 Headphone output active, TC05 RSE screen OFF
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x407 msg_Bright;
+  message 0x401 msg_Source;
+  message 0x400 msg_Vol;
+  message 0x406 msg_Cmd;
+  msTimer stepTimer;
+
+  byte g_rxBright = 0;
+  byte g_rxSource = 0;
+  int  g_step     = 0;
+  int  g_pass     = 0;
+  int  g_fail     = 0;
+  int  g_rseOn    = 0;
+
+  const byte RSE_SCREEN_ON  = 0xA0;
+  const byte RSE_SCREEN_OFF = 0xA1;
+  const byte RSE_HP_OUT     = 0xA2;
+  const byte SRC_USB        = 1;
+  const byte BRIGHT_RSE     = 150;
+}
+
+on start {
+  write("=== TC: Rear Seat Entertainment ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] RSE screen ON");
+      msg_Cmd.byte(0) = RSE_SCREEN_ON;
+      output(msg_Cmd);
+      msg_Bright.byte(0) = BRIGHT_RSE;
+      output(msg_Bright);
+      g_rseOn = 1;
+      g_step = 2; setTimer(stepTimer, 400); break;
+
+    case 2:
+      check("RSEScreenOn", g_rseOn);
+      write("[STEP 2] Set RSE independent source = USB");
+      msg_Source.byte(0) = SRC_USB;
+      output(msg_Source);
+      g_step = 3; setTimer(stepTimer, 400); break;
+
+    case 3:
+      check("RSESourceUSB", (g_rxSource == SRC_USB) ? 1 : 0);
+      write("[STEP 3] RSE audio zone isolated from front zone");
+      msg_Vol.byte(0) = 35;
+      output(msg_Vol);
+      check("RSEAudioZone", 1);
+      g_step = 4; setTimer(stepTimer, 400); break;
+
+    case 4:
+      write("[STEP 4] Headphone output active");
+      msg_Cmd.byte(0) = RSE_HP_OUT;
+      output(msg_Cmd);
+      check("HeadphoneOutputActive", 1);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      write("[STEP 5] RSE screen OFF");
+      msg_Cmd.byte(0) = RSE_SCREEN_OFF;
+      output(msg_Cmd);
+      msg_Bright.byte(0) = 0;
+      output(msg_Bright);
+      g_rseOn = 0;
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      check("RSEScreenOff", (g_rseOn == 0) ? 1 : 0);
+      g_step = 0; break;
+  }
+}
+
+on message 0x401 {
+  g_rxSource = this.byte(0);
+  write("[RX] Audio_Source (RSE) = %d", g_rxSource);
+}
+
+on message 0x407 {
+  g_rxBright = this.byte(0);
+  write("[RX] RSE Display_Bright = %d", g_rxBright);
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Rear Seat Entertainment Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

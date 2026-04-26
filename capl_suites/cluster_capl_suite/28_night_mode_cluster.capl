@@ -1,0 +1,109 @@
+/*
+ * File   : 28_night_mode_cluster.capl
+ * Purpose: Test ambient light sensor → auto night mode transition and
+ *          forced night mode via 0x509 byte5 light level.
+ *  0x509 byte0 = display brightness
+ *  0x509 byte5 = ambient: 0=dark(night), 255=bright(day)
+ *  0x509 byte6 = mode: 0=AUTO, 1=forced day, 2=forced night
+ */
+
+variables {
+  message 0x509 Brightness;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep  = 0;
+  int  passCount = 0;
+  int  failCount = 0;
+  byte lastLamp  = 0;
+  byte lastDisp  = 0;
+  byte lastFault = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+void sendAmbient(byte brightness, byte ambient, byte mode) {
+  Brightness.byte(0) = brightness;
+  Brightness.byte(5) = ambient;
+  Brightness.byte(6) = mode;
+  output(Brightness);
+  write("Brightness=%d ambient=%d mode=%d", brightness, ambient, mode);
+}
+
+on start {
+  write("=== 28_night_mode_cluster.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (testStep) {
+    case 0:
+      write("STEP 1: AUTO mode, bright ambient (day)");
+      sendAmbient(200, 200, 0); /* AUTO, bright */
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 1:
+      check("Day mode – high brightness ack", lastFault == 0);
+      write("STEP 2: AUTO mode, ambient dimming (dusk)");
+      sendAmbient(100, 100, 0);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 2:
+      check("Dusk transition – cluster adjusts", lastFault == 0);
+      write("STEP 3: AUTO mode, dark ambient (night)");
+      sendAmbient(30, 10, 0);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 3:
+      check("Night mode auto-activated", lastFault == 0);
+      check("Night brightness lower than day", lastDisp <= 100 || lastFault == 0);
+      write("STEP 4: Forced DAY mode (override)");
+      sendAmbient(200, 10, 1); /* forced day despite dark ambient */
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 4:
+      check("Forced day mode accepted", lastFault == 0);
+      write("STEP 5: Forced NIGHT mode");
+      sendAmbient(30, 200, 2); /* forced night despite bright ambient */
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 5:
+      check("Forced night mode accepted", lastFault == 0);
+      write("STEP 6: Restore AUTO mode");
+      sendAmbient(128, 128, 0);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 6:
+      check("AUTO mode restored", lastFault == 0);
+      write("STEP 7: Ambient fully dark – minimum brightness");
+      sendAmbient(5, 0, 0);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 7:
+      check("Minimum brightness in darkness", lastFault == 0);
+      testStep++; break;
+
+    default:
+      write("Night mode test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [Night]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 28_night_mode_cluster ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

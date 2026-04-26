@@ -1,0 +1,102 @@
+/*
+ * File   : 06_navigation_route.capl
+ * Purpose: Validate route set by destination, guidance start, ETA update, recalculation, arrival
+ * Tests  : TC01 Route set, TC02 Guidance active, TC03 ETA update, TC04 Recalc, TC05 Arrival, TC06 ETA > 0
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x403 msg_Nav;
+  msTimer stepTimer;
+
+  byte g_rxGuidance = 0;
+  byte g_rxETA      = 0;
+  int  g_step       = 0;
+  int  g_pass       = 0;
+  int  g_fail       = 0;
+
+  // byte0: 0=Idle,1=Calculating,2=Guidance,3=Arrived
+  const byte NAV_IDLE       = 0;
+  const byte NAV_CALC       = 1;
+  const byte NAV_GUIDANCE   = 2;
+  const byte NAV_ARRIVED    = 3;
+}
+
+on start {
+  write("=== TC: Navigation Route ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Set destination – Nav enters Calculating state");
+      msg_Nav.byte(0) = NAV_CALC;
+      msg_Nav.byte(1) = 0;
+      output(msg_Nav);
+      g_step = 2; setTimer(stepTimer, 500); break;
+
+    case 2:
+      write("[STEP 2] Route calculated – Guidance active, ETA = 25 min");
+      msg_Nav.byte(0) = NAV_GUIDANCE;
+      msg_Nav.byte(1) = 25;
+      output(msg_Nav);
+      g_step = 3; setTimer(stepTimer, 500); break;
+
+    case 3:
+      write("[STEP 3] ETA update – 18 min remaining");
+      msg_Nav.byte(0) = NAV_GUIDANCE;
+      msg_Nav.byte(1) = 18;
+      output(msg_Nav);
+      g_step = 4; setTimer(stepTimer, 500); break;
+
+    case 4:
+      write("[STEP 4] Simulate recalculation (deviation)");
+      msg_Nav.byte(0) = NAV_CALC;
+      msg_Nav.byte(1) = 0;
+      output(msg_Nav);
+      g_step = 5; setTimer(stepTimer, 600); break;
+
+    case 5:
+      write("[STEP 5] Resumed guidance after recalc, ETA = 22 min");
+      msg_Nav.byte(0) = NAV_GUIDANCE;
+      msg_Nav.byte(1) = 22;
+      output(msg_Nav);
+      g_step = 6; setTimer(stepTimer, 500); break;
+
+    case 6:
+      write("[STEP 6] Arrival – ETA = 0");
+      msg_Nav.byte(0) = NAV_ARRIVED;
+      msg_Nav.byte(1) = 0;
+      output(msg_Nav);
+      g_step = 0; break;
+  }
+}
+
+on message 0x403 {
+  g_rxGuidance = this.byte(0);
+  g_rxETA      = this.byte(1);
+  write("[RX] Nav_Status: guidance=%d  ETA=%d min", g_rxGuidance, g_rxETA);
+
+  if (g_rxGuidance == NAV_GUIDANCE) {
+    check("GuidanceActive", 1);
+    check("ETAPositive", (g_rxETA > 0) ? 1 : 0);
+  }
+  if (g_rxGuidance == NAV_ARRIVED) {
+    check("ArrivalDetected", 1);
+  }
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Navigation Route Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

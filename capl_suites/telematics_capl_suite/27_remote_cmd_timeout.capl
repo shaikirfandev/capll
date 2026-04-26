@@ -1,0 +1,113 @@
+/*
+ * File   : 27_remote_cmd_timeout.capl
+ * Purpose: Cmd sent, no ACK within 10s, verify timeout retry/abort logic
+ * CAN IDs: 0x604 RemoteCmd, 0x605 RemoteAck
+ */
+
+variables {
+  message 0x604 RemoteCmd;
+  message 0x605 RemoteAck;
+  msTimer stepTimer;
+  msTimer ackTimeout;
+  int passCount    = 0;
+  int failCount    = 0;
+  int testStep     = 0;
+  int ackReceived  = 0;
+  int timedOut     = 0;
+  int retryCount   = 0;
+  int aborted      = 0;
+  dword cmdSentAt  = 0;
+  dword timeoutAt  = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 27_remote_cmd_timeout: Remote Cmd Timeout Retry/Abort Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  timedOut = 0; retryCount = 0; ackReceived = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] TCU online, send UNLOCK cmd (no ECU response simulated)");
+      RemoteCmd.byte(0) = 0x02; RemoteCmd.byte(1) = 0xAA;
+      cmdSentAt = timeNow() / 100000;
+      output(RemoteCmd);
+      setTimer(ackTimeout, 10000);
+      setTimer(stepTimer, 11000);
+      break;
+    case 2:
+      write("[STEP 2] Timeout triggered – retry cmd (attempt 1)");
+      if (timedOut) {
+        retryCount++;
+        RemoteCmd.byte(0) = 0x02; RemoteCmd.byte(1) = 0xAA;
+        output(RemoteCmd);
+        write("  Retry attempt: %d", retryCount);
+        setTimer(ackTimeout, 10000);
+      }
+      setTimer(stepTimer, 11000);
+      break;
+    case 3:
+      write("[STEP 3] Second timeout – abort after 2 retries");
+      if (timedOut && retryCount >= 1) {
+        aborted = 1;
+        cancelTimer(ackTimeout);
+        write("  Command aborted after %d retry(s)", retryCount);
+      }
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] Verify timeout flag was raised");
+      check("Timeout flag triggered",          timedOut);
+      check("At least 1 retry attempted",      retryCount >= 1);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Verify abort after max retries");
+      check("Command aborted after retries",   aborted);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verify timeout coincides with ~10s window");
+      {
+        dword elapsed = timeoutAt - cmdSentAt;
+        check("Timeout duration ~10s (9-11s)", elapsed >= 9000 && elapsed <= 11000);
+        write("  Timeout latency: %d ms", elapsed);
+      }
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify no spurious ACK was received");
+      check("No ACK received during timeout test", !ackReceived);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] System state stable after abort");
+      check("System stable: aborted=1, ackReceived=0", aborted && !ackReceived);
+      break;
+    default:
+      break;
+  }
+}
+
+on msTimer ackTimeout {
+  timedOut = 1;
+  timeoutAt = timeNow() / 100000;
+  write("[TIMEOUT] No ACK received within 10s");
+}
+
+on message 0x605 {
+  ackReceived = 1;
+  cancelTimer(ackTimeout);
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

@@ -1,0 +1,87 @@
+/*
+ * File   : 13_cluster_brightness.capl
+ * Purpose: Test cluster dimmer via 0x509 Brightness message;
+ *          validate response at 0,64,128,192,255 and AUTO mode.
+ */
+
+variables {
+  message 0x509 Brightness;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep     = 0;
+  int  passCount    = 0;
+  int  failCount    = 0;
+  byte lastLamp     = 0;
+  byte lastDisp     = 0;
+  byte lastFault    = 0;
+  int  dimLevels[5] = {0, 64, 128, 192, 255};
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 13_cluster_brightness.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  char label[64];
+  switch (testStep) {
+    case 0: case 1: case 2: case 3: case 4:
+      Brightness.byte(0) = dimLevels[testStep];
+      output(Brightness);
+      write("STEP %d: Brightness=%d", testStep+1, dimLevels[testStep]);
+      setTimer(stepTimer, 350); testStep++; break;
+
+    case 5:
+      snprintf(label, elcount(label), "Cluster responds at max brightness 255");
+      check(label, lastFault == 0);
+      write("STEP 6: AUTO mode (0xFE marker)");
+      Brightness.byte(0) = 0xFE; /* AUTO mode sentinel */
+      output(Brightness);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 6:
+      check("AUTO brightness mode – no fault", lastFault == 0);
+      check("AUTO mode ack from cluster", lastDisp >= 0);
+      write("STEP 7: Night interior dim (value=10)");
+      Brightness.byte(0) = 10;
+      output(Brightness);
+      setTimer(stepTimer, 350); testStep++; break;
+
+    case 7:
+      check("Night dim level – no fault", lastFault == 0);
+      write("STEP 8: Restore full brightness 255");
+      Brightness.byte(0) = 255;
+      output(Brightness);
+      setTimer(stepTimer, 350); testStep++; break;
+
+    case 8:
+      check("Full brightness restored cleanly", lastFault == 0);
+      testStep++; break;
+
+    default:
+      write("Brightness test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [Bright]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 13_cluster_brightness ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

@@ -1,0 +1,102 @@
+/*
+ * 14_dms_validation.capl
+ * Driver Monitoring System – eye closure timer, head pose, drowsiness level,
+ * distraction alert
+ * CAN: 0x314 (DMS)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+  msTimer eyeClosureTimer;
+
+  int eyesClosed     = 0;   // 0=open, 1=closed
+  int eyeClosureMs   = 0;   // accumulated ms
+  int headPoseYaw    = 0;   // degrees, + right, - left
+  int headPosePitch  = 0;   // degrees
+  int drowsinessLevel= 0;   // 0-3 (0=alert, 3=sleep)
+  int distractionFlag= 0;   // 0/1
+  int alertOutput    = 0;   // 0=none,1=visual,2=audio,3=haptic
+
+  const int EYE_WARN_MS    = 1500;
+  const int EYE_ALERT_MS   = 2500;
+  const int HEAD_YAW_LIMIT = 30;    // degrees
+  const int HEAD_PITCH_MAX = 20;
+  const int DROWN_ALERT_LVL= 2;
+
+  int stepCount = 0;
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "DMSValidationTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void evalDMS() {
+  message 0x314 dmsMsg;
+  alertOutput = 0;
+  distractionFlag = 0;
+
+  if (eyesClosed) eyeClosureMs += 200; else eyeClosureMs = 0;
+
+  if (eyeClosureMs >= EYE_ALERT_MS) alertOutput = 3;
+  else if (eyeClosureMs >= EYE_WARN_MS) alertOutput = 2;
+
+  if (headPoseYaw > HEAD_YAW_LIMIT || headPoseYaw < -HEAD_YAW_LIMIT) {
+    distractionFlag = 1; if (alertOutput < 1) alertOutput = 1;
+  }
+  if (headPosePitch > HEAD_PITCH_MAX) {
+    distractionFlag = 1; if (alertOutput < 1) alertOutput = 1;
+  }
+  if (drowsinessLevel >= DROWN_ALERT_LVL) {
+    if (alertOutput < 2) alertOutput = 2;
+  }
+
+  dmsMsg.byte(0) = eyesClosed & 0xFF;
+  dmsMsg.byte(1) = (eyeClosureMs / 100) & 0xFF;  // encode in 100ms units
+  dmsMsg.byte(2) = (headPoseYaw + 128) & 0xFF;
+  dmsMsg.byte(3) = drowsinessLevel & 0xFF;
+  dmsMsg.byte(4) = alertOutput & 0xFF;
+  output(dmsMsg);
+  write("[DMS] eyes=%d closureMs=%d yaw=%d drown=%d alert=%d",
+        eyesClosed, eyeClosureMs, headPoseYaw, drowsinessLevel, alertOutput);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 200);
+}
+
+on timer stepTimer {
+  stepCount++;
+  if (stepCount == 1)  { eyesClosed = 0; headPoseYaw = 0; drowsinessLevel = 0; }
+  if (stepCount == 3)  { eyesClosed = 1; }                      // start closure
+  if (stepCount == 10) { eyesClosed = 1; }                      // 2000ms closed
+  if (stepCount == 12) { eyesClosed = 0; }                      // re-open
+  if (stepCount == 14) { headPoseYaw = 40; }                    // distraction
+  if (stepCount == 16) { headPoseYaw = 0; drowsinessLevel = 2; }
+
+  evalDMS();
+
+  if (stepCount == 8)  check("EyeClosure_WarningLevel",  alertOutput >= 2);
+  if (stepCount == 11) check("EyeClosure_HapticAlert",   alertOutput == 3);
+  if (stepCount == 13) check("EyeOpen_AlertCleared",     alertOutput == 0);
+  if (stepCount == 15) check("HeadYaw_Distraction",      distractionFlag == 1);
+  if (stepCount == 17) check("Drowsiness_AudioAlert",    alertOutput >= 2);
+
+  if (stepCount < 20) setTimer(stepTimer, 200);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on message 0x314 {
+  write("[RX 0x314] eyesClosed=%d closureUnits=%d yaw=%d drown=%d alert=%d",
+        this.byte(0), this.byte(1), (int)this.byte(2)-128,
+        this.byte(3), this.byte(4));
+}

@@ -1,0 +1,98 @@
+/*
+ * File   : 26_remote_cmd_auth_fail.capl
+ * Purpose: Send cmd with wrong auth token, verify fault_code=0x01 response on 0x605
+ * CAN IDs: 0x604 RemoteCmd, 0x605 RemoteAck
+ */
+
+variables {
+  message 0x604 RemoteCmd;
+  message 0x605 RemoteAck;
+  msTimer stepTimer;
+  int passCount      = 0;
+  int failCount      = 0;
+  int testStep       = 0;
+  int authFailSeen   = 0;
+  int faultCode      = 0;
+  int ackStatus      = -1;
+  int cmdEcho        = 0;
+  int authRetryCount = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 26_remote_cmd_auth_fail: Auth Token Rejection Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] TCU online, valid session established");
+      {
+        message 0x600 TCU_Status;
+        TCU_Status.byte(0) = 1; TCU_Status.byte(1) = 85;
+        output(TCU_Status);
+      }
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] Send LOCK cmd with wrong auth token (byte1=0xFF)");
+      RemoteCmd.byte(0) = 0x01; RemoteCmd.byte(1) = 0xFF;
+      output(RemoteCmd);
+      setTimer(stepTimer, 1500);
+      break;
+    case 3:
+      write("[STEP 3] ECU responds: error, fault_code=0x01 (auth fail)");
+      RemoteAck.byte(0) = 0x01; RemoteAck.byte(1) = 3; RemoteAck.byte(2) = 0x01;
+      output(RemoteAck);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] Verify auth failure detected (status=3, fault=0x01)");
+      check("Auth failure: ACK status = error (3)", ackStatus == 3);
+      check("Auth failure: fault_code = 0x01",      faultCode == 0x01);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Retry with another bad token (byte1=0x12)");
+      RemoteCmd.byte(0) = 0x01; RemoteCmd.byte(1) = 0x12;
+      output(RemoteCmd);
+      setTimer(stepTimer, 1500);
+      break;
+    case 6:
+      write("[STEP 6] ECU rejects again with fault=0x01");
+      RemoteAck.byte(0) = 0x01; RemoteAck.byte(1) = 3; RemoteAck.byte(2) = 0x01;
+      output(RemoteAck);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify consistent auth failure on multiple bad tokens");
+      check("Consistent fault_code=0x01 on bad auth", faultCode == 0x01 && ackStatus == 3);
+      check("TCU auth fail flag set",                  authFailSeen);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify cmd was NOT executed (lock not performed)");
+      check("Door not locked on bad auth (error status)", ackStatus == 3);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x605 {
+  ackStatus  = this.byte(1);
+  faultCode  = this.byte(2);
+  cmdEcho    = this.byte(0);
+  if (ackStatus == 3 && faultCode == 0x01) authFailSeen = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

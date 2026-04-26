@@ -1,0 +1,103 @@
+/*
+ * File   : 12_cellular_data_session.capl
+ * Purpose: Data idle→active→idle cycle, packet_loss <5% threshold during active
+ * CAN IDs: 0x607 Cellular_RSSI, 0x650 TCU_Response
+ */
+
+variables {
+  message 0x607 Cellular_RSSI;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount       = 0;
+  int failCount       = 0;
+  int testStep        = 0;
+  int seenIdle        = 0;
+  int seenActive      = 0;
+  int seenIdleAgain   = 0;
+  int maxPacketLoss   = 0;
+  int sessionCount    = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 12_cellular_data_session: Data Session Cycle & Loss Threshold ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Initial: TCU data session idle (bars=3, 4G)");
+      Cellular_RSSI.byte(0) = 3; Cellular_RSSI.byte(1) = 2; Cellular_RSSI.byte(2) = 0;
+      TCU_Response.byte(0) = 0xA0; TCU_Response.byte(1) = 0x00; TCU_Response.byte(2) = 0x00;
+      output(Cellular_RSSI); output(TCU_Response);
+      setTimer(stepTimer, 1500);
+      break;
+    case 2:
+      write("[STEP 2] Data session active (TCU_Response ack_type=0xA1)");
+      Cellular_RSSI.byte(0) = 4; Cellular_RSSI.byte(1) = 2; Cellular_RSSI.byte(2) = 2;
+      TCU_Response.byte(0) = 0xA1; TCU_Response.byte(1) = 0x01; TCU_Response.byte(2) = 0x00;
+      output(Cellular_RSSI); output(TCU_Response);
+      setTimer(stepTimer, 2000);
+      break;
+    case 3:
+      write("[STEP 3] Data session active: pack_loss=3% (within 5% threshold)");
+      Cellular_RSSI.byte(0) = 4; Cellular_RSSI.byte(1) = 2; Cellular_RSSI.byte(2) = 3;
+      output(Cellular_RSSI);
+      setTimer(stepTimer, 2000);
+      break;
+    case 4:
+      write("[STEP 4] Data session active: pack_loss=4% (just under threshold)");
+      Cellular_RSSI.byte(0) = 3; Cellular_RSSI.byte(1) = 2; Cellular_RSSI.byte(2) = 4;
+      output(Cellular_RSSI);
+      setTimer(stepTimer, 1500);
+      break;
+    case 5:
+      write("[STEP 5] Data session returns to idle");
+      Cellular_RSSI.byte(0) = 3; Cellular_RSSI.byte(1) = 2; Cellular_RSSI.byte(2) = 0;
+      TCU_Response.byte(0) = 0xA0; TCU_Response.byte(1) = 0x00; TCU_Response.byte(2) = 0x00;
+      output(Cellular_RSSI); output(TCU_Response);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verify session state cycle idle→active→idle");
+      check("Session started (idle seen)",        seenIdle);
+      check("Session actively used",              seenActive);
+      check("Session returned to idle",           seenIdleAgain);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify packet_loss stayed under 5% during active");
+      check("Max packet_loss < 5% during session", maxPacketLoss < 5);
+      write("  Max packet loss observed: %d%%", maxPacketLoss);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify session count and signal bars remained stable");
+      check("Signal bars >= 3 during session", Cellular_RSSI.byte(0) >= 3);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x607 {
+  int loss = this.byte(2);
+  if (loss > maxPacketLoss) maxPacketLoss = loss;
+}
+
+on message 0x650 {
+  if (this.byte(0) == 0xA0 && !seenActive)           seenIdle      = 1;
+  if (this.byte(0) == 0xA1)                          seenActive    = 1;
+  if (this.byte(0) == 0xA0 && seenActive)            seenIdleAgain = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

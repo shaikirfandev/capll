@@ -1,0 +1,108 @@
+/*
+ * File   : 25_gps_lost_recovery.capl
+ * Purpose: GPS valid→invalid for 10s→valid recovery, fallback DR mode flag
+ * CAN IDs: 0x601 GPS_Validity, 0x650 TCU_Response
+ */
+
+variables {
+  message 0x601 GPS_Validity;
+  message 0x650 TCU_Response;
+  msTimer stepTimer;
+  int passCount      = 0;
+  int failCount      = 0;
+  int testStep       = 0;
+  int seenValid      = 0;
+  int seenInvalid    = 0;
+  int seenRecovery   = 0;
+  int drModeActive   = 0;
+  dword invalidAt    = 0;
+  dword recoveredAt  = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 25_gps_lost_recovery: GPS Loss DR Fallback & Recovery Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] GPS valid with 8 satellites");
+      GPS_Validity.byte(0) = 1; GPS_Validity.byte(1) = 8;
+      output(GPS_Validity);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] GPS signal lost (byte0=0, sats=0)");
+      GPS_Validity.byte(0) = 0; GPS_Validity.byte(1) = 0;
+      invalidAt = timeNow() / 100000;
+      output(GPS_Validity);
+      setTimer(stepTimer, 2000);
+      break;
+    case 3:
+      write("[STEP 3] TCU activates DR fallback mode (0x650 byte0=0xD0)");
+      TCU_Response.byte(0) = 0xD0; TCU_Response.byte(1) = 0x01; TCU_Response.byte(2) = 0x00;
+      output(TCU_Response);
+      setTimer(stepTimer, 3000);
+      break;
+    case 4:
+      write("[STEP 4] GPS still invalid after 5s – DR continues");
+      GPS_Validity.byte(0) = 0; GPS_Validity.byte(1) = 0;
+      output(GPS_Validity);
+      setTimer(stepTimer, 3000);
+      break;
+    case 5:
+      write("[STEP 5] GPS recovers (byte0=1, sats=6) – ~10s after loss");
+      GPS_Validity.byte(0) = 1; GPS_Validity.byte(1) = 6;
+      recoveredAt = timeNow() / 100000;
+      output(GPS_Validity);
+      setTimer(stepTimer, 1500);
+      break;
+    case 6:
+      write("[STEP 6] TCU exits DR fallback (0x650 byte0=0xD0, byte1=0x00)");
+      TCU_Response.byte(0) = 0xD0; TCU_Response.byte(1) = 0x00; TCU_Response.byte(2) = 0x00;
+      output(TCU_Response);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify states: valid→invalid→recovery");
+      check("GPS initially valid",        seenValid);
+      check("GPS invalid state detected", seenInvalid);
+      check("GPS recovery seen",          seenRecovery);
+      check("DR mode was activated",      drModeActive);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify recovery time  appro 10s after loss");
+      {
+        dword elapsed = recoveredAt - invalidAt;
+        check("Recovery within 15s of loss", elapsed <= 15000);
+        write("  GPS loss duration: %d ms", elapsed);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x601 {
+  int st = this.byte(0);
+  if (st == 1 && !seenInvalid)       seenValid    = 1;
+  if (st == 0)                        seenInvalid  = 1;
+  if (st == 1 && seenInvalid)         seenRecovery = 1;
+}
+
+on message 0x650 {
+  if (this.byte(0) == 0xD0 && this.byte(1) == 0x01) drModeActive = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

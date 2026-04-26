@@ -1,0 +1,128 @@
+/*
+ * 29_tsr_validation.capl
+ * Traffic Sign Recognition Validation – speed sign detection,
+ * no-overtaking sign, sign confidence threshold
+ * CAN: 0x309 (Camera), 0x329 (TSR output)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+
+  // Sign types: 0=none,1=speed,2=noOvertaking,3=stop,4=yield,5=clearNoOvertake
+  int detectedSignType  = 0;
+  int detectedSpeedVal  = 0;   // km/h (for speed signs)
+  int signConfidence    = 0;   // 0-100 %
+  int signActive        = 0;   // 1 = currently displayed
+
+  // TSR output
+  int tsrSignType       = 0;
+  int tsrSpeedLimit     = 0;
+  int noOvertakeActive  = 0;
+  int tsrHMI            = 0;   // 0=off,1=advisory,2=warning
+
+  const int CONF_THRESH = 65;
+
+  int stepCount = 0;
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "TSR_Validation_Test";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void evalTSR() {
+  message 0x329 tsrMsg;
+  tsrSignType = 0; tsrSpeedLimit = 0; noOvertakeActive = 0; tsrHMI = 0;
+
+  if (signConfidence >= CONF_THRESH && signActive) {
+    tsrSignType = detectedSignType;
+    if (detectedSignType == 1) {
+      tsrSpeedLimit = detectedSpeedVal;
+      tsrHMI = 1;
+      write("[TSR] Speed sign: %d km/h conf=%d", tsrSpeedLimit, signConfidence);
+    } else if (detectedSignType == 2) {
+      noOvertakeActive = 1;
+      tsrHMI = 2;
+      write("[TSR] No-overtaking sign detected conf=%d", signConfidence);
+    } else if (detectedSignType == 5) {
+      noOvertakeActive = 0;
+      tsrHMI = 1;
+      write("[TSR] No-overtaking cleared conf=%d", signConfidence);
+    } else if (detectedSignType == 3) {
+      tsrHMI = 2;
+      write("[TSR] STOP sign detected!");
+    }
+  } else if (signConfidence < CONF_THRESH && signActive) {
+    write("[TSR] Sign detected but low confidence=%d – suppressed", signConfidence);
+  }
+
+  tsrMsg.byte(0) = tsrSignType     & 0xFF;
+  tsrMsg.byte(1) = tsrSpeedLimit   & 0xFF;
+  tsrMsg.byte(2) = noOvertakeActive & 0xFF;
+  tsrMsg.byte(3) = signConfidence  & 0xFF;
+  tsrMsg.byte(4) = tsrHMI         & 0xFF;
+  output(tsrMsg);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 400);
+}
+
+on timer stepTimer {
+  stepCount++;
+  if (stepCount == 1) {
+    signActive = 0; evalTSR();
+    check("NoSign_AllZero", tsrSignType == 0 && tsrHMI == 0);
+  }
+  if (stepCount == 2) {
+    signActive = 1; detectedSignType = 1; detectedSpeedVal = 50; signConfidence = 80;
+    evalTSR();
+    check("Speed50_Detected",      tsrSpeedLimit == 50);
+    check("Speed50_HMI_Advisory",  tsrHMI == 1);
+  }
+  if (stepCount == 3) {
+    detectedSpeedVal = 30; signConfidence = 90;
+    evalTSR();
+    check("Speed30_Updated",       tsrSpeedLimit == 30);
+  }
+  if (stepCount == 4) {
+    signConfidence = 40;  // low confidence
+    evalTSR();
+    check("LowConf_Suppressed",    tsrSpeedLimit == 0 || tsrHMI == 0);
+  }
+  if (stepCount == 5) {
+    signActive = 1; detectedSignType = 2; signConfidence = 75;
+    evalTSR();
+    check("NoOvertake_Active",     noOvertakeActive == 1);
+    check("NoOvertake_HMI_Warn",   tsrHMI == 2);
+  }
+  if (stepCount == 6) {
+    detectedSignType = 5; signConfidence = 70;
+    evalTSR();
+    check("NoOvertake_Cleared",    noOvertakeActive == 0);
+  }
+  if (stepCount == 7) {
+    detectedSignType = 3; signConfidence = 95;
+    evalTSR();
+    check("STOP_Sign_Warning",     tsrHMI == 2);
+  }
+
+  if (stepCount < 8) setTimer(stepTimer, 400);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on message 0x309 {
+  detectedSignType  = this.byte(2);
+  detectedSpeedVal  = this.byte(3);
+  signConfidence    = this.byte(4);
+  signActive        = 1;
+}

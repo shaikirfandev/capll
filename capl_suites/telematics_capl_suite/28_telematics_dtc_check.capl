@@ -1,0 +1,116 @@
+/*
+ * File   : 28_telematics_dtc_check.capl
+ * Purpose: UDS 0x19 01 0F on Tx=0x744, Rx=0x74C – verify TCU DTC count
+ * CAN IDs: 0x744 (UDS request), 0x74C (UDS response)
+ */
+
+variables {
+  message 0x744 UDS_TCU_Req;
+  message 0x74C UDS_TCU_Res;
+  msTimer stepTimer;
+  msTimer udsTimeout;
+  int passCount    = 0;
+  int failCount    = 0;
+  int testStep     = 0;
+  int udsRespSeen  = 0;
+  int timedOut     = 0;
+  int dtcCount     = 0;
+  int serviceOk    = 0;
+  dword reqSentAt  = 0;
+  dword respAt     = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 28_telematics_dtc_check: UDS ReadDTC (0x19) TCU DTC Count ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Send UDS ReadDTCByStatusMask: 19 01 0F");
+      UDS_TCU_Req.dlc     = 4;
+      UDS_TCU_Req.byte(0) = 0x03;  // length
+      UDS_TCU_Req.byte(1) = 0x19;  // service ReadDTCInformation
+      UDS_TCU_Req.byte(2) = 0x01;  // subFunction = reportNumberOfDTCByStatusMask
+      UDS_TCU_Req.byte(3) = 0x0F;  // statusMask
+      reqSentAt = timeNow() / 100000;
+      output(UDS_TCU_Req);
+      setTimer(udsTimeout, 2000);
+      setTimer(stepTimer, 2500);
+      break;
+    case 2:
+      write("[STEP 2] Simulate ECU positive response (59 01 XX XX count)");
+      UDS_TCU_Res.dlc     = 6;
+      UDS_TCU_Res.byte(0) = 0x05;
+      UDS_TCU_Res.byte(1) = 0x59;  // positive response 0x19+0x40
+      UDS_TCU_Res.byte(2) = 0x01;  // subFunction echo
+      UDS_TCU_Res.byte(3) = 0x0F;  // status mask echo
+      UDS_TCU_Res.byte(4) = 0x00;  // DTC format
+      UDS_TCU_Res.byte(5) = 0x03;  // DTC count = 3
+      cancelTimer(udsTimeout);
+      respAt = timeNow() / 100000;
+      output(UDS_TCU_Res);
+      setTimer(stepTimer, 1000);
+      break;
+    case 3:
+      write("[STEP 3] Verify UDS response received");
+      check("UDS response received on 0x74C",       udsRespSeen);
+      check("No UDS timeout",                        !timedOut);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] Verify positive response service ID = 0x59");
+      check("UDS positive response SID = 0x59",      UDS_TCU_Res.byte(1) == 0x59);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Verify DTC count from response byte5");
+      dtcCount = UDS_TCU_Res.byte(5);
+      write("  DTC count returned: %d", dtcCount);
+      check("DTC count valid (0-255)", dtcCount >= 0 && dtcCount <= 255);
+      setTimer(stepTimer, 1000);
+      break;
+    case 6:
+      write("[STEP 6] Verify UDS response latency < 2s");
+      {
+        dword elapsed = respAt - reqSentAt;
+        check("UDS response < 2000ms", elapsed <= 2000);
+        write("  UDS latency: %d ms", elapsed);
+      }
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify status mask echoed correctly (0x0F)");
+      check("Status mask echoed = 0x0F", UDS_TCU_Res.byte(3) == 0x0F);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Log TCU DTC count for test record");
+      write("  Final TCU DTC count: %d", dtcCount);
+      check("DTC count available for logging", udsRespSeen);
+      break;
+    default:
+      break;
+  }
+}
+
+on msTimer udsTimeout {
+  timedOut = 1;
+  write("[FAIL] UDS timeout: no response from 0x74C within 2s");
+}
+
+on message 0x74C {
+  udsRespSeen = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

@@ -1,0 +1,110 @@
+/*
+ * File   : 08_ota_download_progress.capl
+ * Purpose: Trigger OTA download, poll 0%→50%→100%, timeout 120s
+ * CAN IDs: 0x606 OTA_Status
+ */
+
+variables {
+  message 0x606 OTA_Status;
+  msTimer stepTimer;
+  msTimer otaTimeout;
+  int passCount   = 0;
+  int failCount   = 0;
+  int testStep    = 0;
+  int otaComplete = 0;
+  int timedOut    = 0;
+  int maxProgress = 0;
+  dword otaStart  = 0;
+  dword otaDone   = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 08_ota_download_progress: OTA Download Polling Test ===");
+  passCount = 0; failCount = 0; testStep = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Inject OTA idle state (byte0=0, progress=0%)");
+      OTA_Status.byte(0) = 0; OTA_Status.byte(1) = 0;
+      output(OTA_Status);
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] Inject OTA downloading at 0% (byte0=1, progress=0)");
+      OTA_Status.byte(0) = 1; OTA_Status.byte(1) = 0;
+      otaStart = timeNow() / 100000;
+      setTimer(otaTimeout, 120000);
+      output(OTA_Status);
+      setTimer(stepTimer, 2000);
+      break;
+    case 3:
+      write("[STEP 3] Inject OTA downloading at 25%");
+      OTA_Status.byte(0) = 1; OTA_Status.byte(1) = 25;
+      output(OTA_Status);
+      setTimer(stepTimer, 2000);
+      break;
+    case 4:
+      write("[STEP 4] Inject OTA downloading at 50%");
+      OTA_Status.byte(0) = 1; OTA_Status.byte(1) = 50;
+      output(OTA_Status);
+      setTimer(stepTimer, 2000);
+      break;
+    case 5:
+      write("[STEP 5] Inject OTA downloading at 75%");
+      OTA_Status.byte(0) = 1; OTA_Status.byte(1) = 75;
+      output(OTA_Status);
+      setTimer(stepTimer, 2000);
+      break;
+    case 6:
+      write("[STEP 6] Inject OTA downloading at 100%");
+      OTA_Status.byte(0) = 1; OTA_Status.byte(1) = 100;
+      output(OTA_Status);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Inject OTA complete state (byte0=3)");
+      OTA_Status.byte(0) = 3; OTA_Status.byte(1) = 100;
+      otaDone = timeNow() / 100000;
+      cancelTimer(otaTimeout);
+      output(OTA_Status);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Verify OTA complete, no timeout, progress reached 100");
+      check("OTA download complete (status=3)", otaComplete);
+      check("OTA progress reached 100%",        maxProgress == 100);
+      check("OTA download no timeout",          !timedOut);
+      {
+        dword elapsed = otaDone - otaStart;
+        check("OTA finished within 120s", elapsed <= 120000);
+        write("  OTA download duration: %d ms", elapsed);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+on msTimer otaTimeout {
+  timedOut = 1;
+  write("[FAIL] OTA download exceeded 120s timeout");
+}
+
+on message 0x606 {
+  int prog = this.byte(1);
+  if (prog > maxProgress) maxProgress = prog;
+  if (this.byte(0) == 3)  otaComplete = 1;
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

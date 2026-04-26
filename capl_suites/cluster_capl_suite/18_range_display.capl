@@ -1,0 +1,103 @@
+/*
+ * File   : 18_range_display.capl
+ * Purpose: Calculate range-to-empty from fuel level × consumption rate;
+ *          verify cluster 0x550 shows low-range warning when range <50 km.
+ */
+
+variables {
+  message 0x500 FuelLevel;
+  message 0x100 VehicleSpeed;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+
+  int  testStep  = 0;
+  int  passCount = 0;
+  int  failCount = 0;
+  byte lastLamp  = 0;
+  byte lastDisp  = 0;
+  byte lastFault = 0;
+
+  /* Consumption model: 10L/100km, tank 50L → range = fuel% * 0.5 km */
+  /* At 50% fuel → 25L → 250 km range */
+  /* At 10% fuel → 5L → 50 km range (boundary) */
+  /* At 8%  fuel → 4L → 40 km range (trigger warn) */
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+void sendFuel(int pct) {
+  FuelLevel.byte(0) = (pct * 255) / 100;
+  output(FuelLevel);
+}
+
+on start {
+  write("=== 18_range_display.capl STARTED ===");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (testStep) {
+    case 0:
+      write("STEP 1: 100%% fuel – full range ~500 km");
+      sendFuel(100);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 1:
+      check("Full range – no warn", (lastLamp & 0x40) == 0);
+      write("STEP 2: 50%% fuel – range ~250 km");
+      sendFuel(50);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 2:
+      check("50%% fuel – no range warn", (lastLamp & 0x40) == 0);
+      write("STEP 3: 20%% fuel – range ~100 km");
+      sendFuel(20);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 3:
+      check("20%% fuel – no range warn yet", (lastLamp & 0x40) == 0);
+      write("STEP 4: 8%% fuel – range ~40 km (<50 km threshold)");
+      sendFuel(8);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 4:
+      check("Low range warn at 8%% fuel", (lastLamp & 0x40) != 0);
+      write("STEP 5: 5%% fuel – range ~25 km, critical");
+      sendFuel(5);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 5:
+      check("Low range warn persists at 5%%", (lastLamp & 0x40) != 0);
+      write("STEP 6: Refuel to 50%% – range restored, warn clears");
+      sendFuel(50);
+      setTimer(stepTimer, 400); testStep++; break;
+
+    case 6:
+      check("Range warn clears after refuel", (lastLamp & 0x40) == 0);
+      check("No fault after refuel", lastFault == 0);
+      testStep++; break;
+
+    default:
+      write("Range display test complete.");
+      break;
+  }
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastDisp  = this.byte(1);
+  lastFault = this.byte(2);
+  write("ClusterStatus [Range]: lamp=0x%02X disp=0x%02X fault=0x%02X",
+        lastLamp, lastDisp, lastFault);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 18_range_display ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}

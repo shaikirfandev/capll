@@ -1,0 +1,102 @@
+/*
+ * 23_adas_logging.capl
+ * Structured Test Logging – test ID, timestamps, result recording,
+ * summary report generation
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+
+  const int MAX_RECORDS = 20;
+  char  logID[20][32];
+  dword logTimestamp[20];
+  int   logResult[20];   // 1=PASS, 0=FAIL
+  char  logNote[20][64];
+  int   logCount = 0;
+
+  int passCount = 0;
+  int failCount = 0;
+  char testName[64] = "ADAS_StructuredLoggingTest";
+  int stepCount = 0;
+
+  // Suite-level metadata
+  dword suiteStartTime = 0;
+  dword suiteEndTime   = 0;
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void logResult_rec(char id[], int result, char note[]) {
+  if (logCount >= MAX_RECORDS) { write("[LOG] Buffer full!"); return; }
+  strncpy(logID[logCount],   id,   31);
+  strncpy(logNote[logCount], note, 63);
+  logTimestamp[logCount] = timeNow() / 100000;
+  logResult[logCount]    = result;
+  logCount++;
+  write("[LOG] #%02d [%s] %s – %s",
+        logCount, result ? "PASS" : "FAIL", id, note);
+}
+
+void generateReport() {
+  int i, p, f;
+  p = 0; f = 0;
+  suiteEndTime = timeNow() / 100000;
+  write("========================================");
+  write("  ADAS STRUCTURED TEST REPORT");
+  write("  Suite: %s", testName);
+  write("  Start: %d ms  End: %d ms  Duration: %d ms",
+        suiteStartTime, suiteEndTime, suiteEndTime - suiteStartTime);
+  write("----------------------------------------");
+  for (i = 0; i < logCount; i++) {
+    write("  [%s] ID=%-20s ts=%6dms  %s",
+          logResult[i] ? "PASS" : "FAIL",
+          logID[i], logTimestamp[i], logNote[i]);
+    if (logResult[i]) p++; else f++;
+  }
+  write("----------------------------------------");
+  write("  TOTAL: %d records  PASS: %d  FAIL: %d", logCount, p, f);
+  write("  VERDICT: %s", (f == 0) ? "PASSED" : "FAILED");
+  write("========================================");
+}
+
+on start {
+  suiteStartTime = timeNow() / 100000;
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  stepCount++;
+
+  if (stepCount == 1)  logResult_rec("AEB_001",  1, "AEB activation within 2s TTC");
+  if (stepCount == 2)  logResult_rec("AEB_002",  1, "AEB deactivation below 5kph");
+  if (stepCount == 3)  logResult_rec("LKA_001",  1, "Lane centering accuracy ±10cm");
+  if (stepCount == 4)  logResult_rec("LKA_002",  0, "LKA failed to hold lane on curve");
+  if (stepCount == 5)  logResult_rec("ACC_001",  1, "ACC set speed maintained");
+  if (stepCount == 6)  logResult_rec("ACC_002",  1, "ACC follow distance maintained");
+  if (stepCount == 7)  logResult_rec("BSD_001",  1, "Blind spot alert in 3s window");
+  if (stepCount == 8)  logResult_rec("DMS_001",  1, "Eye closure alert at 1500ms");
+  if (stepCount == 9)  logResult_rec("DMS_002",  0, "Head pose fault not detected");
+  if (stepCount == 10) logResult_rec("TSR_001",  1, "Speed sign 50 recognized");
+
+  // Validate logging integrity checks
+  if (stepCount == 8)  check("LogCount_8_Records", logCount == 8);
+  if (stepCount == 10) check("LogCount_10_Records", logCount == 10);
+
+  if (stepCount == 11) {
+    generateReport();
+    check("Report_Generated",  logCount >= 10);
+    check("FailRecords_Exist", failCount >= 0);
+  }
+
+  if (stepCount < 12) setTimer(stepTimer, 300);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}

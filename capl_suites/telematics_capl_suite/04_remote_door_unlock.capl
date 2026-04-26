@@ -1,0 +1,103 @@
+/*
+ * File   : 04_remote_door_unlock.capl
+ * Purpose: Send unlock cmd 0x02, verify RemoteAck done, resend protection (no duplicate exec)
+ * CAN IDs: 0x604 RemoteCmd, 0x605 RemoteAck
+ */
+
+variables {
+  message 0x604 RemoteCmd;
+  message 0x605 RemoteAck;
+  msTimer stepTimer;
+  int passCount     = 0;
+  int failCount     = 0;
+  int testStep      = 0;
+  int ackCount      = 0;
+  int lastAckStatus = -1;
+  int lastCmdEcho   = -1;
+  int faultCode     = 0;
+  dword cmdTime     = 0;
+  dword doneTime    = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 04_remote_door_unlock: Remote Unlock & Resend Protection Test ===");
+  passCount = 0; failCount = 0; testStep = 0; ackCount = 0;
+  setTimer(stepTimer, 1000);
+}
+
+on msTimer stepTimer {
+  testStep++;
+  switch (testStep) {
+    case 1:
+      write("[STEP 1] Pre-condition: TCU online, doors currently locked");
+      {
+        message 0x600 TCU_Status;
+        TCU_Status.byte(0) = 1; TCU_Status.byte(1) = 75;
+        output(TCU_Status);
+      }
+      setTimer(stepTimer, 1000);
+      break;
+    case 2:
+      write("[STEP 2] Send UNLOCK cmd first time (byte0=0x02, auth=0xBB)");
+      RemoteCmd.byte(0) = 0x02; RemoteCmd.byte(1) = 0xBB;
+      cmdTime = timeNow() / 100000;
+      output(RemoteCmd);
+      setTimer(stepTimer, 1500);
+      break;
+    case 3:
+      write("[STEP 3] ECU processing → done ACK for unlock");
+      RemoteAck.byte(0) = 0x02; RemoteAck.byte(1) = 2; RemoteAck.byte(2) = 0x00;
+      doneTime = timeNow() / 100000;
+      output(RemoteAck);
+      setTimer(stepTimer, 1000);
+      break;
+    case 4:
+      write("[STEP 4] Verify first unlock ACK = done (2), cmd_echo = 0x02");
+      check("First unlock ACK received",             ackCount >= 1);
+      check("Unlock ACK status = done (2)",          lastAckStatus == 2);
+      check("Unlock ACK cmd_echo = 0x02",            lastCmdEcho == 0x02);
+      check("Unlock completed within 5s",            (doneTime - cmdTime) <= 5000);
+      setTimer(stepTimer, 1000);
+      break;
+    case 5:
+      write("[STEP 5] Resend same UNLOCK cmd within guard window");
+      RemoteCmd.byte(0) = 0x02; RemoteCmd.byte(1) = 0xBB;
+      output(RemoteCmd);
+      setTimer(stepTimer, 1500);
+      break;
+    case 6:
+      write("[STEP 6] ECU returns error for duplicate unlock (byte1=3, fault=0x05)");
+      RemoteAck.byte(0) = 0x02; RemoteAck.byte(1) = 3; RemoteAck.byte(2) = 0x05;
+      output(RemoteAck);
+      setTimer(stepTimer, 1000);
+      break;
+    case 7:
+      write("[STEP 7] Verify duplicate unlock rejected with error state");
+      check("Duplicate unlock rejected (status=3)", lastAckStatus == 3);
+      check("Fault code present for duplicate",     RemoteAck.byte(2) != 0x00);
+      setTimer(stepTimer, 1000);
+      break;
+    case 8:
+      write("[STEP 8] Confirm exactly 2 ACK messages processed (first+duplicate)");
+      check("Exactly 2 ACKs received (1 done + 1 error)", ackCount == 2);
+      break;
+    default:
+      break;
+  }
+}
+
+on message 0x605 {
+  ackCount++;
+  lastAckStatus = this.byte(1);
+  lastCmdEcho   = this.byte(0);
+  faultCode     = this.byte(2);
+}
+
+on stopMeasurement {
+  write("=== RESULT: PASS=%d  FAIL=%d ===", passCount, failCount);
+}

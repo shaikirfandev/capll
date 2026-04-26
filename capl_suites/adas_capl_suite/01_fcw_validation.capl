@@ -1,0 +1,174 @@
+/*
+ * 01_fcw_validation.capl
+ * Forward Collision Warning (FCW) Validation
+ * Tests: Warning activation thresholds, TTC calculation, level escalation, deactivation
+ * Standard: Euro NCAP AEB City / Highway Test Protocol
+ */
+
+includes { }
+
+variables {
+  message 0x308 RadarObj;          // Radar object: distance + relative speed
+  message 0x100 VehicleSpeed;      // Host vehicle speed
+  message 0x300 FCW_Status;        // FCW output message
+
+  msTimer  ttcTimer;
+  msTimer  testStepTimer;
+
+  float  hostSpeed_kmh    = 80.0;
+  float  targetDist_m     = 100.0;
+  float  relSpeed_kmh     = 0.0;
+  float  ttc_s            = 0.0;
+  int    fcw_level        = 0;
+  int    testStep         = 0;
+  int    passCount        = 0;
+  int    failCount        = 0;
+
+  // Test thresholds (OEM spec)
+  float  TTC_WARN1        = 4.0;   // FCW Level 1 (visual only)
+  float  TTC_WARN2        = 2.5;   // FCW Level 2 (visual + audio)
+  float  TTC_WARN3        = 1.5;   // FCW Level 3 (haptic + pre-charge brakes)
+}
+
+/*──────────────────────────────────────────*/
+/* Utility: send radar object message       */
+/*──────────────────────────────────────────*/
+void sendRadarObject(float dist_m, float relSpd_kmh) {
+  int raw_dist  = (int)(dist_m  * 10);
+  int raw_speed = (int)((relSpd_kmh + 128.0) * 10);  // offset encoded
+  RadarObj.dlc        = 8;
+  RadarObj.byte(0)    = (raw_dist >> 8) & 0xFF;
+  RadarObj.byte(1)    = raw_dist & 0xFF;
+  RadarObj.byte(2)    = (raw_speed >> 8) & 0xFF;
+  RadarObj.byte(3)    = raw_speed & 0xFF;
+  RadarObj.byte(4)    = 0x01;  // Object valid flag
+  output(RadarObj);
+}
+
+void sendHostSpeed(float spd_kmh) {
+  int raw = (int)(spd_kmh * 10);
+  VehicleSpeed.dlc    = 8;
+  VehicleSpeed.byte(0) = (raw >> 8) & 0xFF;
+  VehicleSpeed.byte(1) = raw & 0xFF;
+  output(VehicleSpeed);
+}
+
+float calcTTC(float dist_m, float relSpd_kmh) {
+  float relSpd_ms = relSpd_kmh / 3.6;
+  if (relSpd_ms <= 0.0) return 99.9;
+  return dist_m / relSpd_ms;
+}
+
+void logResult(char testName[], int pass) {
+  if (pass) {
+    write("[PASS] %s", testName);
+    passCount++;
+  } else {
+    write("[FAIL] %s", testName);
+    failCount++;
+  }
+}
+
+/*──────────────────────────────────────────*/
+on start {
+  write("=== FCW Validation Suite Started ===");
+  write("Host Speed: %.1f km/h | Target Initial Dist: %.1f m", hostSpeed_kmh, targetDist_m);
+  sendHostSpeed(hostSpeed_kmh);
+  testStep = 0;
+  setTimer(testStepTimer, 500);
+}
+
+/*──────────────────────────────────────────*/
+on timer testStepTimer {
+  float closingSpeed;
+
+  testStep++;
+  switch(testStep) {
+
+    case 1:
+      // Step 1: No warning – TTC = 8s (far target)
+      closingSpeed = 36.0;  // 10 m/s closing
+      targetDist_m = calcTTC(8.0, closingSpeed) * (closingSpeed/3.6);  // dist for TTC=8
+      sendRadarObject(targetDist_m, closingSpeed);
+      write("[STEP 1] TTC=8s: Expect NO warning");
+      setTimer(testStepTimer, 1500);
+      break;
+
+    case 2:
+      // Step 2: FCW Level 1 – TTC crossing 4.0s
+      closingSpeed = 36.0;
+      targetDist_m = TTC_WARN1 * (closingSpeed / 3.6);  // dist for TTC_WARN1
+      sendRadarObject(targetDist_m, closingSpeed);
+      write("[STEP 2] TTC=4.0s: Expect FCW Level 1 (visual)");
+      setTimer(testStepTimer, 1500);
+      break;
+
+    case 3:
+      // Step 3: FCW Level 2 – TTC 2.5s
+      closingSpeed = 36.0;
+      targetDist_m = TTC_WARN2 * (closingSpeed / 3.6);
+      sendRadarObject(targetDist_m, closingSpeed);
+      write("[STEP 3] TTC=2.5s: Expect FCW Level 2 (audio+visual)");
+      setTimer(testStepTimer, 1500);
+      break;
+
+    case 4:
+      // Step 4: FCW Level 3 – TTC 1.5s
+      closingSpeed = 36.0;
+      targetDist_m = TTC_WARN3 * (closingSpeed / 3.6);
+      sendRadarObject(targetDist_m, closingSpeed);
+      write("[STEP 4] TTC=1.5s: Expect FCW Level 3 (haptic+brake pre-charge)");
+      setTimer(testStepTimer, 1500);
+      break;
+
+    case 5:
+      // Step 5: Speed below activation threshold (< 10 km/h)
+      sendHostSpeed(8.0);
+      sendRadarObject(5.0, 30.0);  // Very close target
+      write("[STEP 5] Speed=8 km/h: FCW must NOT activate below 10 km/h");
+      setTimer(testStepTimer, 1500);
+      break;
+
+    case 6:
+      // Step 6: Object not in path – no warning
+      sendHostSpeed(80.0);
+      sendRadarObject(30.0, -20.0);  // Target moving away (negative closing)
+      write("[STEP 6] Target moving away: No FCW warning expected");
+      setTimer(testStepTimer, 1000);
+      break;
+
+    case 7:
+      write("=== FCW Test Complete | PASS=%d FAIL=%d ===", passCount, failCount);
+      break;
+  }
+}
+
+/*──────────────────────────────────────────*/
+on message 0x300 {  // FCW_Status response
+  fcw_level = this.byte(0) & 0x03;
+  ttc_s     = ((this.byte(1) * 256) + this.byte(2)) / 10.0;
+
+  write("[FCW RX] Level=%d | TTC=%.2f s", fcw_level, ttc_s);
+
+  // Validate based on current test step
+  switch(testStep) {
+    case 1: logResult("FCW_NoWarn_TTC8s",  fcw_level == 0); break;
+    case 2: logResult("FCW_Level1_TTC4s",  fcw_level >= 1); break;
+    case 3: logResult("FCW_Level2_TTC2p5s",fcw_level >= 2); break;
+    case 4: logResult("FCW_Level3_TTC1p5s",fcw_level >= 3); break;
+    case 5: logResult("FCW_Inhibit_LowSpd",fcw_level == 0); break;
+    case 6: logResult("FCW_NoWarn_AwayObj",fcw_level == 0); break;
+  }
+}
+
+on key 'r' {
+  write("--- FCW Manual Reset ---");
+  testStep  = 0;
+  passCount = 0;
+  failCount = 0;
+  setTimer(testStepTimer, 500);
+}
+
+on stopMeasurement {
+  write("=== FCW Suite Summary: PASS=%d | FAIL=%d ===", passCount, failCount);
+}

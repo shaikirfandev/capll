@@ -1,0 +1,107 @@
+/*
+ * File   : 07_phone_call_handling.capl
+ * Purpose: Validate incoming ring, answer, hold, resume, mute, end call, missed call
+ * Tests  : TC01 Ringing, TC02 Answer, TC03 Hold, TC04 Resume, TC05 Mute, TC06 End, TC07 Missed call
+ * Author : Infotainment CAPL Suite
+ * Date   : 2026-04-26
+ */
+
+includes {}
+
+variables {
+  message 0x405 msg_Call;
+  msTimer stepTimer;
+
+  byte g_rxCallState = 0;
+  int  g_step        = 0;
+  int  g_pass        = 0;
+  int  g_fail        = 0;
+
+  const byte CALL_IDLE    = 0;
+  const byte CALL_RINGING = 1;
+  const byte CALL_ACTIVE  = 2;
+  const byte CALL_HOLD    = 3;
+}
+
+on start {
+  write("=== TC: Phone Call Handling ===");
+  g_step = 1;
+  setTimer(stepTimer, 300);
+}
+
+on timer stepTimer {
+  switch (g_step) {
+    case 1:
+      write("[STEP 1] Incoming ring");
+      msg_Call.byte(0) = CALL_RINGING;
+      output(msg_Call);
+      g_step = 2; setTimer(stepTimer, 500); break;
+
+    case 2:
+      write("[STEP 2] Answer call");
+      msg_Call.byte(0) = CALL_ACTIVE;
+      output(msg_Call);
+      g_step = 3; setTimer(stepTimer, 500); break;
+
+    case 3:
+      write("[STEP 3] Hold call");
+      msg_Call.byte(0) = CALL_HOLD;
+      output(msg_Call);
+      g_step = 4; setTimer(stepTimer, 500); break;
+
+    case 4:
+      write("[STEP 4] Resume call");
+      msg_Call.byte(0) = CALL_ACTIVE;
+      output(msg_Call);
+      g_step = 5; setTimer(stepTimer, 400); break;
+
+    case 5:
+      write("[STEP 5] Mute call (in-call mute flag – byte1=1)");
+      msg_Call.byte(0) = CALL_ACTIVE;
+      msg_Call.byte(1) = 1;
+      output(msg_Call);
+      g_step = 6; setTimer(stepTimer, 400); break;
+
+    case 6:
+      write("[STEP 6] End call");
+      msg_Call.byte(0) = CALL_IDLE;
+      msg_Call.byte(1) = 0;
+      output(msg_Call);
+      g_step = 7; setTimer(stepTimer, 400); break;
+
+    case 7:
+      write("[STEP 7] Missed call – ring then return to idle");
+      msg_Call.byte(0) = CALL_RINGING;
+      output(msg_Call);
+      setTimer(stepTimer, 300);
+      g_step = 8; break;
+
+    case 8:
+      msg_Call.byte(0) = CALL_IDLE;
+      output(msg_Call);
+      write("         Call not answered – missed call scenario");
+      g_step = 0; break;
+  }
+}
+
+on message 0x405 {
+  g_rxCallState = this.byte(0);
+  write("[RX] Call_Status = %d", g_rxCallState);
+  switch (g_rxCallState) {
+    case CALL_RINGING: check("CallRinging", 1); break;
+    case CALL_ACTIVE:  check("CallActive",  1); break;
+    case CALL_HOLD:    check("CallHold",    1); break;
+    case CALL_IDLE:    check("CallIdle",    1); break;
+    default:           check("CallUnknown", 0); break;
+  }
+}
+
+void check(char name[], int result) {
+  if (result) { write("[PASS] %s", name); g_pass++; }
+  else         { write("[FAIL] %s", name); g_fail++; }
+}
+
+on stopMeasurement {
+  write("=== Phone Call Handling Summary ===");
+  write("PASS: %d  FAIL: %d", g_pass, g_fail);
+}

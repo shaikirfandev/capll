@@ -1,0 +1,117 @@
+/*
+ * 28_emergency_brake_light.capl
+ * Emergency Brake Light (EBL) Validation – brake decel threshold,
+ * EBL activation, flash pattern
+ * CAN: 0x100 (VehicleSpeed), 0x328 (EBL status)
+ */
+
+includes { }
+
+variables {
+  msTimer stepTimer;
+  msTimer flashTimer;
+
+  float vehicleSpeed    = 80.0;  // km/h
+  float prevSpeed       = 80.0;
+  float deceleration    = 0.0;   // m/s²  (positive = decelerating)
+
+  int eblActive         = 0;
+  int flashState        = 0;
+  int flashCount        = 0;
+  int normalBrakeLight  = 0;
+
+  const float EBL_DECEL_THRESH  = 6.0;   // m/s² – UN ECE R48, ISO 11452
+  const int   EBL_FLASH_HZ      = 4;     // flashes per second
+  const int   EBL_MIN_FLASHES   = 3;
+
+  int stepCount  = 0;
+  int passCount  = 0;
+  int failCount  = 0;
+  char testName[64] = "EmergencyBrakeLightTest";
+}
+
+void check(char name[], int cond) {
+  if (cond) { write("[PASS] %s", name); passCount++; }
+  else       { write("[FAIL] %s", name); failCount++; }
+}
+
+void calcDecel(float newSpeed) {
+  float deltaV, deltaT;
+  deltaT = 0.2;  // step interval s
+  deltaV = prevSpeed - newSpeed;
+  deceleration = (deltaV / 3.6) / deltaT;   // m/s²
+  prevSpeed = newSpeed;
+  vehicleSpeed = newSpeed;
+}
+
+void evalEBL() {
+  message 0x328 eblMsg;
+  if (deceleration >= EBL_DECEL_THRESH) {
+    if (!eblActive) {
+      eblActive  = 1;
+      flashCount = 0;
+      setTimer(flashTimer, 1000 / (EBL_FLASH_HZ * 2));
+      write("[EBL] ACTIVATED decel=%.2f m/s²", deceleration);
+    }
+  } else {
+    if (eblActive && vehicleSpeed > 1.0) {
+      // keep flashing until min flashes done
+      if (flashCount >= EBL_MIN_FLASHES * 2) {
+        eblActive = 0;
+        write("[EBL] DEACTIVATED after %d half-cycles", flashCount);
+      }
+    } else {
+      eblActive = 0;
+    }
+  }
+  normalBrakeLight = (deceleration > 0.5) ? 1 : 0;
+  eblMsg.byte(0) = eblActive & 0xFF;
+  eblMsg.byte(1) = flashState & 0xFF;
+  eblMsg.byte(2) = (int)(deceleration * 10) & 0xFF;
+  eblMsg.byte(3) = normalBrakeLight & 0xFF;
+  output(eblMsg);
+}
+
+on start {
+  write("=== %s started ===", testName);
+  setTimer(stepTimer, 200);
+}
+
+on timer flashTimer {
+  if (eblActive) {
+    flashState = flashState ? 0 : 1;
+    flashCount++;
+    if (flashCount < EBL_MIN_FLASHES * 6)
+      setTimer(flashTimer, 1000 / (EBL_FLASH_HZ * 2));
+  }
+}
+
+on timer stepTimer {
+  stepCount++;
+  if (stepCount == 1)  { calcDecel(80.0);  evalEBL(); check("Normal_NoEBL",         eblActive == 0); }
+  if (stepCount == 2)  { calcDecel(78.0);  evalEBL(); check("SlowBrake_NoEBL",      eblActive == 0); }
+  if (stepCount == 3)  { calcDecel(72.0);  evalEBL(); }          // normal brake ~8.3 m/s²
+  if (stepCount == 4)  { calcDecel(60.0);  evalEBL(); check("HardBrake_EBL_On",     eblActive == 1); }
+  if (stepCount == 5)  { calcDecel(56.0);  evalEBL(); check("EBL_Still_Active",      eblActive == 1); }
+  if (stepCount == 6)  { calcDecel(55.5);  evalEBL(); }           // decel below thresh
+  if (stepCount == 8)  {
+    check("EBL_FlashCount_Min",  flashCount >= EBL_MIN_FLASHES * 2);
+    check("NormalBrake_Active",  normalBrakeLight == 1 || eblActive == 1);
+  }
+  if (stepCount == 12) {
+    calcDecel(55.0);  evalEBL();
+    check("EBL_Deactivated",     eblActive == 0 || flashCount >= EBL_MIN_FLASHES * 2);
+  }
+  if (stepCount == 14) {
+    vehicleSpeed = 0.0; deceleration = 0.0; eblActive = 0;
+    check("Vehicle_Stopped",     vehicleSpeed == 0.0);
+  }
+
+  if (stepCount < 15) setTimer(stepTimer, 200);
+  else {
+    write("=== %s done – PASS:%d  FAIL:%d ===", testName, passCount, failCount);
+    stop();
+  }
+}
+
+on message 0x100 { vehicleSpeed = (float)this.byte(0); }

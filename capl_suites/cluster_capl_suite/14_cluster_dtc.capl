@@ -1,0 +1,120 @@
+/*
+ * File   : 14_cluster_dtc.capl
+ * Purpose: Send UDS ReadDTCInformation (0x19 01 0F) request to cluster
+ *          ECU on ID 0x744; parse positive response on 0x74C and verify
+ *          DTC record count and status via cluster 0x550.
+ */
+
+variables {
+  message 0x744 UDS_Request;
+  message 0x74C UDS_Response;
+  message 0x550 ClusterStatus;
+  msTimer stepTimer;
+  msTimer timeoutTimer;
+
+  int  testStep    = 0;
+  int  passCount   = 0;
+  int  failCount   = 0;
+  byte lastLamp    = 0;
+  byte lastFault   = 0;
+  byte udsResp[8]  = {0,0,0,0,0,0,0,0};
+  int  gotResponse = 0;
+}
+
+void check(char n[], int c) {
+  if (c) { write("[PASS] %s", n); passCount++; }
+  else   { write("[FAIL] %s", n); failCount++; }
+}
+
+on start {
+  write("=== 14_cluster_dtc.capl STARTED ===");
+  testStep    = 0;
+  passCount   = 0;
+  failCount   = 0;
+  gotResponse = 0;
+  setTimer(stepTimer, 300);
+}
+
+on timer timeoutTimer {
+  if (!gotResponse) {
+    write("[WARN] UDS response timeout – no 0x74C received");
+    failCount++;
+  }
+}
+
+on timer stepTimer {
+  switch (testStep) {
+    case 0:
+      write("STEP 1: Send SingleFrame UDS 0x19 01 0F to 0x744");
+      UDS_Request.byte(0) = 0x03; /* length=3 */
+      UDS_Request.byte(1) = 0x19; /* ReadDTCInformation */
+      UDS_Request.byte(2) = 0x01; /* reportNumberOfDTCByStatusMask */
+      UDS_Request.byte(3) = 0x0F; /* statusMask: confirmed DTCs */
+      UDS_Request.byte(4) = 0x00;
+      UDS_Request.byte(5) = 0x00;
+      UDS_Request.byte(6) = 0x00;
+      UDS_Request.byte(7) = 0x00;
+      gotResponse = 0;
+      output(UDS_Request);
+      setTimer(timeoutTimer, 1000);
+      setTimer(stepTimer, 1200); testStep++; break;
+
+    case 1:
+      check("UDS 0x19 response received", gotResponse == 1);
+      check("UDS response SID = 0x59", udsResp[1] == 0x59);
+      write("STEP 2: Send DTC clear simulation (0x14 FF FF FF)");
+      UDS_Request.byte(0) = 0x04;
+      UDS_Request.byte(1) = 0x14;
+      UDS_Request.byte(2) = 0xFF;
+      UDS_Request.byte(3) = 0xFF;
+      UDS_Request.byte(4) = 0xFF;
+      gotResponse = 0;
+      output(UDS_Request);
+      setTimer(timeoutTimer, 1000);
+      setTimer(stepTimer, 1200); testStep++; break;
+
+    case 2:
+      check("DTC clear response received", gotResponse == 1);
+      check("DTC clear positive response (0x54)", udsResp[1] == 0x54);
+      write("STEP 3: Re-read DTCs – count should be 0");
+      UDS_Request.byte(0) = 0x03;
+      UDS_Request.byte(1) = 0x19;
+      UDS_Request.byte(2) = 0x01;
+      UDS_Request.byte(3) = 0x0F;
+      gotResponse = 0;
+      output(UDS_Request);
+      setTimer(timeoutTimer, 1000);
+      setTimer(stepTimer, 1200); testStep++; break;
+
+    case 3:
+      check("Post-clear DTC response received", gotResponse == 1);
+      check("DTC count=0 after clear", udsResp[4] == 0);
+      check("Cluster MIL OFF after DTC clear", (lastLamp & 0x01) == 0);
+      testStep++; break;
+
+    default:
+      write("Cluster DTC test complete.");
+      break;
+  }
+}
+
+on message 0x74C {
+  gotResponse = 1;
+  udsResp[0] = this.byte(0);
+  udsResp[1] = this.byte(1);
+  udsResp[2] = this.byte(2);
+  udsResp[3] = this.byte(3);
+  udsResp[4] = this.byte(4);
+  write("UDS Response 0x74C: %02X %02X %02X %02X %02X",
+        udsResp[0], udsResp[1], udsResp[2], udsResp[3], udsResp[4]);
+}
+
+on message 0x550 {
+  lastLamp  = this.byte(0);
+  lastFault = this.byte(2);
+}
+
+on stopMeasurement {
+  write("=== SUMMARY: 14_cluster_dtc ===");
+  write("PASS: %d  FAIL: %d  TOTAL: %d", passCount, failCount, passCount+failCount);
+}
