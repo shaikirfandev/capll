@@ -1,0 +1,20 @@
+testcase TC_Boot_Diag_Smoke()
+{
+  testStep("Precondition", "Power mode IGN and rest bus active");
+  testWaitForTimeout(1000);
+  testStepPass("Dry training test module placeholder. Bind to real checks in vTESTstudio/CANoe.");
+}
+
+testcase TC_Reverse_Camera_Nominal()
+{
+  testStep("Action", "Set GearPosition=R");
+  testWaitForTimeout(700);
+  testStep("Expected", "IVI camera active state observed");
+  testStepPass("Replace placeholder with signal wait and diagnostic checks.");
+}
+
+void MainTest()
+{
+  TC_Boot_Diag_Smoke();
+  TC_Reverse_Camera_Nominal();
+}

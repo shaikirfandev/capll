@@ -1,0 +1,41 @@
+{
+  "// comment": "Test environment — simulation mode, verbose logging, short timeouts",
+
+  "can": {
+    "interface":     "vcan0",
+    "loopback":      true
+  },
+
+  "uds": {
+    "p2_timeout_ms": 200,
+    "p2_star_ms":    1000
+  },
+
+  "telematics": {
+    "simulation_mode":        true,
+    "max_reconnect_attempts": 2,
+    "reconnect_delay_ms":     100,
+    "use_tls":                false
+  },
+
+  "engine": {
+    "parallel":           true,
+    "stop_on_first_fail": false,
+    "retry_delay_ms":     100
+  },
+
+  "logging": {
+    "log_dir":        "/tmp/tcu_test_logs",
+    "enable_console": true,
+    "console_level":  "debug",
+    "global_level":   "debug"
+  },
+
+  "reporting": {
+    "output_dir": "/tmp/tcu_test_reports"
+  },
+
+  "watchdog": {
+    "enabled": false
+  }
+}

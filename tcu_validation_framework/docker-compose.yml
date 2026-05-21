@@ -1,0 +1,87 @@
+version: "3.9"
+
+# =============================================================================
+# docker-compose.yml — TCU Validation Framework full stack
+# =============================================================================
+
+services:
+
+  # -------------------------------------------------------
+  # MQTT Broker (for telematics simulation)
+  # -------------------------------------------------------
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: tcu-mqtt
+    ports:
+      - "1883:1883"
+      - "8883:8883"
+      - "9001:9001"
+    volumes:
+      - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt-data:/mosquitto/data
+      - mqtt-log:/mosquitto/log
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "health", "-m", "ok"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # -------------------------------------------------------
+  # TCU Validator (main service)
+  # -------------------------------------------------------
+  tcu-validator:
+    build:
+      context: .
+      target: runtime
+    container_name: tcu-validator
+    image: tcu-validation-framework:latest
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+    environment:
+      TCU_CFG_TELEMATICS_SERVER_URL: "mqtt://mqtt-broker:1883"
+      TCU_CFG_TELEMATICS_SIMULATION_MODE: "false"
+      TCU_CFG_CAN_INTERFACE: "vcan0"
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./firmware:/app/firmware:ro
+      - reports:/app/reports
+      - logs:/app/logs
+    cap_add:
+      - NET_ADMIN   # Required for SocketCAN
+    devices:
+      - /dev/net/tun
+    command: ["--config", "/app/configs/default.json", "--simulate", "--verbose"]
+    restart: on-failure:3
+
+  # -------------------------------------------------------
+  # Test runner (exit container pattern)
+  # -------------------------------------------------------
+  tcu-test:
+    build:
+      context: .
+      target: test
+    container_name: tcu-test
+    depends_on:
+      - mqtt-broker
+    environment:
+      TCU_CFG_TELEMATICS_SIMULATION_MODE: "true"
+    volumes:
+      - reports:/build/reports
+    command: |
+      modprobe vcan || true &&
+      ip link add dev vcan0 type vcan || true &&
+      ip link set up vcan0 &&
+      build/test/bin/unit_tests --gtest_output=xml:/build/reports/unit_tests.xml &&
+      build/test/bin/integration_tests --gtest_output=xml:/build/reports/integration_tests.xml
+    cap_add:
+      - NET_ADMIN
+    profiles:
+      - test
+
+volumes:
+  mqtt-data:
+  mqtt-log:
+  reports:
+  logs:

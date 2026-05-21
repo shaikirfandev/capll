@@ -1,0 +1,6 @@
+TestID,Profile,Type,Precondition,Stimulus,Expected,KPI,Evidence
+BT-PAIR-001,HFP/A2DP/PBAP,Functional,No paired devices,Pair reference Android phone,All selected profiles connected,Within 60s,logcat BT snoop screen
+BT-REC-002,A2DP,Recovery,Phone paired and connected,Ignition off sleep wake,Auto reconnect and playback resumes,Within 30s,CAN trace logcat audio evidence
+BT-CALL-003,HFP,Functional,Phone connected,Incoming call accept via SWC,Call audio routed to vehicle,Within 2s,HFP logs audio capture
+BT-PBAP-004,PBAP,Boundary,Phonebook 5000 contacts,Start contact sync,No ANR and contacts searchable,Within agreed KPI,logcat meminfo
+BT-STRESS-005,A2DP,Stress,Phone paired,500 connect disconnect cycles,No permanent profile failure,Failure rate below threshold,automation report BT snoop

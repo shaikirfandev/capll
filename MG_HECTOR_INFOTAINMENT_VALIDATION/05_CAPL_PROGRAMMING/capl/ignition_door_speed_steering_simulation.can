@@ -1,0 +1,51 @@
+variables
+{
+  msTimer t10ms;
+  msTimer t20ms;
+  int powerMode = 0;
+  int doorOpen = 0;
+  int swcKey = 0;
+  long speedRaw = 0;
+}
+
+on start
+{
+  setTimer(t10ms, 10);
+  setTimer(t20ms, 20);
+  write("MG Hector-style IVI vehicle signal simulator started");
+}
+
+on timer t10ms
+{
+  message BCM_PowerMode pwr;
+  pwr.PowerMode = powerMode;
+  output(pwr);
+
+  message BCM_DoorStatus door;
+  door.DriverDoorAjar = doorOpen;
+  output(door);
+
+  setTimer(t10ms, 10);
+}
+
+on timer t20ms
+{
+  message VCU_VehicleSpeed spd;
+  spd.VehicleSpeed_kph = speedRaw;
+  output(spd);
+  setTimer(t20ms, 20);
+}
+
+void sendSwc(int keyCode, int durationMs)
+{
+  message SWC_Buttons btn;
+  btn.SWC_KeyCode = keyCode;
+  btn.PressDuration_ms = durationMs;
+  output(btn);
+}
+
+on key 'i' { powerMode = 2; }
+on key 'o' { powerMode = 0; speedRaw = 0; }
+on key 'd' { doorOpen = !doorOpen; }
+on key '+' { sendSwc(0x10, 100); }    // volume up short press
+on key 'v' { sendSwc(0x40, 1200); }   // voice long press

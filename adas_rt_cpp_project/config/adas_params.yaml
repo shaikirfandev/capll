@@ -1,0 +1,61 @@
+# ADAS Algorithm Parameters
+# These are loaded at startup and can be hot-reloaded in debug builds.
+
+ego:
+  default_cruise_speed_kmh: 120
+  lane_width_m: 3.7
+
+perception:
+  camera:
+    min_confidence: 0.40
+    fx: 718.8
+    fy: 718.8
+    cx: 607.5
+    cy: 185.2
+    extrinsic:
+      tx: 1.5   # [m] forward from rear axle
+      ty: 0.0
+      tz: 1.2   # [m] above ground
+      roll: 0.0
+      pitch: 0.0
+      yaw: 0.0
+
+  radar:
+    min_confidence: 0.30
+    max_range_m: 200.0
+    min_range_m: 0.5
+    extrinsic:
+      tx: 2.5
+      ty: 0.0
+      tz: 0.5
+      roll: 0.0
+      pitch: 0.0
+      yaw: 0.0
+
+fusion:
+  sigma_acceleration: 0.5    # [m/s²] process noise
+  sigma_camera:       0.3    # [m]    camera measurement noise
+  sigma_radar:        1.0    # [m]    radar measurement noise
+  gate_threshold:     9.0    # chi-squared at 99%
+  confirm_hits:       3
+  max_misses:         5
+
+planning:
+  aeb_ttc_threshold_s:    1.5
+  acc_headway_s:          2.5
+  max_decel_g:            0.8
+  max_accel_mps2:         2.5
+  plan_horizon_s:         3.0
+  num_waypoints:          30
+
+control:
+  pid_kp:         1.0
+  pid_ki:         0.05
+  pid_kd:         0.1
+  stanley_k:      0.5
+  max_steer_deg:  35.0
+  anti_windup_limit_mps_s: 5.0
+
+diagnostics:
+  log_level: DEBUG          # TRACE | DEBUG | INFO | WARNING | ERROR | FATAL
+  log_file: /var/log/adas/adas_rt.log

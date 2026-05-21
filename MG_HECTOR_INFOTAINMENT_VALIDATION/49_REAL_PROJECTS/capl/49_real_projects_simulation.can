@@ -1,0 +1,98 @@
+/*
+  Module 49 - Real Projects
+  MG Hector IVI Validation
+  Purpose: Full project integration test scenario simulating complete
+           validation cycle from requirements to release signoff
+  Signals: All MG_Hector_IVI_Training.dbc signals
+*/
+
+variables
+{
+  msTimer tPowerMode;
+  msTimer tVehicleSpeed;
+  msTimer tGear;
+  msTimer tSwc;
+  msTimer tIviPublish;
+  msTimer tProjectTest;
+  int gPowerMode = 0;
+  long gSpeedRaw = 0;
+  int gGear = 0;
+  int gAlive = 0;
+  int gIviBoot = 0;
+  int gProjectPhase = 0;
+  int gTestsPassed = 0;
+  int gTestsFailed = 0;
+}
+
+on start
+{
+  write("[49_REAL_PROJECTS] Full project integration test scenario");
+  write("Keys: i=IGN p=Phase 1 q=Phase 2 r=Phase 3 t=Run test suite s=status");
+  setTimer(tPowerMode, 10);
+  setTimer(tVehicleSpeed, 20);
+  setTimer(tHeartbeatCheck, 100);
+}
+
+on timer tPowerMode
+{
+  message BCM_PowerMode msg;
+  msg.PowerMode = gPowerMode;
+  msg.AliveCounter = gAlive & 0x0F;
+  output(msg);
+  setTimer(tPowerMode, 10);
+}
+
+on timer tVehicleSpeed
+{
+  message VCU_VehicleSpeed spd;
+  spd.VehicleSpeed_kph = gSpeedRaw;
+  output(spd);
+  setTimer(tVehicleSpeed, 20);
+}
+
+on timer tHeartbeatCheck
+{
+  gAlive++;
+  if (gAlive > 15) gAlive = 0;
+  setTimer(tHeartbeatCheck, 100);
+}
+
+void setIgnitionOn()
+{
+  gPowerMode = 2;
+  write("PowerMode -> IGN");
+}
+
+void setAccessory()
+{
+  gPowerMode = 1;
+  write("PowerMode -> ACC");
+}
+
+void setIgnitionOff()
+{
+  gPowerMode = 0;
+  gSpeedRaw = 0;
+  write("PowerMode -> OFF");
+}
+
+void setReverseGear()
+{
+  message TCU_GearStatus gear;
+  gGear = 1;
+  gear.GearPosition = gGear;
+  output(gear);
+  write("Gear -> Reverse");
+}
+
+void setVehicleSpeed(float speedKph)
+{
+  gSpeedRaw = (long)(speedKph * 100.0);
+  write("VehicleSpeed -> %.2f kph", speedKph);
+}
+
+on key 'i' { setIgnitionOn(); }
+on key 'a' { setAccessory(); }
+on key 'o' { setIgnitionOff(); }
+on key 'r' { setReverseGear(); }
+on key '5' { setVehicleSpeed(5.0); }

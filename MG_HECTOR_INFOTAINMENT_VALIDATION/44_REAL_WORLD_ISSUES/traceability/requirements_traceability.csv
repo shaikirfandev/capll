@@ -1,0 +1,5 @@
+RequirementID,Requirement,TestID,Evidence,Status,DefectID
+REQ-IVI-BOOT-001,IVI shall publish heartbeat after ignition,TC_SMOKE_001,logs/sample_can.asc,Not Run,
+REQ-IVI-FEAT-001,Feature shall react to valid signal,TC_FUNC_001,report template,Not Run,
+REQ-IVI-DIAG-001,ECU shall report DTC for missing required signal,TC_NEG_001,UDS readout,Not Run,
+REQ-IVI-PERF-001,Feature response shall meet KPI,TC_BOUND_001,performance report,Not Run,

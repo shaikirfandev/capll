@@ -1,0 +1,148 @@
+name: Bluetooth Firmware CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CMAKE_VERSION: "3.28.0"
+  BUILD_DIR: build
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-and-test:
+    name: "${{ matrix.build_type }} / ${{ matrix.sanitizer }}"
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+        sanitizer: [none, asan, tsan]
+        exclude:
+          # TSan + Release is unusual; keep matrix small
+          - build_type: Release
+            sanitizer: tsan
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            gcc-12 g++-12 cmake ninja-build \
+            cppcheck clang-tidy lcov \
+            libssl-dev
+
+      - name: Configure CMake
+        run: |
+          cmake_flags=(
+            -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}"
+            -DBT_ENABLE_TESTS=ON
+            -GNinja
+          )
+          if [[ "${{ matrix.sanitizer }}" == "asan" ]]; then
+            cmake_flags+=(-DBT_ASAN=ON)
+          elif [[ "${{ matrix.sanitizer }}" == "tsan" ]]; then
+            cmake_flags+=(-DBT_TSAN=ON)
+          fi
+          cmake -B "$BUILD_DIR" "${cmake_flags[@]}"
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel
+
+      - name: Run unit tests
+        run: |
+          cd "$BUILD_DIR"
+          ctest --test-dir tests/unit -V --output-on-failure --timeout 120
+
+      - name: Run integration tests
+        run: |
+          cd "$BUILD_DIR"
+          ctest --test-dir tests/integration -V --output-on-failure --timeout 120
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            gcc-12 g++-12 cmake ninja-build lcov
+
+      - name: Configure with coverage
+        run: |
+          cmake -B "$BUILD_DIR" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBT_ENABLE_TESTS=ON \
+            -DBT_COVERAGE=ON \
+            -GNinja
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel
+
+      - name: Run tests
+        run: ctest --test-dir "$BUILD_DIR" -V --output-on-failure
+
+      - name: Collect coverage
+        run: |
+          lcov --capture --directory "$BUILD_DIR" \
+               --output-file coverage.info \
+               --gcov-tool gcov-12 \
+               --ignore-errors mismatch
+          lcov --remove coverage.info \
+               '/usr/*' '*/tests/*' '*/build/*' \
+               --output-file coverage_filtered.info
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage_filtered.info
+          flags: unittests
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cppcheck clang-tidy cmake ninja-build g++
+
+      - name: cppcheck
+        run: |
+          cppcheck \
+            --error-exitcode=1 \
+            --enable=warning,style,performance,portability \
+            --suppress=missingIncludeSystem \
+            --suppress=unmatchedSuppression \
+            -I include \
+            src/ 2>&1 | tee cppcheck_report.txt
+
+      - name: Configure for clang-tidy
+        run: |
+          cmake -B "$BUILD_DIR" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -GNinja
+
+      - name: clang-tidy
+        run: |
+          find src -name '*.cpp' | xargs clang-tidy \
+            -p "$BUILD_DIR" \
+            --config-file=.clang-tidy \
+            -- -std=c++17 2>&1 | tee clang_tidy_report.txt || true

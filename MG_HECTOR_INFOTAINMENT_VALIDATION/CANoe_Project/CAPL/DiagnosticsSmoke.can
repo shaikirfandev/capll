@@ -1,0 +1,16 @@
+/* Diagnostic smoke sequence. Bind diagnostic objects in CANoe Diagnostics Console. */
+
+void DiagSmoke_PrintPlan()
+{
+  write("1. Default session 10 01");
+  write("2. Extended session 10 03");
+  write("3. Read SW DID 22 F1 80");
+  write("4. Read VIN DID 22 F1 90");
+  write("5. Read DTC 19 02 FF");
+}
+
+on key 'u'
+{
+  DiagSmoke_PrintPlan();
+  write("Execute via CANoe Diagnostic Console or vTESTstudio diagnostic keywords.");
+}

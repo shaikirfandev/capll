@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<systemvariables version="4">
+  <namespace name="MGH_IVI_Bench">
+    <variable anlyzLocal="2" readOnly="false" valueSequence="false" unit="" name="PowerMode" type="int" bitcount="32" />
+    <variable anlyzLocal="2" readOnly="false" valueSequence="false" unit="" name="GearPosition" type="int" bitcount="32" />
+    <variable anlyzLocal="2" readOnly="false" valueSequence="false" unit="kph" name="VehicleSpeed" type="float" />
+    <variable anlyzLocal="2" readOnly="false" valueSequence="false" unit="" name="DriverDoorAjar" type="int" bitcount="32" />
+    <variable anlyzLocal="2" readOnly="false" valueSequence="false" unit="" name="CameraFaultInjection" type="int" bitcount="32" />
+  </namespace>
+</systemvariables>

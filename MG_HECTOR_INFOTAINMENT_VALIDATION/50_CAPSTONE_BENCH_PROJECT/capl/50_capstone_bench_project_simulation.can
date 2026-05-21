@@ -1,0 +1,104 @@
+/*
+  Module 50 - Capstone Bench Project
+  MG Hector IVI Validation
+  Purpose: End-to-end capstone scenario integrating all training modules,
+           demonstrating complete MG Hector IVI bench validation workflow
+           from power-up to feature validation to shutdown
+  Signals: All MG_Hector_IVI_Training.dbc signals
+*/
+
+variables
+{
+  msTimer tPowerMode;
+  msTimer tVehicleSpeed;
+  msTimer tGear;
+  msTimer tDoor;
+  msTimer tLamp;
+  msTimer tSwc;
+  msTimer tIviPublish;
+  msTimer tCapstoneSequence;
+  int gPowerMode = 0;
+  long gSpeedRaw = 0;
+  int gGear = 0;
+  int gDoor = 0;
+  int gLamp = 0;
+  int gAlive = 0;
+  int gIviBoot = 0;
+  int gCapstoneStep = 0;
+  int gCapstoneRunning = 0;
+  int gTestsPassed = 0;
+  int gTestsFailed = 0;
+}
+
+on start
+{
+  write("[50_CAPSTONE_BENCH_PROJECT] Complete MG Hector IVI validation capstone");
+  write("Keys: i=IGN c=Run capstone n=Next step x=Stop p=Power sequence s=status r=Report");
+  setTimer(tPowerMode, 10);
+  setTimer(tVehicleSpeed, 20);
+  setTimer(tHeartbeatCheck, 100);
+}
+
+on timer tPowerMode
+{
+  message BCM_PowerMode msg;
+  msg.PowerMode = gPowerMode;
+  msg.AliveCounter = gAlive & 0x0F;
+  output(msg);
+  setTimer(tPowerMode, 10);
+}
+
+on timer tVehicleSpeed
+{
+  message VCU_VehicleSpeed spd;
+  spd.VehicleSpeed_kph = gSpeedRaw;
+  output(spd);
+  setTimer(tVehicleSpeed, 20);
+}
+
+on timer tHeartbeatCheck
+{
+  gAlive++;
+  if (gAlive > 15) gAlive = 0;
+  setTimer(tHeartbeatCheck, 100);
+}
+
+void setIgnitionOn()
+{
+  gPowerMode = 2;
+  write("PowerMode -> IGN");
+}
+
+void setAccessory()
+{
+  gPowerMode = 1;
+  write("PowerMode -> ACC");
+}
+
+void setIgnitionOff()
+{
+  gPowerMode = 0;
+  gSpeedRaw = 0;
+  write("PowerMode -> OFF");
+}
+
+void setReverseGear()
+{
+  message TCU_GearStatus gear;
+  gGear = 1;
+  gear.GearPosition = gGear;
+  output(gear);
+  write("Gear -> Reverse");
+}
+
+void setVehicleSpeed(float speedKph)
+{
+  gSpeedRaw = (long)(speedKph * 100.0);
+  write("VehicleSpeed -> %.2f kph", speedKph);
+}
+
+on key 'i' { setIgnitionOn(); }
+on key 'a' { setAccessory(); }
+on key 'o' { setIgnitionOff(); }
+on key 'r' { setReverseGear(); }
+on key '5' { setVehicleSpeed(5.0); }

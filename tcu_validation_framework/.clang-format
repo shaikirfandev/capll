@@ -1,0 +1,80 @@
+---
+# =============================================================================
+# .clang-format — TCU Validation Framework
+# Based on LLVM with automotive-friendly adjustments
+# =============================================================================
+
+Language:        Cpp
+BasedOnStyle:    LLVM
+
+# Indentation
+IndentWidth:              4
+TabWidth:                 4
+UseTab:                   Never
+ContinuationIndentWidth:  4
+ConstructorInitializerIndentWidth: 4
+IndentCaseLabels:         true
+IndentPPDirectives:       AfterHash
+NamespaceIndentation:     None
+
+# Column limit
+ColumnLimit:              100
+
+# Braces
+BreakBeforeBraces:        Allman
+
+# Alignment
+AlignAfterOpenBracket:    Align
+AlignConsecutiveAssignments:
+  Enabled:  true
+  AcrossEmptyLines: false
+  AcrossComments:   false
+AlignConsecutiveDeclarations:
+  Enabled: false
+AlignTrailingComments:    true
+AlignOperands:            true
+
+# Function style
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine:    false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortLambdasOnASingleLine:  Empty
+
+# Breaking
+BreakBeforeTernaryOperators:     true
+BreakConstructorInitializers:    BeforeColon
+BreakInheritanceList:            BeforeColon
+BreakStringLiterals:             false
+AlwaysBreakTemplateDeclarations: Yes
+
+# Pointer & reference
+PointerAlignment:         Left
+ReferenceAlignment:       Pointer
+
+# Includes
+SortIncludes:             CaseSensitive
+IncludeBlocks:            Regroup
+IncludeCategories:
+  - Regex:    '^"(core|can|diagnostics|validation|firmware|telematics|logging|reporting|config)/'
+    Priority: 1
+  - Regex:    '^<(spdlog|nlohmann)/'
+    Priority: 2
+  - Regex:    '^<'
+    Priority: 3
+
+# Spaces
+SpaceBeforeParens:        ControlStatements
+SpacesInAngles:           Never
+SpaceInEmptyParentheses:  false
+SpacesInContainerLiterals: false
+SpacesInCStyleCastParentheses: false
+
+# Misc
+Cpp11BracedListStyle:     true
+DerivePointerAlignment:   false
+FixNamespaceComments:     true
+MaxEmptyLinesToKeep:      2
+ReflowComments:           true
+SortUsingDeclarations:    true
+Standard:                 c++17

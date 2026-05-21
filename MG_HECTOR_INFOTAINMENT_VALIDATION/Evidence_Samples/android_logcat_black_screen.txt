@@ -1,0 +1,5 @@
+05-21 10:15:03.412  1420  1888 I VehicleService: PowerMode changed OFF -> IGN
+05-21 10:15:05.831  2211  2211 I Launcher: Home activity resumed
+05-21 10:15:06.027  2330  2401 E DisplayService: Surface attach timeout for main_display
+05-21 10:15:06.048  2330  2401 W WindowManager: black frame shown while waiting for IVI surface
+05-21 10:15:07.510  2330  2401 I DisplayService: recovered after compositor restart

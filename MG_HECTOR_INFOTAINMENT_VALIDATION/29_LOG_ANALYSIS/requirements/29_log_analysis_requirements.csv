@@ -1,0 +1,6 @@
+RequirementID,ASIL_or_QM,Requirement,Priority,Verification,LinkedTest
+MGH-29-FUNC-001,QM,Log Analysis nominal behavior shall work in IGN mode,P0,Bench functional test,TC_FUNC_001
+MGH-29-NEG-001,QM,Log Analysis shall handle invalid or missing dependency input gracefully,P0,Fault injection,TC_NEG_001
+MGH-29-REC-001,QM,Log Analysis shall recover after sleep wake or reconnect where applicable,P1,Recovery test,TC_REC_001
+MGH-29-DIAG-001,QM,Log Analysis diagnostic identification and DTC behavior shall match diagnostic spec,P1,UDS test,TC_DIAG_001
+MGH-29-PERF-001,QM,Log Analysis user-visible latency shall meet KPI,P1,Performance test,TC_PERF_001

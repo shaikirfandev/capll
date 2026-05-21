@@ -1,0 +1,9 @@
+CAN_ID,Message,Signal,Length,Cycle,Description
+0x100,BCM_PowerMode,PowerMode,2,10 ms,0=OFF,1=ACC,2=IGN,3=CRANK
+0x101,BCM_DoorStatus,DriverDoorAjar,1,50 ms,0=closed,1=open
+0x120,VCU_VehicleSpeed,VehicleSpeed_kph,16,20 ms,0..240 kph, scale 0.01
+0x130,TCU_GearStatus,GearPosition,4,20 ms,0=P,1=R,2=N,3=D
+0x180,SWC_Buttons,SWC_KeyCode,8,20 ms event,volume, track, phone, voice
+0x220,BCM_LampStatus,TurnIndicator,2,100 ms,left/right/hazard
+0x300,IVI_Heartbeat,IVI_AliveCounter,4,100 ms,rolling counter
+0x301,IVI_Status,IVI_BootState,3,100 ms,booting, ready, diag, shutdown

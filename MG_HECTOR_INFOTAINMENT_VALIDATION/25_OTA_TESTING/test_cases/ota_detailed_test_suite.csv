@@ -1,0 +1,6 @@
+TestID,Phase,Type,Precondition,Stimulus,Expected,Evidence
+OTA-001,Download,Functional,Network available,Start valid package download,Download completes hash verified,OTA logs
+OTA-002,Download,Recovery,Download active,Network loss 2 min,Pause resume or retry as spec,network logs
+OTA-003,Install,Negative,Install active,Power mode OFF request,Defined inhibit resume or rollback,power trace OTA logs
+OTA-004,Verification,Negative,Corrupt package hash,Start install,Package rejected current version retained,OTA logs DID version
+OTA-005,Post-update,Regression,Update complete,Run smoke suite,No critical regression,CANoe pytest report

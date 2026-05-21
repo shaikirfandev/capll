@@ -1,0 +1,47 @@
+variables
+{
+  msTimer tCamStatus;
+  int gCameraAvailable = 1;
+  int gCameraFault = 0;
+  int gFrameCounter = 0;
+  dword gReverseStartTime = 0;
+}
+
+on start
+{
+  setTimer(tCamStatus, 33);
+}
+
+on timer tCamStatus
+{
+  message CAM_Status cam;
+  cam.CameraAvailable = gCameraAvailable;
+  cam.CameraFault = gCameraFault;
+  cam.VideoFrameCounter = gFrameCounter & 0xFF;
+  output(cam);
+  gFrameCounter++;
+  setTimer(tCamStatus, 33);
+}
+
+on message TCU_GearStatus
+{
+  if (this.GearPosition == 1)
+  {
+    gReverseStartTime = timeNow();
+    write("Reverse gear detected at %d", gReverseStartTime);
+  }
+}
+
+on message IVI_Status
+{
+  if (this.CameraViewActive == 1 && gReverseStartTime != 0)
+  {
+    dword latency = timeNow() - gReverseStartTime;
+    write("Reverse camera active latency = %d ms", latency);
+    if (latency <= 700) testStepPass("Reverse camera latency within KPI");
+    else testStepFail("Reverse camera latency exceeded KPI");
+  }
+}
+
+on key 'f' { gCameraFault = !gCameraFault; }
+on key 'c' { gCameraAvailable = !gCameraAvailable; }

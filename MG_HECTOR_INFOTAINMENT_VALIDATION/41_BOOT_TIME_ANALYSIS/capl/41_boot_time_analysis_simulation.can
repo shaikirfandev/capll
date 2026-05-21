@@ -1,0 +1,93 @@
+/*
+  Module 41 - Boot Time Analysis
+  MG Hector IVI Validation
+  Purpose: Boot timestamp capture, IVI ready state monitoring, boot time
+           measurement from KL15 ON to Android launcher ready
+  Signals: BCM_PowerMode, IVI_Status, IVI_Heartbeat, IVI_BootTimestamp (0x410)
+*/
+
+variables
+{
+  msTimer tPowerMode;
+  msTimer tIviPublish;
+  msTimer tBootMonitor;
+  int gPowerMode = 0;
+  int gAlive = 0;
+  int gIviBoot = 0;
+  int gBootStartTime = 0;
+  int gBootEndTime = 0;
+  int gBootTimeMs = 0;
+}
+
+on start
+{
+  write("[41_BOOT_TIME_ANALYSIS] IVI boot time measurement and timestamp capture");
+  write("Keys: i=IGN (start boot) b=IVI ready (end boot) r=Reset m=Measure s=status");
+  setTimer(tPowerMode, 10);
+  setTimer(tVehicleSpeed, 20);
+  setTimer(tHeartbeatCheck, 100);
+}
+
+on timer tPowerMode
+{
+  message BCM_PowerMode msg;
+  msg.PowerMode = gPowerMode;
+  msg.AliveCounter = gAlive & 0x0F;
+  output(msg);
+  setTimer(tPowerMode, 10);
+}
+
+on timer tVehicleSpeed
+{
+  message VCU_VehicleSpeed spd;
+  spd.VehicleSpeed_kph = gSpeedRaw;
+  output(spd);
+  setTimer(tVehicleSpeed, 20);
+}
+
+on timer tHeartbeatCheck
+{
+  gAlive++;
+  if (gAlive > 15) gAlive = 0;
+  setTimer(tHeartbeatCheck, 100);
+}
+
+void setIgnitionOn()
+{
+  gPowerMode = 2;
+  write("PowerMode -> IGN");
+}
+
+void setAccessory()
+{
+  gPowerMode = 1;
+  write("PowerMode -> ACC");
+}
+
+void setIgnitionOff()
+{
+  gPowerMode = 0;
+  gSpeedRaw = 0;
+  write("PowerMode -> OFF");
+}
+
+void setReverseGear()
+{
+  message TCU_GearStatus gear;
+  gGear = 1;
+  gear.GearPosition = gGear;
+  output(gear);
+  write("Gear -> Reverse");
+}
+
+void setVehicleSpeed(float speedKph)
+{
+  gSpeedRaw = (long)(speedKph * 100.0);
+  write("VehicleSpeed -> %.2f kph", speedKph);
+}
+
+on key 'i' { setIgnitionOn(); }
+on key 'a' { setAccessory(); }
+on key 'o' { setIgnitionOff(); }
+on key 'r' { setReverseGear(); }
+on key '5' { setVehicleSpeed(5.0); }

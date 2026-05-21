@@ -1,0 +1,6 @@
+TestID,Type,Precondition,Stimulus,Expected,KPI,Evidence
+RCAM-001,Functional,IGN ON speed 0 camera available,Gear R,Camera view active,<=700ms,CANoe trace video
+RCAM-002,Recovery,Camera active,Gear D then R within 500ms,No frozen stale frame,No stale frame,CAN video frame counter
+RCAM-003,Negative,IGN ON,CameraAvailable=0 then Gear R,User warning and DTC behavior per spec,N/A,CAN DTC screen
+RCAM-004,Boundary,IGN ON,Reverse at low voltage profile,Graceful behavior no reboot,N/A,power trace logcat
+RCAM-005,Stress,IGN ON,300 R-D-R cycles,No camera service crash,0 crashes,automation report

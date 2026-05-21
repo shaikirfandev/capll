@@ -1,0 +1,72 @@
+{
+  "// comment": "Default configuration — used as base for all environments",
+
+  "can": {
+    "interface":     "vcan0",
+    "bitrate":       500000,
+    "enable_fd":     false,
+    "fd_data_bitrate": 2000000,
+    "loopback":      false,
+    "rx_timeout_ms": 100
+  },
+
+  "uds": {
+    "tx_id":         2016,
+    "rx_id":         2024,
+    "p2_timeout_ms": 1000,
+    "p2_star_ms":    5000,
+    "p3_timeout_ms": 1000,
+    "st_min_ms":     5
+  },
+
+  "telematics": {
+    "server_url":              "mqtt://localhost:1883",
+    "client_id":               "tcu_validator_dev",
+    "simulation_mode":         true,
+    "max_reconnect_attempts":  5,
+    "reconnect_delay_ms":      2000,
+    "heartbeat_interval_s":    30,
+    "use_tls":                 false,
+    "ca_cert_path":            "",
+    "client_cert_path":        "",
+    "client_key_path":         ""
+  },
+
+  "firmware": {
+    "rfp_cli_path":   "rfp-cli",
+    "device_type":    "RX",
+    "use_tcpip":      false,
+    "host":           "192.168.1.100",
+    "port":           9004,
+    "uds_block_size": 256,
+    "uds_security_level": 0,
+    "use_uds_path":   true
+  },
+
+  "engine": {
+    "parallel":            false,
+    "stop_on_first_fail":  false,
+    "retry_delay_ms":      500
+  },
+
+  "logging": {
+    "log_dir":             "logs",
+    "base_filename":       "tcu_validator",
+    "max_file_size_bytes": 10485760,
+    "max_files":           5,
+    "enable_console":      true,
+    "console_level":       "info",
+    "global_level":        "debug"
+  },
+
+  "reporting": {
+    "output_dir":   "reports",
+    "formats":      ["html", "json", "csv"]
+  },
+
+  "watchdog": {
+    "enabled":       false,
+    "timeout_ms":    5000,
+    "kick_interval_ms": 1000
+  }
+}

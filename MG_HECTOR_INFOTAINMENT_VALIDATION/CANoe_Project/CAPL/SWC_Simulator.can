@@ -1,0 +1,32 @@
+variables
+{
+  msTimer tRelease;
+  int gCurrentKey = 0;
+}
+
+void SWC_Send(int key, int durationMs)
+{
+  message SWC_Buttons swc;
+  gCurrentKey = key;
+  swc.SWC_KeyCode = key;
+  swc.PressDuration_ms = durationMs;
+  swc.ButtonValid = 1;
+  output(swc);
+  setTimer(tRelease, durationMs);
+}
+
+on timer tRelease
+{
+  message SWC_Buttons swc;
+  swc.SWC_KeyCode = 0;
+  swc.PressDuration_ms = 0;
+  swc.ButtonValid = 0;
+  output(swc);
+  gCurrentKey = 0;
+}
+
+on key '+' { SWC_Send(0x10, 100); }
+on key '-' { SWC_Send(0x11, 100); }
+on key 'n' { SWC_Send(0x20, 100); }
+on key 'p' { SWC_Send(0x30, 100); }
+on key 'v' { SWC_Send(0x40, 1200); }

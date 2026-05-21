@@ -1,0 +1,6 @@
+TestID,Feature,Type,Precondition,Stimulus,Expected,KPI,Evidence
+IVI-RAD-001,Radio,Functional,IGN ON antenna connected,Tune FM station,Station audio and metadata displayed,Audio within 2s,CANoe log screen video audio capture
+IVI-MED-002,USB Media,Boundary,USB with 10000 files,Insert USB,Indexing completes without ANR,No ANR memory stable,logcat dumpsys meminfo
+IVI-UI-003,Touchscreen,Stress,Home screen ready,1000 rapid taps/swipes,No crash no stuck input,Input latency P95 within target,screen recording logcat
+IVI-LANG-004,Language,Negative,Locale menu open,Select language with missing strings,Fallback string shown no blank labels,No UI overlap,screenshots
+IVI-PROF-005,User Profiles,Recovery,Profile A active,Power cycle during profile switch,Profile data consistent after boot,No corruption,trace logcat settings dump

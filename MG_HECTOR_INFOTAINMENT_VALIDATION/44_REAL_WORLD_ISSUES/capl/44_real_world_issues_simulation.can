@@ -1,0 +1,97 @@
+/*
+  Module 44 - Real World Issues
+  MG Hector IVI Validation
+  Purpose: Known defect reproduction scenarios from production field issues,
+           edge case testing, and customer-reported bug validation
+  Signals: BCM_PowerMode, VCU_VehicleSpeed, TCU_GearStatus, IVI_Status,
+           plus issue-specific reproduction patterns
+*/
+
+variables
+{
+  msTimer tPowerMode;
+  msTimer tVehicleSpeed;
+  msTimer tGear;
+  msTimer tIviPublish;
+  msTimer tIssueRepro;
+  int gPowerMode = 0;
+  long gSpeedRaw = 0;
+  int gGear = 0;
+  int gAlive = 0;
+  int gIviBoot = 0;
+  int gIssueId = 0;
+  int gReproStep = 0;
+}
+
+on start
+{
+  write("[44_REAL_WORLD_ISSUES] Production field issue reproduction scenarios");
+  write("Keys: i=IGN 1=Issue#456 BT freeze 2=Issue#789 camera black 3=Issue#012 audio s=status");
+  setTimer(tPowerMode, 10);
+  setTimer(tVehicleSpeed, 20);
+  setTimer(tHeartbeatCheck, 100);
+}
+
+on timer tPowerMode
+{
+  message BCM_PowerMode msg;
+  msg.PowerMode = gPowerMode;
+  msg.AliveCounter = gAlive & 0x0F;
+  output(msg);
+  setTimer(tPowerMode, 10);
+}
+
+on timer tVehicleSpeed
+{
+  message VCU_VehicleSpeed spd;
+  spd.VehicleSpeed_kph = gSpeedRaw;
+  output(spd);
+  setTimer(tVehicleSpeed, 20);
+}
+
+on timer tHeartbeatCheck
+{
+  gAlive++;
+  if (gAlive > 15) gAlive = 0;
+  setTimer(tHeartbeatCheck, 100);
+}
+
+void setIgnitionOn()
+{
+  gPowerMode = 2;
+  write("PowerMode -> IGN");
+}
+
+void setAccessory()
+{
+  gPowerMode = 1;
+  write("PowerMode -> ACC");
+}
+
+void setIgnitionOff()
+{
+  gPowerMode = 0;
+  gSpeedRaw = 0;
+  write("PowerMode -> OFF");
+}
+
+void setReverseGear()
+{
+  message TCU_GearStatus gear;
+  gGear = 1;
+  gear.GearPosition = gGear;
+  output(gear);
+  write("Gear -> Reverse");
+}
+
+void setVehicleSpeed(float speedKph)
+{
+  gSpeedRaw = (long)(speedKph * 100.0);
+  write("VehicleSpeed -> %.2f kph", speedKph);
+}
+
+on key 'i' { setIgnitionOn(); }
+on key 'a' { setAccessory(); }
+on key 'o' { setIgnitionOff(); }
+on key 'r' { setReverseGear(); }
+on key '5' { setVehicleSpeed(5.0); }

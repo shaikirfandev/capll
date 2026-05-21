@@ -1,0 +1,93 @@
+/*
+  Module 19 - Cluster Integration
+  MG Hector IVI Validation
+  Purpose: Simulate IVI-to-cluster messages including speed display sync,
+           warning icons, media info, phone call display on CAN
+  Signals: BCM_PowerMode, VCU_VehicleSpeed, IVI_Status, IVI_ClusterRequest (0x3D0)
+*/
+
+variables
+{
+  msTimer tPowerMode;
+  msTimer tVehicleSpeed;
+  msTimer tIviPublish;
+  msTimer tClusterPublish;
+  int gPowerMode = 0;
+  long gSpeedRaw = 0;
+  int gAlive = 0;
+  int gIviBoot = 0;
+  int gClusterDisplayMode = 0;
+}
+
+on start
+{
+  write("[19_CLUSTER_INTEGRATION] IVI-to-cluster display message simulation");
+  write("Keys: i=IGN m=media info c=call display w=warning icon 1/2/3=speed s=status");
+  setTimer(tPowerMode, 10);
+  setTimer(tVehicleSpeed, 20);
+  setTimer(tHeartbeatCheck, 100);
+}
+
+on timer tPowerMode
+{
+  message BCM_PowerMode msg;
+  msg.PowerMode = gPowerMode;
+  msg.AliveCounter = gAlive & 0x0F;
+  output(msg);
+  setTimer(tPowerMode, 10);
+}
+
+on timer tVehicleSpeed
+{
+  message VCU_VehicleSpeed spd;
+  spd.VehicleSpeed_kph = gSpeedRaw;
+  output(spd);
+  setTimer(tVehicleSpeed, 20);
+}
+
+on timer tHeartbeatCheck
+{
+  gAlive++;
+  if (gAlive > 15) gAlive = 0;
+  setTimer(tHeartbeatCheck, 100);
+}
+
+void setIgnitionOn()
+{
+  gPowerMode = 2;
+  write("PowerMode -> IGN");
+}
+
+void setAccessory()
+{
+  gPowerMode = 1;
+  write("PowerMode -> ACC");
+}
+
+void setIgnitionOff()
+{
+  gPowerMode = 0;
+  gSpeedRaw = 0;
+  write("PowerMode -> OFF");
+}
+
+void setReverseGear()
+{
+  message TCU_GearStatus gear;
+  gGear = 1;
+  gear.GearPosition = gGear;
+  output(gear);
+  write("Gear -> Reverse");
+}
+
+void setVehicleSpeed(float speedKph)
+{
+  gSpeedRaw = (long)(speedKph * 100.0);
+  write("VehicleSpeed -> %.2f kph", speedKph);
+}
+
+on key 'i' { setIgnitionOn(); }
+on key 'a' { setAccessory(); }
+on key 'o' { setIgnitionOff(); }
+on key 'r' { setReverseGear(); }
+on key '5' { setVehicleSpeed(5.0); }

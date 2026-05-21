@@ -1,0 +1,81 @@
+VERSION "MG Hector IVI Training DBC - representative"
+
+NS_ :
+  NS_DESC_
+  CM_
+  BA_DEF_
+  BA_
+  VAL_
+  CAT_DEF_
+  CAT_
+  FILTER
+  BA_DEF_DEF_
+  EV_DATA_
+  ENVVAR_DATA_
+  SGTYPE_
+  SGTYPE_VAL_
+  BA_DEF_SGTYPE_
+  BA_SGTYPE_
+  SIG_TYPE_REF_
+  VAL_TABLE_
+  SIG_GROUP_
+  SIG_VALTYPE_
+  SIGTYPE_VALTYPE_
+  BO_TX_BU_
+  BA_DEF_REL_
+  BA_REL_
+  BA_DEF_DEF_REL_
+  BU_SG_REL_
+  BU_EV_REL_
+  BU_BO_REL_
+  SG_MUL_VAL_
+
+BS_:
+
+BU_: BCM VCU TCU SWC IVI CLUSTER CAM_GW TESTER
+
+BO_ 256 BCM_PowerMode: 8 BCM
+ SG_ PowerMode : 0|2@1+ (1,0) [0|3] "" IVI,CLUSTER
+ SG_ KL30Voltage_dV : 8|8@1+ (1,0) [0|180] "dV" IVI
+ SG_ AliveCounter : 48|4@1+ (1,0) [0|15] "" IVI
+
+BO_ 257 BCM_DoorStatus: 8 BCM
+ SG_ DriverDoorAjar : 0|1@1+ (1,0) [0|1] "" IVI,CLUSTER
+ SG_ PassengerDoorAjar : 1|1@1+ (1,0) [0|1] "" IVI,CLUSTER
+ SG_ TailgateAjar : 2|1@1+ (1,0) [0|1] "" IVI,CLUSTER
+
+BO_ 288 VCU_VehicleSpeed: 8 VCU
+ SG_ VehicleSpeed_kph : 0|16@1+ (0.01,0) [0|240] "kph" IVI,CLUSTER
+ SG_ SpeedValid : 16|1@1+ (1,0) [0|1] "" IVI
+
+BO_ 304 TCU_GearStatus: 8 TCU
+ SG_ GearPosition : 0|4@1+ (1,0) [0|7] "" IVI,CLUSTER
+ SG_ GearValid : 4|1@1+ (1,0) [0|1] "" IVI
+
+BO_ 384 SWC_Buttons: 8 SWC
+ SG_ SWC_KeyCode : 0|8@1+ (1,0) [0|255] "" IVI
+ SG_ PressDuration_ms : 8|16@1+ (1,0) [0|5000] "ms" IVI
+ SG_ ButtonValid : 24|1@1+ (1,0) [0|1] "" IVI
+
+BO_ 512 CAM_Status: 8 CAM_GW
+ SG_ CameraAvailable : 0|1@1+ (1,0) [0|1] "" IVI
+ SG_ CameraFault : 1|1@1+ (1,0) [0|1] "" IVI
+ SG_ VideoFrameCounter : 8|8@1+ (1,0) [0|255] "" IVI
+
+BO_ 768 IVI_Heartbeat: 8 IVI
+ SG_ IVI_AliveCounter : 0|4@1+ (1,0) [0|15] "" TESTER,CLUSTER
+ SG_ IVI_NetworkState : 8|4@1+ (1,0) [0|15] "" TESTER,CLUSTER
+
+BO_ 769 IVI_Status: 8 IVI
+ SG_ IVI_BootState : 0|4@1+ (1,0) [0|15] "" TESTER,CLUSTER
+ SG_ CameraViewActive : 4|1@1+ (1,0) [0|1] "" TESTER,CLUSTER
+ SG_ AudioFocusState : 8|4@1+ (1,0) [0|15] "" TESTER
+
+BO_ 784 CLUSTER_WarningStatus: 8 CLUSTER
+ SG_ DoorWarningDisplayed : 0|1@1+ (1,0) [0|1] "" IVI,TESTER
+ SG_ CameraWarningDisplayed : 1|1@1+ (1,0) [0|1] "" IVI,TESTER
+
+VAL_ 256 PowerMode 0 "OFF" 1 "ACC" 2 "IGN" 3 "CRANK";
+VAL_ 304 GearPosition 0 "P" 1 "R" 2 "N" 3 "D" 4 "M";
+VAL_ 384 SWC_KeyCode 0 "NONE" 16 "VOL_UP" 17 "VOL_DOWN" 32 "TRACK_NEXT" 33 "TRACK_PREV" 48 "PHONE" 64 "VOICE";
+VAL_ 769 IVI_BootState 0 "OFF" 1 "BOOTING" 2 "READY" 3 "SLEEP" 4 "DIAG" 5 "CAMERA_ACTIVE" 6 "SHUTDOWN";

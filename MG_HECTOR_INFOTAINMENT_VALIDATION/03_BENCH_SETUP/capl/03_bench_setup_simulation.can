@@ -1,0 +1,149 @@
+/*
+  Module 03 - Bench Setup
+  MG Hector IVI Validation
+  Purpose: Simulate proper power-up sequence for the MG Hector IVI bench
+           demonstrating KL30 (battery) and KL15 (ignition) line behavior
+           and rest-bus initialization
+  Signals: BCM_PowerMode, VCU_VehicleSpeed, TCU_GearStatus, BCM_DoorStatus,
+           BCM_LampStatus, IVI_Heartbeat, IVI_Status
+*/
+
+variables
+{
+  msTimer tPowerMode;
+  msTimer tVehicleSpeed;
+  msTimer tGear;
+  msTimer tDoor;
+  msTimer tLamp;
+  msTimer tIviPublish;
+  int gPowerMode = 0;
+  int gGear = 0;
+  int gDriverDoor = 0;
+  int gTurnIndicator = 0;
+  long gSpeedRaw = 0;
+  int gAlive = 0;
+  int gIviBoot = 0;
+  int gBenchPowerSequence = 0;
+}
+
+on start
+{
+  write("[03_BENCH_SETUP] MG Hector IVI Bench - Power Sequence Simulation");
+  write("Keys: b=Bench Power-Up  s=Shutdown  i=IGN  a=ACC  o=OFF  r=Reverse  d=Drive");
+  write("      m=Toggle door  t=Turn signal  h=Status");
+  setTimer(tPowerMode, 10);
+  setTimer(tVehicleSpeed, 20);
+  setTimer(tGear, 20);
+  setTimer(tDoor, 50);
+  setTimer(tLamp, 100);
+  setTimer(tIviPublish, 100);
+}
+
+on timer tPowerMode
+{
+  message BCM_PowerMode msg;
+  msg.PowerMode = gPowerMode;
+  msg.AliveCounter = gAlive & 0x0F;
+  output(msg);
+  gAlive++;
+  if (gAlive > 15) gAlive = 0;
+  setTimer(tPowerMode, 10);
+}
+
+on timer tVehicleSpeed
+{
+  message VCU_VehicleSpeed spd;
+  spd.VehicleSpeed_kph = gSpeedRaw;
+  output(spd);
+  setTimer(tVehicleSpeed, 20);
+}
+
+on timer tGear
+{
+  message TCU_GearStatus gear;
+  gear.GearPosition = gGear;
+  output(gear);
+  setTimer(tGear, 20);
+}
+
+on timer tDoor
+{
+  message BCM_DoorStatus door;
+  door.DriverDoorAjar = gDriverDoor;
+  output(door);
+  setTimer(tDoor, 50);
+}
+
+on timer tLamp
+{
+  message BCM_LampStatus lamp;
+  lamp.TurnIndicator = gTurnIndicator;
+  output(lamp);
+  setTimer(tLamp, 100);
+}
+
+on timer tIviPublish
+{
+  message IVI_Heartbeat hb;
+  message IVI_Status status;
+  hb.IVI_AliveCounter = gAlive & 0x0F;
+  status.IVI_BootState = gIviBoot;
+  output(hb);
+  output(status);
+  setTimer(tIviPublish, 100);
+}
+
+void benchPowerUpSequence()
+{
+  gBenchPowerSequence = 1;
+  write("[BENCH] Starting power-up sequence: KL30 ON");
+  gPowerMode = 0;
+  gIviBoot = 0;
+  setTimerCyclic(100, 1);
+  setTimerCyclic(100, 2);
+  setTimerCyclic(100, 3);
+}
+
+void benchShutdownSequence()
+{
+  write("[BENCH] Shutdown sequence: IGN OFF -> KL15 OFF -> KL30 standby");
+  gPowerMode = 0;
+  gSpeedRaw = 0;
+  gIviBoot = 0;
+  gBenchPowerSequence = 0;
+}
+
+void setPowerMode(int mode, char name[])
+{
+  gPowerMode = mode;
+  if (mode == 0)
+  {
+    gSpeedRaw = 0;
+    gIviBoot = 0;
+  }
+  else if (mode == 1)
+  {
+    gIviBoot = 1;
+  }
+  else if (mode == 2)
+  {
+    gIviBoot = 2;
+  }
+  write("[BCM] PowerMode -> %s", name);
+}
+
+on key 'b' { benchPowerUpSequence(); }
+on key 's' { benchShutdownSequence(); }
+on key 'i' { setPowerMode(2, "IGN"); }
+on key 'a' { setPowerMode(1, "ACC"); }
+on key 'o' { setPowerMode(0, "OFF"); }
+on key 'r' { gGear = 1; write("[TCU] Gear -> Reverse"); }
+on key 'd' { gGear = 3; write("[TCU] Gear -> Drive"); }
+on key 'p' { gGear = 0; write("[TCU] Gear -> Park"); }
+on key 'm' { gDriverDoor = !gDriverDoor; write("[BCM] Door -> %s", gDriverDoor ? "OPEN" : "CLOSED"); }
+on key 't' { gTurnIndicator = (gTurnIndicator + 1) % 4; write("[BCM] Turn -> %d", gTurnIndicator); }
+on key 'h'
+{
+  write("[STATUS] Power=%d IVI=%d Gear=%d Door=%d Speed=%.1f Seq=%d",
+        gPowerMode, gIviBoot, gGear, gDriverDoor, gSpeedRaw / 100.0, gBenchPowerSequence);
+}

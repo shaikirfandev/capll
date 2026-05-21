@@ -1,0 +1,31 @@
+{
+  "_comment": "Navigation Database — ARINC 424 Cycle 2401 — B737-800 EGLL base",
+  "airports": [
+    {"icao":"EGLL","name":"London Heathrow","lat":51.4775,"lon":-0.4614,"elevation_ft":83},
+    {"icao":"KSFO","name":"San Francisco Intl","lat":37.6213,"lon":-122.379,"elevation_ft":13},
+    {"icao":"KLAX","name":"Los Angeles Intl","lat":33.9425,"lon":-118.408,"elevation_ft":125},
+    {"icao":"EDDF","name":"Frankfurt Main","lat":50.0333,"lon":8.5706,"elevation_ft":364}
+  ],
+  "navaids": [
+    {"ident":"LAM","type":"VOR","lat":51.6458,"lon":-0.1506,"freq_mhz":115.6,"elevation_ft":183},
+    {"ident":"OCK","type":"VOR","lat":51.3050,"lon":-0.4478,"freq_mhz":115.3,"elevation_ft":179},
+    {"ident":"SFO","type":"VOR","lat":37.6189,"lon":-122.375,"freq_mhz":115.8,"elevation_ft":10}
+  ],
+  "intersections": [
+    {"ident":"WOBUN","lat":51.7608,"lon":-1.7503,"region":"EGTT"},
+    {"ident":"MALOT","lat":52.1167,"lon":-4.5833,"region":"EGTT"},
+    {"ident":"SUNOT","lat":52.8333,"lon":-8.5000,"region":"EISN"},
+    {"ident":"MIMKU","lat":53.1167,"lon":-15.0000,"region":"EISN"},
+    {"ident":"DOLIR","lat":54.0000,"lon":-20.0000,"region":"BIRD"},
+    {"ident":"SOMAX","lat":54.5000,"lon":-30.0000,"region":"BIRD"},
+    {"ident":"BEDRA","lat":54.5000,"lon":-40.0000,"region":"BIRD"},
+    {"ident":"RAFOX","lat":54.0000,"lon":-50.0000,"region":"CZQX"},
+    {"ident":"BOBTU","lat":52.0000,"lon":-60.0000,"region":"CZQX"}
+  ],
+  "nat_tracks": {
+    "_comment": "Simplified NAT Track A (westbound)",
+    "track_id": "A",
+    "direction": "WEST",
+    "waypoints": ["MIMKU","DOLIR","SOMAX","BEDRA","RAFOX","BOBTU"]
+  }
+}

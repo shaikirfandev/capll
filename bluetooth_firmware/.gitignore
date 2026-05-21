@@ -1,0 +1,50 @@
+# Git Ignore — Bluetooth Firmware Project
+
+# Build output
+build/
+cmake-build-*/
+out/
+
+# CMake cache
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.ninja
+
+# IDE / editor
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Compile commands (keep for clang-tidy, but not required in VCS)
+# compile_commands.json
+
+# Test artifacts
+Testing/
+CTestTestfile.cmake
+LastTest.log
+*.gcda
+*.gcno
+*.gcov
+coverage.info
+coverage_filtered.info
+
+# Logs
+*.log
+!scripts/*.sh
+
+# Generated docs
+docs/html/
+docs/latex/
+
+# Docker
+.dockerignore
+
+# Python cache
+__pycache__/
+*.py[cod]

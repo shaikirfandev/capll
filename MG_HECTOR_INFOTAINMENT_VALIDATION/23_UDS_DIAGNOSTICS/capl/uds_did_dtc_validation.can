@@ -1,0 +1,34 @@
+/* Representative UDS validation helper.
+   Replace diagnostic target, request objects and DID values per project setup. */
+
+variables
+{
+  diagRequest IVI.DefaultSession reqDefault;
+  diagRequest IVI.ExtendedSession reqExtended;
+  diagRequest IVI.ReadSoftwareId reqSwId;
+  diagRequest IVI.ReadDtcByStatusMask reqDtc;
+}
+
+void runIviDiagnosticSmoke()
+{
+  write("UDS smoke: default session");
+  DiagSendRequest(reqDefault);
+  testWaitForDiagResponse(reqDefault, 1000);
+
+  write("UDS smoke: extended session");
+  DiagSendRequest(reqExtended);
+  testWaitForDiagResponse(reqExtended, 1000);
+
+  write("UDS smoke: software DID");
+  DiagSendRequest(reqSwId);
+  testWaitForDiagResponse(reqSwId, 1000);
+
+  write("UDS smoke: DTC status mask");
+  DiagSendRequest(reqDtc);
+  testWaitForDiagResponse(reqDtc, 1000);
+}
+
+on key 'u'
+{
+  runIviDiagnosticSmoke();
+}

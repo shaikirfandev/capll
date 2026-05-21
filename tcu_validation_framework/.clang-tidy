@@ -1,0 +1,53 @@
+---
+# =============================================================================
+# .clang-tidy — TCU Validation Framework
+# =============================================================================
+
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -modernize-use-trailing-return-type,
+  -readability-braces-around-statements,
+  -readability-magic-numbers,
+  -misc-non-private-member-variables-in-classes
+
+WarningsAsErrors: ""
+
+HeaderFilterRegex: "include/.*\\.h$"
+
+FormatStyle: file
+
+CheckOptions:
+  - key:   readability-identifier-naming.NamespaceCase
+    value: lower_case
+  - key:   readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key:   readability-identifier-naming.StructCase
+    value: CamelCase
+  - key:   readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key:   readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key:   readability-identifier-naming.VariableCase
+    value: lower_case
+  - key:   readability-identifier-naming.MemberPrefix
+    value: m_
+  - key:   readability-identifier-naming.StaticMemberPrefix
+    value: s_
+  - key:   readability-identifier-naming.ConstantCase
+    value: UPPER_CASE
+  - key:   modernize-use-default-member-init.UseAssignment
+    value: "0"
+  - key:   cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor
+    value: "1"

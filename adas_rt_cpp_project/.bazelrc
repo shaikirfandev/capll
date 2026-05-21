@@ -1,0 +1,29 @@
+# Bazel flags applied to every build
+build --cxxopt='-std=c++17'
+build --cxxopt='-Wall'
+build --cxxopt='-Wextra'
+build --cxxopt='-Wpedantic'
+build --cxxopt='-Wno-unused-parameter'
+
+# Real-time build: enable POSIX real-time extensions
+build:rt --cxxopt='-D_GNU_SOURCE'
+build:rt --cxxopt='-DADAS_REALTIME_ENABLED'
+build:rt --linkopt='-lrt'
+build:rt --linkopt='-lpthread'
+
+# Debug / sanitizer profiles
+build:asan --cxxopt='-fsanitize=address,undefined'
+build:asan --linkopt='-fsanitize=address,undefined'
+build:asan --cxxopt='-fno-omit-frame-pointer'
+
+build:tsan --cxxopt='-fsanitize=thread'
+build:tsan --linkopt='-fsanitize=thread'
+
+# Release profile (O2 + LTO)
+build:release --cxxopt='-O2'
+build:release --cxxopt='-DNDEBUG'
+build:release --cxxopt='-flto'
+
+# Embedded / cross-compile stub (arm-linux-gnueabihf)
+build:embedded --crosstool_top=//toolchains:arm_linux_toolchain
+build:embedded --cpu=armeabihf

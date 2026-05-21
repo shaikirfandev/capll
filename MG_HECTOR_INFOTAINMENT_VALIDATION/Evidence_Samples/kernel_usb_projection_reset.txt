@@ -1,0 +1,4 @@
+[  421.122334] usb 1-1: new high-speed USB device number 7 using xhci-hcd
+[  423.901220] usb 1-1: reset high-speed USB device number 7 using xhci-hcd
+[  424.005100] projectiond: transport reset while session state=LAUNCHING
+[  424.445891] usb 1-1: USB disconnect, device number 7

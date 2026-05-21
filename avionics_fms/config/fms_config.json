@@ -1,0 +1,50 @@
+{
+  "_comment": "Avionics FMS v3.2.1 Runtime Configuration — DO-178C DAL-B",
+  "fms": {
+    "version": "3.2.1",
+    "aircraft_type": "B737-800",
+    "log_level": "INFO",
+    "cycle_time_ms": 50
+  },
+  "navigation": {
+    "default_rnp_nm": 2.0,
+    "approach_rnp_nm": 0.1,
+    "oceanic_rnp_nm": 4.0,
+    "gps_timeout_ms": 2000,
+    "ins_drift_limit_nm_per_hr": 1.5,
+    "min_gps_satellites": 5,
+    "max_hdop": 2.0,
+    "anp_filter_alpha": 0.1
+  },
+  "fuel": {
+    "initial_total_kg": 18000.0,
+    "initial_left_kg": 9000.0,
+    "initial_right_kg": 9000.0,
+    "reserve_kg": 1500.0,
+    "imbalance_warn_kg": 200.0,
+    "low_fuel_warn_kg": 1500.0
+  },
+  "performance": {
+    "default_tow_kg": 70000.0,
+    "mtow_kg": 78016.0,
+    "cruise_mach": 0.78,
+    "long_range_mach": 0.74,
+    "fuel_flow_cruise_kghr": 2400.0,
+    "fuel_flow_climb_kghr": 3600.0,
+    "default_cost_index": 50,
+    "opt_cruise_alt_ft": 35000.0,
+    "v2_kt": 148.0,
+    "vapp_kt": 138.0
+  },
+  "safety": {
+    "watchdog_timeout_ms": 500,
+    "max_fault_records": 64,
+    "bite_on_startup": true
+  },
+  "communications": {
+    "arinc429_baud": 100000,
+    "afdx_vl_bandwidth_kbps": 1000,
+    "can_baud": 1000000,
+    "bus_timeout_ms": 1000
+  }
+}

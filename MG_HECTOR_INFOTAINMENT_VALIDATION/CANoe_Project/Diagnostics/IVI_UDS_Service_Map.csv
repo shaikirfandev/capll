@@ -1,0 +1,10 @@
+Service,Request,Positive_Response,Use,Notes
+DiagnosticSessionControl_Default,10 01,50 01,Return to default session,Non-destructive
+DiagnosticSessionControl_Extended,10 03,50 03,Enable extended diagnostics,Use before DID/DTC checks if required
+ECUReset_Hard,11 01,51 01,Reset IVI,Requires test approval
+ReadDID_SW,22 F1 80,62 F1 80,Software identifier,Release evidence
+ReadDID_VIN,22 F1 90,62 F1 90,VIN/personalization,Use bench-safe VIN only
+ReadDID_BootKPI,22 D1 00,62 D1 00,Boot metrics,Representative DID
+ReadDTCByStatusMask,19 02 FF,59 02,DTC snapshot,Pre/post fault injection
+ClearDTC,14 FF FF FF,54,Clear DTCs,Only after evidence captured
+SecurityAccessSeed,27 01,67 01,Request seed,Training only no brute force

@@ -1,0 +1,56 @@
+/* Rest bus simulation for representative MG Hector-style IVI bench. */
+
+variables
+{
+  msTimer t10;
+  msTimer t20;
+  int gPowerMode = 0;
+  int gGear = 0;
+  long gSpeedRaw = 0;
+  int gDoor = 0;
+  int gAlive = 0;
+}
+
+on start
+{
+  setTimer(t10, 10);
+  setTimer(t20, 20);
+  write("RestBus_BCM_VCU_TCU started");
+}
+
+on timer t10
+{
+  message BCM_PowerMode pwr;
+  pwr.PowerMode = gPowerMode;
+  pwr.KL30Voltage_dV = 125;
+  pwr.AliveCounter = gAlive & 0x0F;
+  output(pwr);
+
+  message BCM_DoorStatus door;
+  door.DriverDoorAjar = gDoor;
+  output(door);
+
+  gAlive++;
+  setTimer(t10, 10);
+}
+
+on timer t20
+{
+  message VCU_VehicleSpeed spd;
+  spd.VehicleSpeed_kph = gSpeedRaw;
+  spd.SpeedValid = 1;
+  output(spd);
+
+  message TCU_GearStatus gear;
+  gear.GearPosition = gGear;
+  gear.GearValid = 1;
+  output(gear);
+
+  setTimer(t20, 20);
+}
+
+void Bench_IgnitionOn() { gPowerMode = 2; }
+void Bench_IgnitionOff() { gPowerMode = 0; gSpeedRaw = 0; }
+void Bench_SetGear(int gear) { gGear = gear; }
+void Bench_SetSpeedKph(float speed) { gSpeedRaw = (long)(speed * 100.0); }
+void Bench_ToggleDriverDoor() { gDoor = !gDoor; }

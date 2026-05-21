@@ -1,0 +1,45 @@
+workspace(name = "adas_rt_cpp_project")
+
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# ─── Google Test ────────────────────────────────────────────────────────────
+http_archive(
+    name = "com_google_googletest",
+    urls = ["https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz"],
+    sha256 = "8ad598c73ad796e0d8280b082cebd82a630d73e73cd3c70057938a6501bba5d7",
+    strip_prefix = "googletest-1.14.0",
+)
+
+# ─── Google Benchmark ───────────────────────────────────────────────────────
+http_archive(
+    name = "com_github_google_benchmark",
+    urls = ["https://github.com/google/benchmark/archive/refs/tags/v1.8.3.tar.gz"],
+    sha256 = "6bc180a57d23d4d9515519f92b0490f908a8fd1b43ef28fbab0c1bc4044b9b59",
+    strip_prefix = "benchmark-1.8.3",
+)
+
+# ─── Abseil (C++ common libraries) ──────────────────────────────────────────
+http_archive(
+    name = "com_google_absl",
+    urls = ["https://github.com/abseil/abseil-cpp/archive/refs/tags/20240116.2.tar.gz"],
+    sha256 = "733726b8c3a6d39a4120d7e45ea8b41a1d9e7442da8ac6d84cf8b8a4fc4e6bf5",
+    strip_prefix = "abseil-cpp-20240116.2",
+)
+
+# ─── spdlog (fast structured logger) ────────────────────────────────────────
+http_archive(
+    name = "com_github_gabime_spdlog",
+    urls = ["https://github.com/gabime/spdlog/archive/refs/tags/v1.13.0.tar.gz"],
+    sha256 = "9e0c05a9e0e490c8eb4cfce62ee42e3f3c4e8c7f34bcd79fb53c7f57a38ddc63",
+    strip_prefix = "spdlog-1.13.0",
+    build_file = "//third_party:spdlog.BUILD",
+)
+
+# ─── nlohmann/json ──────────────────────────────────────────────────────────
+http_archive(
+    name = "com_github_nlohmann_json",
+    urls = ["https://github.com/nlohmann/json/archive/refs/tags/v3.11.3.tar.gz"],
+    sha256 = "0d8ef5af7f9794e3263480193c491549b2ba6cc74bb018906202ada498a79406",
+    strip_prefix = "json-3.11.3",
+    build_file = "//third_party:nlohmann_json.BUILD",
+)

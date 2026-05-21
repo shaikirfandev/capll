@@ -1,0 +1,137 @@
+/*
+  Module 35 - Vector Tools
+  MG Hector IVI Validation
+  Purpose: Demonstrate Vector CANoe tool integration including IVI heartbeat
+           monitoring, steering wheel control simulation, and tool automation
+  Signals: BCM_PowerMode, VCU_VehicleSpeed, TCU_GearStatus, SWC_Buttons,
+           IVI_Heartbeat, IVI_Status
+*/
+
+variables
+{
+  msTimer tPowerMode;
+  msTimer tVehicleSpeed;
+  msTimer tIviMonitor;
+  int gPowerMode = 0;       // 0 OFF, 1 ACC, 2 IGN, 3 CRANK
+  int gGear = 0;            // 0 P, 1 R, 2 N, 3 D
+  long gSpeedRaw = 0;       // speed * 100
+  int gAlive = 0;
+  int gLastIviAlive = -1;
+  int gIviHeartbeatSeen = 0;
+  int gIviBootState = -1;
+}
+
+on start
+{
+  write("Vector Tools: starting representative rest bus simulation");
+  setTimer(tPowerMode, 10);
+  setTimer(tVehicleSpeed, 20);
+  setTimer(tIviMonitor, 200);
+}
+
+on timer tPowerMode
+{
+  message BCM_PowerMode msg;
+  msg.PowerMode = gPowerMode;
+  msg.AliveCounter = gAlive & 0x0F;
+  output(msg);
+  setTimer(tPowerMode, 10);
+}
+
+on timer tVehicleSpeed
+{
+  message VCU_VehicleSpeed spd;
+  spd.VehicleSpeed_kph = gSpeedRaw;
+  output(spd);
+  setTimer(tVehicleSpeed, 20);
+}
+
+on timer tIviMonitor
+{
+  if (!gIviHeartbeatSeen)
+  {
+    write("WARN: IVI heartbeat not observed in monitor window");
+  }
+  else
+  {
+    write("INFO: IVI heartbeat alive=%d bootState=%d", gLastIviAlive, gIviBootState);
+  }
+
+  gAlive++;
+  if (gAlive > 15) gAlive = 0;
+  gIviHeartbeatSeen = 0;
+  setTimer(tIviMonitor, 200);
+}
+
+void setIgnitionOn()
+{
+  gPowerMode = 2;
+  write("PowerMode -> IGN");
+}
+
+void setAccessory()
+{
+  gPowerMode = 1;
+  write("PowerMode -> ACC");
+}
+
+void setIgnitionOff()
+{
+  gPowerMode = 0;
+  gSpeedRaw = 0;
+  write("PowerMode -> OFF");
+}
+
+void setReverseGear()
+{
+  message TCU_GearStatus gear;
+  gGear = 1;
+  gear.GearPosition = gGear;
+  output(gear);
+  write("Gear -> Reverse");
+}
+
+void setDriveGear()
+{
+  message TCU_GearStatus gear;
+  gGear = 3;
+  gear.GearPosition = gGear;
+  output(gear);
+  write("Gear -> Drive");
+}
+
+void setVehicleSpeed(float speedKph)
+{
+  gSpeedRaw = (long)(speedKph * 100.0);
+  write("VehicleSpeed -> %.2f kph", speedKph);
+}
+
+void sendSteeringWheelKey(int keyCode, char buttonName[])
+{
+  message SWC_Buttons swc;
+  swc.SWC_KeyCode = keyCode;
+  output(swc);
+  write("SWC -> %s (%d)", buttonName, keyCode);
+}
+
+on message IVI_Heartbeat
+{
+  gLastIviAlive = this.IVI_AliveCounter;
+  gIviHeartbeatSeen = 1;
+}
+
+on message IVI_Status
+{
+  gIviBootState = this.IVI_BootState;
+  write("IVI boot state update -> %d", gIviBootState);
+}
+
+on key 'i' { setIgnitionOn(); }
+on key 'a' { setAccessory(); }
+on key 'o' { setIgnitionOff(); }
+on key 'r' { setReverseGear(); }
+on key 'd' { setDriveGear(); }
+on key '5' { setVehicleSpeed(5.0); }
+on key 'u' { sendSteeringWheelKey(1, "VOL_UP"); }
+on key 'j' { sendSteeringWheelKey(2, "VOL_DOWN"); }
+on key 'v' { sendSteeringWheelKey(4, "VOICE"); }

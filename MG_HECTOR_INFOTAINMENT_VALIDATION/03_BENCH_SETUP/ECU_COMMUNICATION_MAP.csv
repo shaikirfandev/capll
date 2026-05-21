@@ -1,0 +1,8 @@
+Source,Destination,Protocol,Data,Validation_Purpose
+BCM,IVI,CAN,PowerMode DoorStatus LampStatus,Wakeup UI state timeout DTC
+TCU,IVI,CAN,GearPosition,Reverse camera trigger
+VCU,IVI,CAN,VehicleSpeed,Speed lockouts navigation dead reckoning
+SWC,IVI,CAN,Button events,Media phone voice control
+IVI,Cluster,CAN,Media warning status,Cluster sync validation
+CameraGW,IVI,Ethernet/LVDS/Analog,Video and camera status,Reverse and 360 camera validation
+TCU/Telematics,IVI,Ethernet/CAN,OTA connectivity state,OTA and connected services

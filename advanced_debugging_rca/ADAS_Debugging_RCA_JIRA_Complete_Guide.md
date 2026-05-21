@@ -1,4 +1,4 @@
-# ADAS Validation — Debugging, Root Cause Analysis & JIRA Bug Reporting
+ # ADAS Validation — Debugging, Root Cause Analysis & JIRA Bug Reporting
 ## Complete Professional Reference for Automotive Test Engineers
 
 > **Document Classification:** Technical Reference — Validation Engineering
@@ -41,7 +41,7 @@
     - 14.5 Steps to Reproduce — Professional Formatting
     - 14.6 Attaching Evidence — What and How
     - 14.7 JIRA Workflow States
-    - 14.8 Linking Tickets (Defect ↔ Requirement ↔ Test Case)
+    - 14.8 Linking Tickets (Defect ↔ Requirement ↔ Test Case)   
     - 14.9 Writing Defect Comments During Investigation
     - 14.10 Closing a Defect After Fix Verification
 15. [Real ADAS Bug Examples with Full JIRA Tickets](#15-real-adas-bug-examples-with-full-jira-tickets)
@@ -51,7 +51,7 @@
 
 ---
 
-## 1. Debugging Philosophy in Automotive Testing
+  ## 1. Debugging Philosophy in Automotive Testing
 
 ### 1.1 The Core Principle: Evidence Before Conclusion
 

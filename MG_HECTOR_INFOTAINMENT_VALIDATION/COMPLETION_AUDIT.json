@@ -1,0 +1,258 @@
+{
+  "modules_checked": 50,
+  "required_artifacts_per_module": 31,
+  "modules_passed": 50,
+  "missing_count": 0,
+  "modules": [
+    {
+      "folder": "01_AUTOMOTIVE_BASICS",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "02_INFOTAINMENT_ARCHITECTURE",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "03_BENCH_SETUP",
+      "file_count": 33,
+      "missing": []
+    },
+    {
+      "folder": "04_VECTOR_CANOE",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "05_CAPL_PROGRAMMING",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "06_CAN_PROTOCOL",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "07_AUTOMOTIVE_ETHERNET",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "08_ANDROID_AUTOMOTIVE",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "09_IVI_FEATURES",
+      "file_count": 33,
+      "missing": []
+    },
+    {
+      "folder": "10_BLUETOOTH_VALIDATION",
+      "file_count": 33,
+      "missing": []
+    },
+    {
+      "folder": "11_WIFI_VALIDATION",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "12_USB_VALIDATION",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "13_CARPLAY_ANDROID_AUTO",
+      "file_count": 33,
+      "missing": []
+    },
+    {
+      "folder": "14_AUDIO_VALIDATION",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "15_VIDEO_VALIDATION",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "16_NAVIGATION_SYSTEM",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "17_REVERSE_CAMERA",
+      "file_count": 33,
+      "missing": []
+    },
+    {
+      "folder": "18_360_CAMERA_SYSTEM",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "19_CLUSTER_INTEGRATION",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "20_STEERING_SWITCH_CONTROLS",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "21_HVAC_INTEGRATION",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "22_CAN_SIGNAL_SIMULATION",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "23_UDS_DIAGNOSTICS",
+      "file_count": 34,
+      "missing": []
+    },
+    {
+      "folder": "24_ECU_FLASHING",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "25_OTA_TESTING",
+      "file_count": 33,
+      "missing": []
+    },
+    {
+      "folder": "26_PERFORMANCE_TESTING",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "27_STRESS_TESTING",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "28_MEMORY_LEAK_ANALYSIS",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "29_LOG_ANALYSIS",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "30_AUTOMATION_FRAMEWORK",
+      "file_count": 57,
+      "missing": []
+    },
+    {
+      "folder": "31_PYTHON_AUTOMATION",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "32_TEST_CASE_DESIGN",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "33_REQUIREMENT_TRACEABILITY",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "34_DEFECT_MANAGEMENT",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "35_VECTOR_TOOLS",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "36_CANOE_AUTOMATION",
+      "file_count": 33,
+      "missing": []
+    },
+    {
+      "folder": "37_HIL_SIL_SETUP",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "38_VEHICLE_SIGNAL_SIMULATION",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "39_POWER_MODE_VALIDATION",
+      "file_count": 33,
+      "missing": []
+    },
+    {
+      "folder": "40_SLEEP_WAKEUP_TESTING",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "41_BOOT_TIME_ANALYSIS",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "42_ANDROID_LOGCAT",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "43_LINUX_DEBUGGING",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "44_REAL_WORLD_ISSUES",
+      "file_count": 33,
+      "missing": []
+    },
+    {
+      "folder": "45_INTERVIEW_PREPARATION",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "46_SYSTEM_DESIGN",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "47_CYBERSECURITY_BASICS",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "48_FUNCTIONAL_SAFETY",
+      "file_count": 31,
+      "missing": []
+    },
+    {
+      "folder": "49_REAL_PROJECTS",
+      "file_count": 32,
+      "missing": []
+    },
+    {
+      "folder": "50_CAPSTONE_BENCH_PROJECT",
+      "file_count": 34,
+      "missing": []
+    }
+  ]
+}

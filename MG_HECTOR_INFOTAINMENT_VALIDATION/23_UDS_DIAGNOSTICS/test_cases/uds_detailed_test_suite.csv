@@ -1,0 +1,6 @@
+TestID,Service,Type,Precondition,Request,Expected,Evidence
+UDS-001,0x10,Functional,IVI awake,10 03,50 03,CANoe diagnostics log
+UDS-002,0x22,Functional,Extended session,22 F1 80,62 F1 80,CANoe diagnostics log
+UDS-003,0x19,Functional,Fault injected,19 02 FF,59 02 with expected DTC,DTC snapshot
+UDS-004,0x27,Negative,Extended session,27 02 invalid_key,7F 27 35,diagnostics log
+UDS-005,0x11,Recovery,Approved reset test,11 01,51 01 and reboot,trace logcat

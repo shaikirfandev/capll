@@ -1,0 +1,34 @@
+{
+    "version": "1.0",
+    "comment": "ADAS real-time runtime configuration",
+
+    "scheduler": {
+        "lock_memory": true,
+        "tasks": [
+            {
+                "name":         "sensor_fusion",
+                "priority":     70,
+                "cpu_affinity": 2,
+                "period_ms":    20
+            },
+            {
+                "name":         "plan_control",
+                "priority":     60,
+                "cpu_affinity": 2,
+                "period_ms":    50
+            },
+            {
+                "name":         "diagnostics",
+                "priority":     40,
+                "cpu_affinity": -1,
+                "period_ms":    100
+            }
+        ]
+    },
+
+    "thresholds": {
+        "max_jitter_warn_us":     500,
+        "max_jitter_error_us":   1000,
+        "deadline_miss_limit":      5
+    }
+}

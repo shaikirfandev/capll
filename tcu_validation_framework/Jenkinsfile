@@ -1,0 +1,205 @@
+// ============================================================
+// Jenkinsfile — Declarative pipeline for TCU Validation Framework
+// ============================================================
+
+pipeline {
+    agent {
+        docker {
+            image 'ubuntu:22.04'
+            args '--privileged --cap-add=NET_ADMIN'
+        }
+    }
+
+    environment {
+        BUILD_TYPE   = 'Debug'
+        REPORT_DIR   = "${WORKSPACE}/reports"
+        BUILD_DIR    = "${WORKSPACE}/build/${BUILD_TYPE}"
+        DEBIAN_FRONTEND = 'noninteractive'
+    }
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
+    }
+
+    stages {
+        // -------------------------------------------------------
+        stage('Checkout') {
+            steps {
+                checkout scm
+                sh 'git submodule update --init --recursive'
+            }
+        }
+
+        // -------------------------------------------------------
+        stage('Install Dependencies') {
+            steps {
+                sh '''
+                    apt-get update -q
+                    apt-get install -y \
+                        build-essential cmake ninja-build git \
+                        cppcheck clang clang-tidy clang-format \
+                        can-utils iproute2 lcov gcovr \
+                        libssl-dev python3 python3-pip
+                '''
+            }
+        }
+
+        // -------------------------------------------------------
+        stage('Setup vcan0') {
+            steps {
+                sh '''
+                    modprobe vcan || true
+                    ip link add dev vcan0 type vcan || true
+                    ip link set up vcan0
+                    ip link show vcan0
+                '''
+            }
+        }
+
+        // -------------------------------------------------------
+        stage('Configure') {
+            steps {
+                sh """
+                    cmake -S . -B ${BUILD_DIR} \
+                        -G Ninja \
+                        -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+                        -DBUILD_TESTS=ON \
+                        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+                """
+            }
+        }
+
+        // -------------------------------------------------------
+        stage('Build') {
+            steps {
+                sh "cmake --build ${BUILD_DIR} --parallel \$(nproc)"
+            }
+            post {
+                success {
+                    archiveArtifacts artifacts: "build/${BUILD_TYPE}/bin/**", fingerprint: true
+                }
+            }
+        }
+
+        // -------------------------------------------------------
+        stage('Static Analysis') {
+            parallel {
+                stage('cppcheck') {
+                    steps {
+                        sh """
+                            cmake --build ${BUILD_DIR} --target cppcheck 2>&1 | tee ${WORKSPACE}/cppcheck.txt || true
+                        """
+                        recordIssues(tools: [cppCheck(pattern: 'cppcheck.txt')])
+                    }
+                }
+                stage('clang-tidy') {
+                    steps {
+                        sh """
+                            cmake --build ${BUILD_DIR} --target clang-tidy 2>&1 | tee ${WORKSPACE}/clang-tidy.txt || true
+                        """
+                    }
+                }
+            }
+        }
+
+        // -------------------------------------------------------
+        stage('Unit Tests') {
+            steps {
+                sh """
+                    mkdir -p ${REPORT_DIR}
+                    ${BUILD_DIR}/bin/unit_tests \
+                        --gtest_output=xml:${REPORT_DIR}/unit_tests.xml \
+                        --gtest_color=yes
+                """
+            }
+            post {
+                always {
+                    junit "${REPORT_DIR}/unit_tests.xml"
+                }
+            }
+        }
+
+        // -------------------------------------------------------
+        stage('Integration Tests') {
+            steps {
+                sh """
+                    ${BUILD_DIR}/bin/integration_tests \
+                        --gtest_output=xml:${REPORT_DIR}/integration_tests.xml \
+                        --gtest_color=yes
+                """
+            }
+            post {
+                always {
+                    junit "${REPORT_DIR}/integration_tests.xml"
+                }
+            }
+        }
+
+        // -------------------------------------------------------
+        stage('Coverage') {
+            when { branch 'main' }
+            steps {
+                sh """
+                    cmake -S . -B build/coverage \
+                        -G Ninja \
+                        -DCMAKE_BUILD_TYPE=Debug \
+                        -DCMAKE_CXX_FLAGS='--coverage -O0' \
+                        -DBUILD_TESTS=ON
+                    cmake --build build/coverage --parallel \$(nproc)
+                    build/coverage/bin/unit_tests || true
+                    build/coverage/bin/integration_tests || true
+                    gcovr \
+                        --root src/ \
+                        --html-details ${REPORT_DIR}/coverage.html \
+                        --xml ${REPORT_DIR}/coverage.xml \
+                        --print-summary
+                """
+                publishHTML([
+                    allowMissing: false,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: "${REPORT_DIR}",
+                    reportFiles: 'coverage.html',
+                    reportName: 'Coverage Report'
+                ])
+            }
+        }
+
+        // -------------------------------------------------------
+        stage('Package') {
+            when {
+                anyOf {
+                    branch 'main'
+                    tag pattern: 'v\\d+\\.\\d+\\.\\d+', comparator: 'REGEXP'
+                }
+            }
+            steps {
+                sh """
+                    cmake -S . -B build/release \
+                        -G Ninja \
+                        -DCMAKE_BUILD_TYPE=Release \
+                        -DBUILD_TESTS=OFF
+                    cmake --build build/release --parallel \$(nproc)
+                    cd build/release && cpack -G DEB -G TGZ
+                """
+                archiveArtifacts artifacts: 'build/release/*.deb, build/release/*.tar.gz',
+                                  fingerprint: true
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
+            cleanWs()
+        }
+        failure {
+            echo "Build FAILED — check logs at ${BUILD_URL}"
+        }
+        success {
+            echo "Build PASSED — all stages completed"
+        }
+    }
+}

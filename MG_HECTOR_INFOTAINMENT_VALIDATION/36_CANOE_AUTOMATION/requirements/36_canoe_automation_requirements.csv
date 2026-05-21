@@ -1,0 +1,6 @@
+RequirementID,ASIL_or_QM,Requirement,Priority,Verification,LinkedTest
+MGH-36-FUNC-001,QM,CANoe Automation nominal behavior shall work in IGN mode,P0,Bench functional test,TC_FUNC_001
+MGH-36-NEG-001,QM,CANoe Automation shall handle invalid or missing dependency input gracefully,P0,Fault injection,TC_NEG_001
+MGH-36-REC-001,QM,CANoe Automation shall recover after sleep wake or reconnect where applicable,P1,Recovery test,TC_REC_001
+MGH-36-DIAG-001,QM,CANoe Automation diagnostic identification and DTC behavior shall match diagnostic spec,P1,UDS test,TC_DIAG_001
+MGH-36-PERF-001,QM,CANoe Automation user-visible latency shall meet KPI,P1,Performance test,TC_PERF_001

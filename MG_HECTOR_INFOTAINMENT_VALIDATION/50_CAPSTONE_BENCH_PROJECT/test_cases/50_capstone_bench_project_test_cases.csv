@@ -1,0 +1,6 @@
+TestID,Requirement,Precondition,Stimulus,Expected_Result,Evidence,Priority
+TC_SMOKE_001,IVI shall publish heartbeat,KL30 and KL15 stable,Start CANoe measurement,IVI heartbeat present within timeout,CANoe BLF and report,P0
+TC_FUNC_001,Feature shall respond to valid vehicle signal,IVI ready and rest bus active,Inject nominal signal sequence,Correct UI/audio/video/CAN response observed,CAN trace plus logcat,P0
+TC_NEG_001,Feature shall fail gracefully on missing input,IVI ready,Stop required CAN message,Timeout handling and DTC behavior match spec,CAN trace plus DTC read,P1
+TC_BOUND_001,Feature shall handle boundary values,IVI ready,Inject min max and invalid ranges,No crash and defined UI behavior,CAN trace plus screen evidence,P1
+TC_STRESS_001,Feature shall remain stable over endurance,IVI ready,Repeat stimulus 500 cycles,No crash memory leak or permanent fault,Automation report,P1

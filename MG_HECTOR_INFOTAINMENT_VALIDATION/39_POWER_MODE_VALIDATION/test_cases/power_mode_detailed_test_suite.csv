@@ -1,0 +1,6 @@
+TestID,Type,Precondition,Stimulus,Expected,Evidence
+PWR-001,Functional,KL30 stable,KL15 ON,IVI boots to ready state,CAN power trace logcat
+PWR-002,Functional,IGN ON,KL15 OFF,IVI starts shutdown/sleep policy,current trace CAN
+PWR-003,Boundary,IGN ON,Crank voltage dip,No data corruption defined reset behavior,power supply log
+PWR-004,Recovery,Sleep state,CAN wake frame,IVI wakes and restores state,wake trace logcat
+PWR-005,Stress,Bench stable,200 ignition cycles,No boot loop no DTC accumulation,automation report

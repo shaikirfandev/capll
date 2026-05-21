@@ -1,0 +1,43 @@
+# Build directories
+build/
+build_*/
+out/
+
+# Compiled objects
+*.o
+*.a
+*.so
+*.dylib
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+compile_commands.json
+_deps/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Coverage
+*.gcno
+*.gcda
+*.gcov
+coverage/
+
+# Logs
+*.log
+fms.log
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# Test artifacts
+Testing/

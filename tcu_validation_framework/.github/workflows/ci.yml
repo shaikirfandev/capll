@@ -1,0 +1,243 @@
+name: CI — TCU Validation Framework
+
+on:
+  push:
+    branches: [main, develop, "release/**"]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_TYPE: Debug
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  # ============================================================
+  # Build & Unit Test (Ubuntu)
+  # ============================================================
+  build-and-test:
+    name: Build + Unit Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04]
+        build_type: [Debug, Release]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            build-essential cmake ninja-build git \
+            cppcheck clang clang-tidy clang-format \
+            can-utils iproute2 lcov gcovr \
+            libssl-dev python3 python3-pip
+
+      - name: Setup vcan0
+        run: |
+          sudo modprobe vcan
+          sudo ip link add dev vcan0 type vcan || true
+          sudo ip link set up vcan0
+
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build/${{ matrix.build_type }} \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DBUILD_TESTS=ON \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Build
+        run: cmake --build build/${{ matrix.build_type }} --parallel $(nproc)
+
+      - name: Run unit tests
+        working-directory: build/${{ matrix.build_type }}
+        run: |
+          ./bin/unit_tests \
+            --gtest_output=xml:unit_tests.xml \
+            --gtest_color=yes
+
+      - name: Run integration tests
+        working-directory: build/${{ matrix.build_type }}
+        run: |
+          ./bin/integration_tests \
+            --gtest_output=xml:integration_tests.xml \
+            --gtest_color=yes
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.build_type }}-${{ matrix.os }}
+          path: |
+            build/${{ matrix.build_type }}/unit_tests.xml
+            build/${{ matrix.build_type }}/integration_tests.xml
+
+  # ============================================================
+  # Static Analysis
+  # ============================================================
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-22.04
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y build-essential cmake ninja-build cppcheck clang clang-tidy
+
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build/analysis \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run cppcheck
+        run: |
+          cmake --build build/analysis --target cppcheck 2>&1 | tee cppcheck_report.txt
+          # Fail if cppcheck finds errors
+          if grep -q "error:" cppcheck_report.txt; then
+            echo "cppcheck found errors!"
+            exit 1
+          fi
+
+      - name: Run clang-tidy
+        run: |
+          cmake --build build/analysis --target clang-tidy 2>&1 | tee clang_tidy_report.txt || true
+
+      - name: Upload analysis reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: static-analysis-reports
+          path: |
+            cppcheck_report.txt
+            clang_tidy_report.txt
+
+  # ============================================================
+  # Code Coverage
+  # ============================================================
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-22.04
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            build-essential cmake ninja-build can-utils iproute2 \
+            lcov gcovr python3
+
+      - name: Setup vcan0
+        run: |
+          sudo modprobe vcan
+          sudo ip link add dev vcan0 type vcan || true
+          sudo ip link set up vcan0
+
+      - name: Configure with coverage
+        run: |
+          cmake -S . -B build/coverage \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="--coverage -O0" \
+            -DCMAKE_C_FLAGS="--coverage -O0" \
+            -DBUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build/coverage --parallel $(nproc)
+
+      - name: Run tests
+        working-directory: build/coverage
+        run: |
+          ./bin/unit_tests || true
+          ./bin/integration_tests || true
+
+      - name: Generate coverage report
+        run: |
+          gcovr \
+            --root src/ \
+            --html-details reports/coverage.html \
+            --xml reports/coverage.xml \
+            --cobertura reports/coverage-cobertura.xml \
+            --exclude tests/ \
+            --exclude build/ \
+            --print-summary
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: reports/
+
+  # ============================================================
+  # Docker Build
+  # ============================================================
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-22.04
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: tcu-validation-framework:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================================
+  # Package (Release only)
+  # ============================================================
+  package:
+    name: Create Release Package
+    runs-on: ubuntu-22.04
+    needs: [build-and-test, static-analysis]
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get install -y build-essential cmake ninja-build
+
+      - name: Build Release
+        run: |
+          cmake -S . -B build/release \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTS=OFF
+          cmake --build build/release --parallel $(nproc)
+
+      - name: Create packages
+        working-directory: build/release
+        run: cpack -G DEB -G TGZ
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: build/release/*.{deb,tar.gz}

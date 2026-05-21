@@ -1,0 +1,6 @@
+10:20:01.001 TCP  tester:54123 -> ivi:13400  DoIP routing activation request
+10:20:01.025 TCP  ivi:13400 -> tester:54123  DoIP routing activation response positive
+10:20:01.100 UDS  tester -> ivi  10 03
+10:20:01.112 UDS  ivi -> tester  50 03
+10:20:01.200 UDS  tester -> ivi  22 F1 80
+10:20:01.219 UDS  ivi -> tester  62 F1 80 4D 47 48 5F 49 56 49

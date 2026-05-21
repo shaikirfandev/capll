@@ -1,0 +1,20 @@
+bench_id: MGH_BENCH_01
+mode: dry_run
+canoe:
+  config_path: C:/MGHector/CANoe/MGH_IVI_Bench.cfg
+  measurement_timeout_s: 15
+  environment_variables:
+    PowerMode: Env_PowerMode
+    GearPosition: Env_GearPosition
+    VehicleSpeed: Env_VehicleSpeed
+adb:
+  serial: ""
+  collect_bugreport_on_failure: false
+diagnostics:
+  request_timeout_ms: 1000
+  safe_mode: true
+kpis:
+  boot_heartbeat_timeout_s: 20
+  reverse_camera_latency_ms: 700
+evidence_root: evidence
+

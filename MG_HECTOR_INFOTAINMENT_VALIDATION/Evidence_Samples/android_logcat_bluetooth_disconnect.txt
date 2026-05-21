@@ -1,0 +1,5 @@
+05-21 11:02:01.100  1801  1942 I BluetoothA2dp: state CONNECTED device=REF_PHONE_01
+05-21 11:17:42.445  1801  2010 W BtGatt.GattService: link supervision timeout
+05-21 11:17:42.482  1801  1942 I BluetoothA2dp: state DISCONNECTED reason=0x08
+05-21 11:17:47.620  1801  1942 I BluetoothA2dp: reconnect attempt=1
+05-21 11:17:50.033  1801  1942 E BluetoothA2dp: reconnect failed profile busy

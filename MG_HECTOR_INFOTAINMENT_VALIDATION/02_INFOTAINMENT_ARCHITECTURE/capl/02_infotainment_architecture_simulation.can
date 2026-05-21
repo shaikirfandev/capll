@@ -1,0 +1,147 @@
+/*
+  Module 02 - Infotainment Architecture
+  MG Hector IVI Validation Bench
+  Purpose : Exercise the IVI startup sequence and its dependencies on power,
+            heartbeat, boot-state transitions and steering wheel inputs.
+  DBC     : MG_Hector_IVI_Training.dbc
+  Signals : BCM_PowerMode, VCU_VehicleSpeed, TCU_GearStatus,
+            SWC_Buttons, IVI_Heartbeat, IVI_Status
+*/
+
+variables
+{
+  msTimer tPowerMode;
+  msTimer tVehicleSpeed;
+  msTimer tIviPublish;
+  msTimer tArchitectureMonitor;
+  int gPowerMode = 0;
+  int gGear = 0;
+  long gSpeedRaw = 0;
+  int gAlive = 0;
+  int gIviBoot = 0;
+  int gIviReadySeen = 0;
+  int gHeartbeatRx = 0;
+}
+
+on start
+{
+  write("[02_INFOTAINMENT_ARCHITECTURE] IVI startup architecture simulation started");
+  write("Keys: i=IGN a=ACC o=OFF b=boot-ready x=diag r=reverse d=drive u=volup v=voice h=status");
+  setTimer(tPowerMode, 10);
+  setTimer(tVehicleSpeed, 20);
+  setTimer(tIviPublish, 100);
+  setTimer(tArchitectureMonitor, 250);
+}
+
+on timer tPowerMode
+{
+  message BCM_PowerMode msg;
+  msg.PowerMode = gPowerMode;
+  msg.AliveCounter = gAlive & 0x0F;
+  output(msg);
+  setTimer(tPowerMode, 10);
+}
+
+on timer tVehicleSpeed
+{
+  message VCU_VehicleSpeed spd;
+  spd.VehicleSpeed_kph = gSpeedRaw;
+  output(spd);
+  setTimer(tVehicleSpeed, 20);
+}
+
+on timer tIviPublish
+{
+  message IVI_Heartbeat hb;
+  message IVI_Status status;
+  hb.IVI_AliveCounter = gAlive & 0x0F;
+  status.IVI_BootState = gIviBoot;
+  output(hb);
+  output(status);
+  gAlive++;
+  if (gAlive > 15) gAlive = 0;
+  setTimer(tIviPublish, 100);
+}
+
+on timer tArchitectureMonitor
+{
+  if (gPowerMode >= 1 && !gIviReadySeen)
+  {
+    write("[ARCH] Waiting for IVI ready state. Current boot=%d", gIviBoot);
+  }
+  if (!gHeartbeatRx)
+  {
+    write("[ARCH] Heartbeat publish window elapsed without receive confirmation");
+  }
+  gHeartbeatRx = 0;
+  setTimer(tArchitectureMonitor, 250);
+}
+
+void setPowerMode(int mode, char name[])
+{
+  gPowerMode = mode;
+  if (mode == 0)
+  {
+    gSpeedRaw = 0;
+    gIviBoot = 0;
+    gIviReadySeen = 0;
+  }
+  else if (mode == 1)
+  {
+    gIviBoot = 1;
+  }
+  write("[BCM] PowerMode -> %s", name);
+}
+
+void setGear(int gearPos, char name[])
+{
+  message TCU_GearStatus gear;
+  gGear = gearPos;
+  gear.GearPosition = gGear;
+  output(gear);
+  write("[TCU] Gear -> %s", name);
+}
+
+void setVehicleSpeed(float speedKph)
+{
+  gSpeedRaw = (long)(speedKph * 100.0);
+  write("[VCU] VehicleSpeed -> %.1f kph", speedKph);
+}
+
+void publishSwc(int keyCode, char label[])
+{
+  message SWC_Buttons swc;
+  swc.SWC_KeyCode = keyCode;
+  output(swc);
+  write("[SWC] %s (%d)", label, keyCode);
+}
+
+on message IVI_Heartbeat
+{
+  gHeartbeatRx = 1;
+}
+
+on message IVI_Status
+{
+  gIviBoot = this.IVI_BootState;
+  if (gIviBoot == 2)
+  {
+    gIviReadySeen = 1;
+  }
+  write("[IVI] BootState -> %d", gIviBoot);
+}
+
+on key 'i' { setPowerMode(2, "IGN"); }
+on key 'a' { setPowerMode(1, "ACC"); }
+on key 'o' { setPowerMode(0, "OFF"); }
+on key 'b' { gIviBoot = 2; gIviReadySeen = 1; write("[IVI] Forced ready state"); }
+on key 'x' { gIviBoot = 3; write("[IVI] Diagnostic session active"); }
+on key 'r' { setGear(1, "Reverse"); setVehicleSpeed(5.0); }
+on key 'd' { setGear(3, "Drive"); setVehicleSpeed(20.0); }
+on key 'u' { publishSwc(1, "VOL_UP"); }
+on key 'v' { publishSwc(4, "VOICE"); }
+on key 'h'
+{
+  write("[STATUS] Power=%d Gear=%d Speed=%.1f Ready=%d Alive=%d",
+        gPowerMode, gGear, gSpeedRaw / 100.0, gIviReadySeen, gAlive);
+}

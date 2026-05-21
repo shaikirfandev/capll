@@ -1,0 +1,7 @@
+FaultID,Fault_Type,Injection_Method,Expected_IVI_Behavior,Expected_Diagnostic_Behavior,Evidence
+FI-001,Missing cyclic CAN input,Stop related rest bus message in CANoe,Graceful timeout handling no crash,DTC set if specified,CANoe trace plus DTC read
+FI-002,Invalid signal range,Transmit out-of-range or invalid enum value,Ignore or fallback to safe default,NRC/DTC per spec,CAN trace logcat
+FI-003,Power interruption,Toggle KL15 or apply low-voltage profile,No corruption defined recovery,No unexpected permanent DTC,Power log CAN trace
+FI-004,Peripheral disconnect,Disconnect USB phone camera audio or network dependency,User-visible recovery message,DTC only if specified,Kernel log logcat screen
+FI-005,High load condition,Run bus load or app stress while feature active,No ANR boot loop or permanent degradation,No critical DTC,Performance logs
+FI-006,Sleep/wakeup transition,Enter sleep during active feature then wake,State restored or reset as requirement defines,DTC behavior per spec,CAN wake trace logcat

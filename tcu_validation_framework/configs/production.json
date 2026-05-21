@@ -1,0 +1,43 @@
+{
+  "// comment": "Production overlay — applied on top of default.json in production deployments",
+
+  "can": {
+    "interface":     "can0",
+    "loopback":      false,
+    "rx_timeout_ms": 50
+  },
+
+  "uds": {
+    "p2_timeout_ms": 500,
+    "p2_star_ms":    3000
+  },
+
+  "telematics": {
+    "server_url":             "mqtts://telematics.oem-backend.example.com:8883",
+    "client_id":              "tcu_validator_prod",
+    "simulation_mode":        false,
+    "max_reconnect_attempts": 10,
+    "reconnect_delay_ms":     5000,
+    "use_tls":                true,
+    "ca_cert_path":           "/etc/tcu/certs/ca.crt",
+    "client_cert_path":       "/etc/tcu/certs/client.crt",
+    "client_key_path":        "/etc/tcu/certs/client.key"
+  },
+
+  "logging": {
+    "log_dir":             "/var/log/tcu",
+    "enable_console":      false,
+    "console_level":       "warn",
+    "global_level":        "info"
+  },
+
+  "reporting": {
+    "output_dir": "/var/reports/tcu"
+  },
+
+  "watchdog": {
+    "enabled":      true,
+    "timeout_ms":   10000,
+    "kick_interval_ms": 2000
+  }
+}

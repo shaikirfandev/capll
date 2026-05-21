@@ -1,0 +1,6 @@
+TestID,Projection,Type,Precondition,Stimulus,Expected,KPI,Evidence
+PROJ-AA-001,Android Auto,Functional,Certified cable phone unlocked,Connect USB,Projection starts and audio route correct,Within KPI,USB log logcat screen
+PROJ-CP-002,CarPlay,Functional,iPhone trusted,Connect USB,CarPlay starts and Siri route correct,Within KPI,USB log screen
+PROJ-REC-003,Projection,Recovery,Projection active,Unplug and reconnect USB,Previous session recovers gracefully,Within KPI,kernel log logcat
+PROJ-NEG-004,Projection,Negative,Projection launching,Revoke phone permission,Actionable message no crash,N/A,screen logcat
+PROJ-AUD-005,Projection Audio,Integration,Projection navigation active,Start BT call,Correct focus and ducking,No audio leak,audio trace logcat
