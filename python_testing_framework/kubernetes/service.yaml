@@ -1,0 +1,67 @@
+# ============================================================
+# kubernetes/service.yaml
+# ADAS Test Framework — Kubernetes Services
+# ============================================================
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: allure-service
+  namespace: adas-testing
+  labels:
+    app: allure
+spec:
+  type: ClusterIP
+  selector:
+    app: allure-server
+  ports:
+    - name: http
+      port: 5050
+      targetPort: 5050
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-service
+  namespace: adas-testing
+  labels:
+    app: grafana
+spec:
+  type: LoadBalancer
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: influxdb-service
+  namespace: adas-testing
+  labels:
+    app: influxdb
+spec:
+  type: ClusterIP
+  selector:
+    app: influxdb
+  ports:
+    - name: http
+      port: 8086
+      targetPort: 8086
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: adas-testing
+  labels:
+    purpose: automotive-validation
+    environment: ci

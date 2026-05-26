@@ -1,0 +1,57 @@
+# ============================================================
+# requirements/requirements.txt
+# Enterprise ADAS Hybrid Test Framework — Python dependencies
+# ============================================================
+
+# ── Core test frameworks ──────────────────────────────────────────────────────
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+pytest-xdist>=3.5.0         # parallel test execution
+pytest-timeout>=2.3.0
+pytest-rerunfailures>=13.0
+pytest-html>=4.1.0
+robotframework>=7.0.0
+robotframework-seleniumlibrary>=6.3.0
+
+# ── Allure reporting ──────────────────────────────────────────────────────────
+allure-pytest>=2.13.5
+allure-python-commons>=2.13.5
+
+# ── CAN / automotive bus ──────────────────────────────────────────────────────
+python-can>=4.3.1
+cantools>=39.4.5             # DBC decoding
+
+# ── UDS / ISO-TP diagnostics ─────────────────────────────────────────────────
+udsoncan>=2.0.0
+python-isotp>=2.0.0
+
+# ── Computer Vision (headless for CI) ────────────────────────────────────────
+opencv-python-headless>=4.9.0
+numpy>=1.26.0
+
+# ── Network / protocol ────────────────────────────────────────────────────────
+aiohttp>=3.9.0               # SOME/IP / REST hooks
+websockets>=12.0
+
+# ── Data / configuration ──────────────────────────────────────────────────────
+pyyaml>=6.0.1
+dataclasses-json>=0.6.4
+
+# ── Time-series metrics ───────────────────────────────────────────────────────
+influxdb-client>=1.40.0
+
+# ── Structured logging ────────────────────────────────────────────────────────
+python-json-logger>=2.0.7
+colorlog>=6.8.2
+
+# ── Static analysis / code quality ───────────────────────────────────────────
+flake8>=7.0.0
+mypy>=1.9.0
+black>=24.3.0
+isort>=5.13.2
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+click>=8.1.7                 # CLI helpers
+tabulate>=0.9.0              # table formatting
+python-dotenv>=1.0.1
+rich>=13.7.1                 # rich terminal output

@@ -1,0 +1,144 @@
+# ============================================================
+# kubernetes/deployment.yaml
+# ADAS Test Framework — Kubernetes Deployment
+# ============================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adas-test-runner
+  namespace: adas-testing
+  labels:
+    app: adas-test-runner
+    tier: testing
+    version: "1.0.0"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: adas-test-runner
+  template:
+    metadata:
+      labels:
+        app: adas-test-runner
+        tier: testing
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+
+      containers:
+        - name: test-runner
+          image: adas-test-framework:1.0.0
+          imagePullPolicy: IfNotPresent
+
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+
+          env:
+            - name: ENVIRONMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: adas-config
+                  key: environment
+            - name: SW_VERSION
+              valueFrom:
+                configMapKeyRef:
+                  name: adas-config
+                  key: sw_version
+            - name: INFLUX_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: adas-config
+                  key: influx_host
+
+          command:
+            - python3
+            - "-m"
+            - pytest
+          args:
+            - "python_testing_framework/pytest_framework/test_suites/"
+            - "-m"
+            - "regression and not hil"
+            - "--no-hardware"
+            - "--env=$(ENVIRONMENT)"
+            - "--sw-version=$(SW_VERSION)"
+            - "--alluredir=/app/allure-results"
+            - "--junitxml=/app/reports/results.xml"
+            - "-n"
+            - "2"
+            - "-v"
+
+          volumeMounts:
+            - name: reports-volume
+              mountPath: /app/reports
+            - name: allure-volume
+              mountPath: /app/allure-results
+            - name: config-volume
+              mountPath: /app/python_testing_framework/configs
+              readOnly: true
+
+          livenessProbe:
+            exec:
+              command:
+                - python3
+                - "-c"
+                - "import pytest; print('healthy')"
+            initialDelaySeconds: 30
+            periodSeconds: 60
+
+      volumes:
+        - name: reports-volume
+          persistentVolumeClaim:
+            claimName: adas-reports-pvc
+        - name: allure-volume
+          persistentVolumeClaim:
+            claimName: adas-allure-pvc
+        - name: config-volume
+          configMap:
+            name: adas-framework-config
+
+      restartPolicy: Never
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: adas-config
+  namespace: adas-testing
+data:
+  environment: "ci"
+  sw_version:  "DEV"
+  influx_host: "influxdb-service.adas-testing.svc.cluster.local"
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: adas-reports-pvc
+  namespace: adas-testing
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: adas-allure-pvc
+  namespace: adas-testing
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 20Gi

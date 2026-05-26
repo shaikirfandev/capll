@@ -1,0 +1,338 @@
+# ============================================================
+# ci_cd/github_actions.yml
+# Enterprise ADAS Hybrid Test Framework — GitHub Actions CI
+# ============================================================
+
+name: ADAS Validation CI
+
+on:
+  push:
+    branches: ["main", "develop", "release/**"]
+  pull_request:
+    branches: ["main", "develop"]
+  schedule:
+    - cron: "0 2 * * *"   # Nightly regression at 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Test environment (ci|sil|hil)"
+        required: false
+        default: "ci"
+      sw_version:
+        description: "SW version under test"
+        required: false
+        default: ""
+      run_performance:
+        description: "Run performance tests"
+        type: boolean
+        required: false
+        default: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  FRAMEWORK_DIR: "./python_testing_framework"
+  ALLURE_VERSION: "2.27.0"
+
+jobs:
+  # ── Lint & Static Analysis ──────────────────────────────────────────────
+  lint:
+    name: Lint & Static Analysis
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install lint tools
+        run: pip install flake8 mypy black isort
+
+      - name: Flake8
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          flake8 pytest_framework/ --max-line-length=120 --ignore=E501,W503 --count
+
+      - name: Black format check
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          black --check --line-length=120 pytest_framework/ || true
+
+  # ── Smoke Tests ────────────────────────────────────────────────────────
+  smoke:
+    name: Smoke Tests
+    needs: lint
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          pip install -r requirements/requirements.txt
+
+      - name: Run pytest smoke tests
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          python3 -m pytest pytest_framework/test_suites/ \
+            -m smoke \
+            --no-hardware \
+            --env=${{ github.event.inputs.environment || 'ci' }} \
+            --sw-version="${{ github.event.inputs.sw_version || github.sha }}" \
+            --alluredir=allure-results/smoke \
+            --tb=short \
+            --timeout=60 \
+            -v \
+            --junitxml=reports/smoke.xml
+
+      - name: Upload smoke results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results
+          path: ${{ env.FRAMEWORK_DIR }}/reports/smoke.xml
+
+  # ── Matrix Regression ──────────────────────────────────────────────────
+  regression:
+    name: Regression (${{ matrix.feature }})
+    needs: smoke
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        feature:
+          - acc
+          - aeb
+          - lka
+          - bsd
+          - tsr
+          - dms
+          - parking
+          - sensor_fusion
+          - cybersecurity
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          pip install -r requirements/requirements.txt
+
+      - name: Run ${{ matrix.feature }} tests
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          python3 -m pytest pytest_framework/test_suites/${{ matrix.feature }}/ \
+            -m "regression and not hil" \
+            --no-hardware \
+            --env=ci \
+            --alluredir=allure-results/${{ matrix.feature }} \
+            --tb=short \
+            --timeout=120 \
+            -v \
+            --junitxml=reports/${{ matrix.feature }}.xml || true
+
+      - name: Upload ${{ matrix.feature }} results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-${{ matrix.feature }}
+          path: ${{ env.FRAMEWORK_DIR }}/reports/${{ matrix.feature }}.xml
+
+  # ── Safety Suite ────────────────────────────────────────────────────────
+  safety:
+    name: Safety & ASIL Tests
+    needs: smoke
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          pip install -r requirements/requirements.txt
+
+      - name: Run safety tests
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          python3 -m pytest pytest_framework/test_suites/ \
+            -m "safety or asil_b or asil_d" \
+            --no-hardware \
+            --env=ci \
+            --alluredir=allure-results/safety \
+            --tb=long \
+            --timeout=180 \
+            -v \
+            --junitxml=reports/safety.xml || true
+
+      - name: Upload safety results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: safety-results
+          path: ${{ env.FRAMEWORK_DIR }}/reports/safety.xml
+
+  # ── Performance Tests ───────────────────────────────────────────────────
+  performance:
+    name: Performance Tests
+    needs: regression
+    if: ${{ github.event.inputs.run_performance != 'false' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          pip install -r requirements/requirements.txt
+
+      - name: Run performance suite
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          python3 -m pytest pytest_framework/test_suites/performance/ \
+            --no-hardware \
+            --env=ci \
+            --alluredir=allure-results/performance \
+            --tb=short \
+            --timeout=300 \
+            -v \
+            --junitxml=reports/performance.xml || true
+
+      - name: Upload performance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: ${{ env.FRAMEWORK_DIR }}/reports/performance.xml
+
+  # ── Robot Framework Tests ───────────────────────────────────────────────
+  robot:
+    name: Robot Framework Tests
+    needs: smoke
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          pip install -r requirements/requirements.txt
+
+      - name: Run Robot Framework suites
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          python3 -m robot \
+            --variable ENVIRONMENT:ci \
+            --variable SW_VERSION:${{ github.sha }} \
+            --exclude hil \
+            --outputdir reports/robot \
+            robot_framework/test_suites/ || true
+
+      - name: Upload Robot results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: robot-results
+          path: ${{ env.FRAMEWORK_DIR }}/reports/robot/
+
+  # ── Allure Report ───────────────────────────────────────────────────────
+  report:
+    name: Generate Allure Report
+    needs: [regression, safety, performance, robot]
+    if: always()
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all allure results
+        uses: actions/download-artifact@v4
+        with:
+          path: allure-artifacts/
+
+      - name: Setup Allure
+        uses: simple-elf/allure-report-action@master
+        with:
+          allure_results: allure-artifacts
+          allure_history: allure-history
+          keep_reports: 20
+
+      - name: Publish Allure Report
+        uses: peaceiris/actions-gh-pages@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: allure-history
+
+  # ── HIL Tests (self-hosted runner) ──────────────────────────────────────
+  hil:
+    name: HIL Bench Validation
+    needs: regression
+    if: ${{ github.event_name == 'schedule' || github.ref == 'refs/heads/release/**' }}
+    runs-on: [self-hosted, hil-bench]
+    environment: hil
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          pip install -r requirements/requirements.txt
+
+      - name: Run HIL suite
+        run: |
+          cd ${{ env.FRAMEWORK_DIR }}
+          python3 -m pytest pytest_framework/test_suites/ \
+            -m hil \
+            --hil \
+            --channel=PCAN0 \
+            --interface=pcan \
+            --env=hil \
+            --alluredir=allure-results/hil \
+            --tb=long \
+            -v \
+            --junitxml=reports/hil.xml
+
+      - name: Upload HIL results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hil-results
+          path: ${{ env.FRAMEWORK_DIR }}/reports/hil.xml

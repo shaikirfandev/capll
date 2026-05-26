@@ -67,7 +67,10 @@ class TestACC(ADASBaseTest):
         if actual is None:
             pytest.skip("VehicleSpeed signal not yet available")
 
-        self.assert_signal_in_range(actual, set_speed - 2.0, set_speed + 2.0)
+        assert (set_speed - 2.0) <= float(actual) <= (set_speed + 2.0), (
+            f"Vehicle speed {actual} km/h outside expected range "
+            f"[{set_speed - 2.0}, {set_speed + 2.0}]"
+        )
 
     @pytest.mark.parametrize("set_speed_kmh", [30, 60, 80, 100, 130])
     def test_speed_hold_parametrized(self, signals, can_bus, set_speed_kmh):
@@ -79,7 +82,10 @@ class TestACC(ADASBaseTest):
         if actual is None:
             pytest.skip("VehicleSpeed signal not available")
 
-        self.assert_signal_in_range(actual, set_speed_kmh - 2.0, set_speed_kmh + 2.0)
+        assert (set_speed_kmh - 2.0) <= float(actual) <= (set_speed_kmh + 2.0), (
+            f"Vehicle speed {actual} km/h outside expected range "
+            f"[{set_speed_kmh - 2.0}, {set_speed_kmh + 2.0}]"
+        )
 
     # ── Following distance ─────────────────────────────────────────────────────
 
@@ -89,7 +95,9 @@ class TestACC(ADASBaseTest):
         headway = signals.get(SIG_ACC_HEADWAY_S)
         if headway is None:
             pytest.skip("ACC headway signal not available")
-        self.assert_signal_in_range(headway, 1.5, 4.0)
+        assert 1.5 <= float(headway) <= 4.0, (
+            f"ACC following time {headway}s outside expected range [1.5, 4.0]"
+        )
 
     # ── Target tracking ────────────────────────────────────────────────────────
 
@@ -120,7 +128,10 @@ class TestACC(ADASBaseTest):
         actual = signals.get(SIG_VEHICLE_SPEED)
         if actual is None:
             pytest.skip("VehicleSpeed signal not available")
-        self.assert_signal_in_range(actual, set_speed - 5.0, set_speed + 5.0)
+        assert (set_speed - 5.0) <= float(actual) <= (set_speed + 5.0), (
+            f"Vehicle speed {actual} km/h outside expected range "
+            f"[{set_speed - 5.0}, {set_speed + 5.0}] after target loss"
+        )
 
     # ── Deceleration ───────────────────────────────────────────────────────────
 
@@ -172,7 +183,9 @@ class TestACC(ADASBaseTest):
         if status is None:
             pytest.skip("ACC status signal not available")
         # 30 km/h is at the lower boundary — status should still be ≥ 2 (active)
-        self.assert_signal_in_range(float(status), 0, 3)
+        assert 0 <= float(status) <= 3, (
+            f"ACC status {status} outside valid range [0, 3]"
+        )
 
     # ── False target rejection ─────────────────────────────────────────────────
 

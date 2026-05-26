@@ -1,0 +1,135 @@
+# ============================================================
+# docker/docker-compose.yml
+# ADAS Test Framework — Full observability stack
+# Services: test-runner, allure, influxdb, grafana, kibana
+# ============================================================
+
+version: "3.9"
+
+networks:
+  adas_net:
+    driver: bridge
+
+volumes:
+  influxdb_data:
+  grafana_data:
+  allure_results:
+  allure_history:
+
+services:
+
+  # ── Test Runner ──────────────────────────────────────────────────────────
+  test-runner:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: adas_test_runner
+    networks:
+      - adas_net
+    environment:
+      - ENVIRONMENT=ci
+      - SW_VERSION=${SW_VERSION:-DEV}
+      - INFLUX_HOST=influxdb
+      - INFLUX_PORT=8086
+      - INFLUX_DB=adas_metrics
+    volumes:
+      - allure_results:/app/allure-results
+      - ./reports:/app/reports
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    command: >
+      python_testing_framework/pytest_framework/test_suites/
+      -m "regression and not hil"
+      --no-hardware
+      --env=ci
+      --alluredir=/app/allure-results
+      --junitxml=/app/reports/results.xml
+      -v
+    restart: "no"
+
+  # ── Allure Server ────────────────────────────────────────────────────────
+  allure:
+    image: frankescobar/allure-docker-service:2.27.0
+    container_name: adas_allure
+    networks:
+      - adas_net
+    ports:
+      - "5050:5050"
+    environment:
+      CHECK_RESULTS_EVERY_SECONDS: 10
+      KEEP_HISTORY: 30
+    volumes:
+      - allure_results:/app/allure-results
+      - allure_history:/app/default-reports
+    depends_on:
+      - test-runner
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/allure-docker-service/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── InfluxDB (metrics time-series) ───────────────────────────────────────
+  influxdb:
+    image: influxdb:2.7
+    container_name: adas_influxdb
+    networks:
+      - adas_net
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE:     setup
+      DOCKER_INFLUXDB_INIT_USERNAME: adas_admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: adas_password_secure
+      DOCKER_INFLUXDB_INIT_ORG:      adas_org
+      DOCKER_INFLUXDB_INIT_BUCKET:   adas_metrics
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Grafana (dashboards) ─────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: adas_grafana
+    networks:
+      - adas_net
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER:     admin
+      GF_SECURITY_ADMIN_PASSWORD: adas_grafana_secure
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+      GF_SERVER_DOMAIN:           localhost
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Allure UI proxy ──────────────────────────────────────────────────────
+  allure-ui:
+    image: frankescobar/allure-docker-service-ui:7.0.3
+    container_name: adas_allure_ui
+    networks:
+      - adas_net
+    ports:
+      - "5252:5252"
+    environment:
+      ALLURE_DOCKER_PUBLIC_API_URL: http://localhost:5050
+    depends_on:
+      - allure
+    restart: unless-stopped

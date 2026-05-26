@@ -60,7 +60,9 @@ class TestLKA(ADASBaseTest):
         if offset is None:
             pytest.skip("LKA lateral offset signal not available")
 
-        self.assert_signal_in_range(abs(float(offset)), 0.0, 0.3)
+        assert abs(float(offset)) <= 0.3, (
+            f"LKA lateral offset |{offset}| m exceeds 0.3 m maximum"
+        )
 
     # ── Torque limits ─────────────────────────────────────────────────────────
 
@@ -71,7 +73,9 @@ class TestLKA(ADASBaseTest):
         torque = signals.get(SIG_LKA_TORQUE_REQ)
         if torque is None:
             pytest.skip("LKA torque request signal not available")
-        self.assert_signal_in_range(float(torque), -5.0, 5.0)
+        assert -5.0 <= float(torque) <= 5.0, (
+            f"LKA torque {torque} Nm outside ISO 11270 limit [-5.0, 5.0]"
+        )
 
     # ── Drift correction ──────────────────────────────────────────────────────
 

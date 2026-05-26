@@ -121,8 +121,8 @@ class TestBSD(ADASBaseTest):
         dist = signals.get(SIG_BSD_RIGHT_DIST)
         if dist is None:
             pytest.skip("BSD right distance signal not available")
-        self.assert_signal_in_range(
-            float(dist), expected_dist_m - 0.5, expected_dist_m + 0.5
+        assert float(dist) == pytest.approx(expected_dist_m, abs=0.5), (
+            f"BSD distance {dist} m deviates more than ±0.5 m from expected {expected_dist_m} m"
         )
 
     # ── Speed envelope ────────────────────────────────────────────────────────

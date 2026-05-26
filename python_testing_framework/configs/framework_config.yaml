@@ -1,0 +1,118 @@
+# ============================================================
+# configs/framework_config.yaml
+# Enterprise ADAS Hybrid Test Framework — Master Configuration
+# Override with: --config-file=/path/to/your_config.yaml
+# All values can also be set via environment variables.
+# ============================================================
+
+# ── Framework metadata ────────────────────────────────────────────────────────
+environment: ci           # ci | sil | hil
+sw_version:  ""           # e.g. "2.5.1-RC1" (override via CLI)
+hil_enabled: false
+
+# ── CAN Bus Configuration ─────────────────────────────────────────────────────
+can:
+  channel:    virtual     # virtual | PCAN0 | vcan0 | COM3
+  interface:  virtual     # virtual | pcan  | socketcan | kvaser | vector
+  bitrate:    500000      # 500 kbps standard
+  fd_enabled: false
+  fd_bitrate: 2000000     # 2 Mbps for CAN FD
+  dbc_path:   ""          # Path to .dbc file; empty = no DBC decoding
+  rx_buffer:  1000        # Max RX frame buffer
+  timeout_ms: 100
+
+# ── UDS Configuration ─────────────────────────────────────────────────────────
+uds:
+  p2_timeout_s:    2.0    # P2 server response timeout (s)
+  p2_ext_timeout:  5.0    # P2* extended timeout (s)
+  ecu_map:
+    ADAS_ECU:
+      tx_id: 0x740
+      rx_id: 0x748
+    BCM:
+      tx_id: 0x760
+      rx_id: 0x768
+    GW:
+      tx_id: 0x700
+      rx_id: 0x708
+
+# ── Radar Configuration ───────────────────────────────────────────────────────
+radar:
+  host:               "127.0.0.1"
+  port:               1234
+  max_range_m:        200.0
+  min_update_rate_hz: 10
+  max_objects:        64
+  azimuth_range_deg:  [-75.0, 75.0]
+  elevation_range_deg:[-15.0, 15.0]
+
+# ── Camera Configuration ──────────────────────────────────────────────────────
+camera:
+  source:            0         # /dev/video0 or RTSP URL
+  width:             1920
+  height:            1080
+  fps:               30
+  min_fps:           25.0
+  min_brightness:    30.0
+  max_blur_score:    100.0
+  calibration_file:  ""        # camera_matrix.yaml path
+
+# ── LiDAR Configuration ───────────────────────────────────────────────────────
+lidar:
+  host:               "127.0.0.1"
+  port:               2368      # Velodyne VLP-16 default
+  max_range_m:        100.0
+  min_update_rate_hz: 10
+  min_points:         100
+
+# ── HIL Configuration ─────────────────────────────────────────────────────────
+hil:
+  power_supply_host:  "192.168.10.20"
+  dspace_host:        "192.168.10.21"
+  carmaker_host:      "192.168.10.22"
+  canoe_project_path: ""
+  default_timeout_s:  30
+
+# ── Reporting Configuration ───────────────────────────────────────────────────
+report:
+  allure_dir:         "./allure-results"
+  html_dir:           "./reports/html"
+  influx_host:        "localhost"
+  influx_port:        8086
+  influx_db:          "adas_metrics"
+  grafana_url:        "http://localhost:3000"
+  send_to_influx:     false
+
+# ── Test execution defaults ───────────────────────────────────────────────────
+execution:
+  default_timeout_s:  120
+  short_timeout_s:    10
+  settle_time_s:      0.3
+  retry_count:        2
+  flaky_max_runs:     5
+  flaky_min_passes:   3
+
+# ── ASIL safety limits ────────────────────────────────────────────────────────
+safety_limits:
+  acc_max_decel_mpss:    3.0
+  aeb_min_decel_mpss:    8.0
+  aeb_latency_max_ms:    600
+  lka_max_torque_nm:     3.0
+  lka_min_speed_kmh:     60
+  acc_min_speed_kmh:     30
+  acc_max_speed_kmh:     180
+  parking_max_speed_kmh: 15
+  bsd_zone_near_m:       0.5
+  bsd_zone_far_m:        4.5
+
+# ── Signal names (DBC-independent fallback) ───────────────────────────────────
+signals:
+  vehicle_speed:    "VehicleSpeed_kmh"
+  acc_status:       "ACC_Status"
+  aeb_status:       "AEB_Status"
+  lka_status:       "LKA_Status"
+  bsd_left:         "BSD_LeftZone_Status"
+  bsd_right:        "BSD_RightZone_Status"
+  tsr_sign_id:      "TSR_DetectedSignID"
+  dms_status:       "DMS_Status"
+  park_status:      "ParkAssist_Status"

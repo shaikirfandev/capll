@@ -1,0 +1,256 @@
+// ============================================================
+// ci_cd/Jenkinsfile
+// Enterprise ADAS Hybrid Test Framework — Jenkins Pipeline
+// 8 Stages: Setup → Lint → Flash → Smoke → Regression →
+//           Safety → Performance → Report
+// ============================================================
+
+pipeline {
+    agent {
+        docker {
+            image 'python:3.11-slim'
+            args  '--network host -v /dev/bus/usb:/dev/bus/usb'
+        }
+    }
+
+    parameters {
+        string(name: 'SW_VERSION',   defaultValue: '',      description: 'ECU SW version under test')
+        string(name: 'ECU_CHANNEL',  defaultValue: 'virtual', description: 'CAN channel (virtual|PCAN0|vcan0)')
+        string(name: 'ENVIRONMENT',  defaultValue: 'ci',    description: 'ci | hil | sil')
+        booleanParam(name: 'RUN_HIL',       defaultValue: false, description: 'Run HIL bench tests')
+        booleanParam(name: 'RUN_PERF',      defaultValue: true,  description: 'Run performance tests')
+        booleanParam(name: 'SKIP_FLASH',    defaultValue: true,  description: 'Skip ECU flash step')
+    }
+
+    environment {
+        PYTHONPATH         = "${WORKSPACE}/python_testing_framework"
+        ALLURE_RESULTS_DIR = "${WORKSPACE}/allure-results"
+        REPORT_DIR         = "${WORKSPACE}/reports"
+        PYTEST_OPTS        = "--no-hardware --env=${params.ENVIRONMENT} --sw-version=${params.SW_VERSION}"
+        ROBOT_OPTS         = "--variable ENVIRONMENT:${params.ENVIRONMENT} --variable SW_VERSION:${params.SW_VERSION}"
+    }
+
+    stages {
+
+        // ── Stage 1: Setup ────────────────────────────────────────────────
+        stage('Setup') {
+            steps {
+                echo "⚙ Setting up ADAS Test Framework"
+                sh """
+                    pip install --quiet --upgrade pip
+                    pip install --quiet -r python_testing_framework/requirements/requirements.txt
+                    mkdir -p ${ALLURE_RESULTS_DIR} ${REPORT_DIR}
+                """
+                echo "Python: $(python3 --version)"
+                echo "pytest: $(python3 -m pytest --version)"
+            }
+        }
+
+        // ── Stage 2: Lint & Static Analysis ──────────────────────────────
+        stage('Lint') {
+            steps {
+                echo "🔍 Running linting and static analysis"
+                sh """
+                    cd python_testing_framework
+                    python3 -m flake8 pytest_framework/ \
+                        --max-line-length=120 \
+                        --ignore=E501,W503 \
+                        --count --statistics || true
+                    python3 -m mypy pytest_framework/core/ \
+                        --ignore-missing-imports --no-error-summary || true
+                """
+            }
+        }
+
+        // ── Stage 3: Flash ECU ────────────────────────────────────────────
+        stage('Flash ECU') {
+            when {
+                allOf {
+                    expression { !params.SKIP_FLASH }
+                    expression { params.ENVIRONMENT != 'ci' }
+                }
+            }
+            steps {
+                echo "⚡ Flashing ECU with SW version ${params.SW_VERSION}"
+                sh """
+                    cd python_testing_framework
+                    python3 -c "
+from pytest_framework.diagnostics.uds_client import UDSClient
+import asyncio
+print('ECU flash placeholder — integrate with your flash tool here')
+"
+                """
+            }
+        }
+
+        // ── Stage 4: Smoke Tests ──────────────────────────────────────────
+        stage('Smoke Tests') {
+            steps {
+                echo "💨 Running smoke test suite"
+                sh """
+                    cd python_testing_framework
+                    python3 -m pytest pytest_framework/test_suites/ \
+                        -m smoke \
+                        ${PYTEST_OPTS} \
+                        --alluredir=${ALLURE_RESULTS_DIR}/smoke \
+                        --tb=short \
+                        --timeout=60 \
+                        -x \
+                        -v \
+                        --junitxml=${REPORT_DIR}/smoke_results.xml \
+                    || true
+                """
+                // Robot Framework smoke
+                sh """
+                    cd python_testing_framework
+                    python3 -m robot \
+                        ${ROBOT_OPTS} \
+                        --include smoke \
+                        --outputdir ${REPORT_DIR}/robot_smoke \
+                        --log NONE \
+                        robot_framework/test_suites/ \
+                    || true
+                """
+            }
+            post {
+                always {
+                    junit "${REPORT_DIR}/smoke_results.xml"
+                }
+            }
+        }
+
+        // ── Stage 5: Regression Tests ─────────────────────────────────────
+        stage('Regression') {
+            steps {
+                echo "🔄 Running full regression suite"
+                sh """
+                    cd python_testing_framework
+                    python3 -m pytest pytest_framework/test_suites/ \
+                        -m "regression and not performance and not hil" \
+                        ${PYTEST_OPTS} \
+                        --alluredir=${ALLURE_RESULTS_DIR}/regression \
+                        --tb=short \
+                        --timeout=120 \
+                        -n auto \
+                        -v \
+                        --junitxml=${REPORT_DIR}/regression_results.xml \
+                    || true
+                """
+                sh """
+                    cd python_testing_framework
+                    python3 -m robot \
+                        ${ROBOT_OPTS} \
+                        --exclude smoke --exclude hil --exclude performance \
+                        --outputdir ${REPORT_DIR}/robot_regression \
+                        robot_framework/test_suites/ \
+                    || true
+                """
+            }
+            post {
+                always {
+                    junit "${REPORT_DIR}/regression_results.xml"
+                }
+            }
+        }
+
+        // ── Stage 6: Safety Tests ─────────────────────────────────────────
+        stage('Safety Tests') {
+            steps {
+                echo "🛡 Running ASIL safety test suite"
+                sh """
+                    cd python_testing_framework
+                    python3 -m pytest pytest_framework/test_suites/ \
+                        -m "safety or asil_b or asil_d" \
+                        ${PYTEST_OPTS} \
+                        --alluredir=${ALLURE_RESULTS_DIR}/safety \
+                        --tb=long \
+                        --timeout=180 \
+                        -v \
+                        --junitxml=${REPORT_DIR}/safety_results.xml \
+                    || true
+                """
+            }
+            post {
+                always {
+                    junit "${REPORT_DIR}/safety_results.xml"
+                }
+            }
+        }
+
+        // ── Stage 7: Performance Tests ────────────────────────────────────
+        stage('Performance') {
+            when {
+                expression { params.RUN_PERF }
+            }
+            steps {
+                echo "⏱ Running performance and timing validation"
+                sh """
+                    cd python_testing_framework
+                    python3 -m pytest pytest_framework/test_suites/performance/ \
+                        -m performance \
+                        ${PYTEST_OPTS} \
+                        --alluredir=${ALLURE_RESULTS_DIR}/performance \
+                        --tb=short \
+                        --timeout=300 \
+                        -v \
+                        --junitxml=${REPORT_DIR}/performance_results.xml \
+                    || true
+                """
+            }
+            post {
+                always {
+                    junit "${REPORT_DIR}/performance_results.xml"
+                }
+            }
+        }
+
+        // ── Stage 8: Report Generation ────────────────────────────────────
+        stage('Report') {
+            steps {
+                echo "📊 Generating Allure and Robot Framework reports"
+                sh """
+                    allure generate ${ALLURE_RESULTS_DIR} \
+                        --output ${REPORT_DIR}/allure-html \
+                        --clean || true
+                """
+                // Merge Robot Framework outputs
+                sh """
+                    python3 -m robot.rebot \
+                        --outputdir ${REPORT_DIR}/robot_combined \
+                        --name "ADAS_Validation_${params.SW_VERSION}" \
+                        ${REPORT_DIR}/robot_*/output.xml || true
+                """
+                echo "✅ All reports generated"
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/**', fingerprint: true
+                    publishHTML([
+                        reportDir:   "${REPORT_DIR}/allure-html",
+                        reportFiles: 'index.html',
+                        reportName:  'Allure Report',
+                        keepAll:     true
+                    ])
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Pipeline PASSED — SW ${params.SW_VERSION}"
+        }
+        failure {
+            echo "❌ Pipeline FAILED — check reports"
+            emailext(
+                to:          "${env.CHANGE_AUTHOR_EMAIL}",
+                subject:     "ADAS Test FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body:        "Build failed. Check ${env.BUILD_URL}",
+                attachLog:   true
+            )
+        }
+        always {
+            cleanWs(deleteDirs: true, patterns: [[pattern: 'allure-results/**', type: 'INCLUDE']])
+        }
+    }
+}

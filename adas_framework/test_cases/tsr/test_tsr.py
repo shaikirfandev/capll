@@ -169,4 +169,6 @@ class TestTSR(ADASBaseTest):
         sign_val = signals.get(SIG_TSR_SPEED_VALUE)
         if sign_val is None:
             pytest.skip("TSR speed value signal not available")
-        self.assert_signal_equals(float(sign_val), float(test_speed), tolerance=0)
+        assert float(sign_val) == pytest.approx(float(test_speed)), (
+            f"TSR CAN speed value {sign_val} does not match recognized sign {test_speed}"
+        )
