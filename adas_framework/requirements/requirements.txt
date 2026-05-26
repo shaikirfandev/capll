@@ -1,0 +1,59 @@
+# adas_framework/requirements/requirements.txt
+# ─────────────────────────────────────────────────────────────────────────────
+# ADAS Enterprise Test Framework — Python Dependencies
+#
+# Install: pip install -r requirements/requirements.txt
+# Python:  3.10 | 3.11 | 3.12
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Test framework ────────────────────────────────────────────────────────────
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+pytest-html>=4.0.0
+pytest-xdist>=3.3.0          # Parallel test execution
+pytest-timeout>=2.2.0
+pytest-rerunfailures>=13.0   # Flaky test reruns
+pytest-mock>=3.12.0
+
+# ── Reporting ─────────────────────────────────────────────────────────────────
+allure-pytest>=2.13.0
+openpyxl>=3.1.2               # Excel reports
+jinja2>=3.1.2                 # HTML templates
+
+# ── CAN / Automotive Bus ──────────────────────────────────────────────────────
+python-can>=4.3.0             # CAN bus abstraction (PCAN, Vector, SocketCAN)
+cantools>=39.0.0              # DBC/ARXML signal decoder
+
+# ── UDS / ISO-TP ──────────────────────────────────────────────────────────────
+udsoncan>=1.22.0              # ISO 14229 UDS client
+python-isotp>=2.0.0           # ISO 15765-2 transport protocol
+
+# ── Ethernet / Automotive Networking ─────────────────────────────────────────
+# doipclient>=1.1.0           # DoIP (uncomment if ADAS_ECU uses Ethernet diagnostics)
+# someip>=0.1.8               # SOME/IP parsing (uncomment for Ethernet tests)
+
+# ── Sensor / CV ───────────────────────────────────────────────────────────────
+numpy>=1.24.0
+opencv-python-headless>=4.9.0  # Camera validation (headless — no Qt/X11)
+# open3d>=0.18.0              # LiDAR point cloud (uncomment if LiDAR available)
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+
+# ── Async ──────────────────────────────────────────────────────────────────────
+# asyncio is stdlib, no install needed
+aiohttp>=3.9.0                # Async HTTP (Allure server, Grafana API)
+
+# ── Metrics / Observability ────────────────────────────────────────────────────
+influxdb-client>=1.39.0       # Push test metrics to InfluxDB (Grafana)
+
+# ── Linting / Dev tools ────────────────────────────────────────────────────────
+flake8>=7.0.0
+mypy>=1.8.0
+black>=24.0.0
+isort>=5.13.0
+
+# ── Optional hardware tools ────────────────────────────────────────────────────
+# pypcan>=0.2.0               # PCAN Windows API (Windows HIL only)
+# peak-can-basic>=0.1.0       # Alternative PCAN binding

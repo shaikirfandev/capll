@@ -1,0 +1,129 @@
+# adas_framework/docker/docker-compose.yml
+# ADAS Test Framework — Docker Compose orchestration
+#
+# Services:
+#   test-runner   — Main test executor (headless)
+#   allure        — Allure report server (port 4040)
+#   grafana       — Metrics dashboard (port 3000)
+#   influxdb      — Time-series metrics store (port 8086)
+#
+# Usage:
+#   docker-compose up -d allure grafana influxdb
+#   docker-compose run --rm test-runner pytest test_cases/ -m smoke --no-hardware
+#
+# Environment variables (override in .env file):
+#   SW_VERSION         Build version string
+#   CAN_CHANNEL        PCAN/SocketCAN channel
+#   HW_VARIANT         Hardware variant name
+#   TEST_SUITE         smoke | regression | full
+
+version: '3.8'
+
+services:
+
+  # ── Test runner ─────────────────────────────────────────────────────────
+  test-runner:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: adas-test-framework:latest
+    container_name: adas-test-runner
+    volumes:
+      - ./reports:/reports
+      - ./logs:/logs
+      - ./allure-results:/adas_framework/allure-results
+      # Mount real CAN device if running on HIL
+      # - /dev/pcan0:/dev/pcan0
+    environment:
+      - SW_VERSION=${SW_VERSION:-dev}
+      - ADAS_ENV=docker
+      - ADAS_LOG_DIR=/logs
+      - PYTHONPATH=/adas_framework
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN:-}
+      - INFLUXDB_ORG=${INFLUXDB_ORG:-adas}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-test_metrics}
+    networks:
+      - adas-net
+    depends_on:
+      - influxdb
+    # Default command: smoke tests (override with 'docker-compose run')
+    command: >
+      pytest test_cases/
+        -m "smoke"
+        --no-hardware
+        --sw-version ${SW_VERSION:-dev}
+        --env docker
+        -v
+        --tb=short
+        --alluredir=/adas_framework/allure-results
+        --html=/reports/smoke_report.html
+        --self-contained-html
+        -q
+    restart: "no"
+
+  # ── Allure report server ─────────────────────────────────────────────────
+  allure:
+    image: frankescobar/allure-docker-service:latest
+    container_name: adas-allure
+    ports:
+      - "4040:5050"
+    volumes:
+      - ./allure-results:/app/allure-results
+      - ./allure-reports:/app/default-reports
+    environment:
+      - CHECK_RESULTS_EVERY_SECONDS=3
+      - KEEP_HISTORY=20
+    networks:
+      - adas-net
+    restart: unless-stopped
+
+  # ── InfluxDB (metrics store) ──────────────────────────────────────────────
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: adas-influxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_ADMIN_PASS:-admin1234}
+      - DOCKER_INFLUXDB_INIT_ORG=adas
+      - DOCKER_INFLUXDB_INIT_BUCKET=test_metrics
+      - DOCKER_INFLUXDB_INIT_RETENTION=30d
+    networks:
+      - adas-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Grafana (dashboards) ──────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: adas-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASS:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_DOMAIN=localhost
+    networks:
+      - adas-net
+    depends_on:
+      - influxdb
+    restart: unless-stopped
+
+volumes:
+  influxdb-data:
+  grafana-data:
+
+networks:
+  adas-net:
+    driver: bridge

@@ -1,0 +1,147 @@
+# adas_framework/configs/test_config.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# ADAS Enterprise Test Framework — Master Configuration
+#
+# Override any value via environment variable using the prefix ADAS_:
+#   ADAS_CAN_CHANNEL=PCAN_USBBUS1
+#   ADAS_UDS_TX_ID=0x741
+#   ADAS_ENV_NAME=HIL_LAB_02
+#
+# This file is loaded by core/config.py at import time.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── CAN Bus ──────────────────────────────────────────────────────────────────
+can:
+  channel:        "virtual"          # PCAN_USBBUS1 | virtual | socketcan | kvaser
+  interface:      "virtual"          # pcan | vector | socketcan | virtual
+  bitrate:        500000             # 500 kbit/s (HS CAN)
+  fd_enabled:     false
+  dbc_path:       "test_data/dbs/ADAS_Network.dbc"
+  timeout_s:      5.0
+  rx_queue_size:  1000
+
+# ── UDS Diagnostics ──────────────────────────────────────────────────────────
+uds:
+  tx_id:          0x7DF              # Functional broadcast (optional)
+  rx_id:          0x7E8
+  timeout_s:      5.0
+  p2_server_max:  0.025              # s
+  p2_star_server: 5.0                # s (extended)
+  ecu_map:
+    ADAS_ECU:   { tx: 0x740, rx: 0x748 }
+    BMS:        { tx: 0x741, rx: 0x749 }
+    VCU:        { tx: 0x742, rx: 0x74A }
+    TCU:        { tx: 0x743, rx: 0x74B }
+    RADAR_F:    { tx: 0x744, rx: 0x74C }
+    CAMERA:     { tx: 0x745, rx: 0x74D }
+    LIDAR:      { tx: 0x746, rx: 0x74E }
+    DMS:        { tx: 0x747, rx: 0x74F }
+
+# ── Radar ─────────────────────────────────────────────────────────────────────
+radar:
+  can_id_base:          0x200        # Base CAN ID for radar object list
+  max_objects:          64
+  target_range_min_m:   0.5
+  target_range_max_m:   250.0
+  velocity_min_mps:     -80.0        # -288 km/h
+  velocity_max_mps:     80.0         # +288 km/h
+  azimuth_min_deg:      -75.0
+  azimuth_max_deg:      75.0
+  snr_threshold_db:     5.0          # Ghost object rejection threshold
+  update_rate_hz:       20.0
+
+# ── Camera ────────────────────────────────────────────────────────────────────
+camera:
+  rtsp_url:             "rtsp://localhost:8554/adas_camera"
+  resolution_w:         1920
+  resolution_h:         1080
+  fps:                  30
+  lane_detection_confidence: 0.85
+  calibration_file:     "test_data/calibration/front_camera.yaml"
+
+# ── LiDAR ─────────────────────────────────────────────────────────────────────
+lidar:
+  host:                 "127.0.0.1"
+  port:                 2368          # Velodyne VLP-16 default
+  max_range_m:          100.0
+  min_points_per_scan:  1000
+  update_rate_hz:       10.0
+
+# ── Ethernet ─────────────────────────────────────────────────────────────────
+ethernet:
+  interface:            "eth0"
+  someip_multicast_ip:  "239.192.255.251"
+  someip_port:          30491
+  doip_host:            "192.168.1.10"
+  doip_port:            13400
+  vlan_id:              10
+
+# ── HIL ──────────────────────────────────────────────────────────────────────
+hil:
+  enabled:              false
+  host:                 "192.168.10.100"
+  port:                 5000
+  bench_id:             "HIL_LAB_01"
+  psu_channel:          1
+  nominal_voltage_v:    12.0
+  min_voltage_v:        9.0
+  max_voltage_v:        16.0
+
+# ── Reports ──────────────────────────────────────────────────────────────────
+report:
+  output_dir:           "test_reports/"
+  allure_results_dir:   "allure-results/"
+  html_report:          true
+  excel_report:         true
+  junit_xml:            true
+  grafana_push:         false
+  grafana_url:          "http://localhost:3000"
+  influxdb_url:         "http://localhost:8086"
+  influxdb_token:       ""
+  influxdb_org:         "adas"
+  influxdb_bucket:      "test_metrics"
+
+# ── Environment ───────────────────────────────────────────────────────────────
+environment:
+  name:                 "SIL_DEV"    # SIL_DEV | HIL_LAB_01 | HIL_RELEASE
+  adas_sw_version:      "dev"
+  hw_variant:           "PB10"       # PCB revision
+  test_site:            "local"
+  jira_project:         "ADAS"
+  jira_url:             "https://jira.example.com"
+
+# ── Timing Limits (ms) ────────────────────────────────────────────────────────
+timing_limits:
+  acc_response_ms:      200
+  aeb_latency_ms:       600
+  lka_torque_delay_ms:  100
+  tsr_recognition_ms:   500
+  uds_response_ms:      5000
+  can_cycle_tolerance:  20           # % of nominal
+
+# ── Signal timeout defaults (ms) ─────────────────────────────────────────────
+signal_timeouts:
+  default_ms:           200
+  safety_critical_ms:   100          # AEB, ESC signals
+  comfort_ms:           500          # TSR, DMS convenience signals
+
+# ── DTC definitions ──────────────────────────────────────────────────────────
+dtc_map:
+  # Radar
+  B0100: "RADAR_FRONT_FAILURE"
+  B0101: "RADAR_FRONT_MISALIGNMENT"
+  # Camera
+  B0200: "CAMERA_FRONT_FAILURE"
+  B0201: "CAMERA_CALIBRATION_FAULT"
+  # LiDAR
+  B0300: "LIDAR_FAILURE"
+  # AEB
+  C0100: "AEB_SYSTEM_FAILURE"
+  C0101: "AEB_ACTIVATION_FAULT"
+  # ACC
+  C0200: "ACC_SYSTEM_FAILURE"
+  # LKA
+  C0300: "LKA_TORQUE_FAULT"
+  # DMS
+  B0500: "DMS_CAMERA_OCCLUSION"
+  B0501: "DMS_INFRARED_FAILURE"

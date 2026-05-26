@@ -1,0 +1,246 @@
+# adas_framework/ci_cd/github_actions.yml
+# GitHub Actions workflow — ADAS Enterprise Test Framework
+# Triggers: push to main/develop, PR, manual dispatch
+# Runs headless tests (--no-hardware) on GitHub-hosted runners
+# Hardware tests run on self-hosted HIL runner (tagged: hil-bench)
+
+name: ADAS Test Framework — CI
+
+on:
+  push:
+    branches: [main, develop, release/**]
+    paths:
+      - 'adas_framework/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      sw_version:
+        description: 'SW Version (e.g. 1.4.2)'
+        required: false
+        default: 'dev'
+      test_suite:
+        description: 'Test suite to run'
+        required: false
+        default: 'smoke'
+        type: choice
+        options:
+          - smoke
+          - regression
+          - full
+      run_hardware:
+        description: 'Run hardware tests (requires self-hosted runner)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  PYTHONPATH:    ${{ github.workspace }}/adas_framework
+  ADAS_ENV:      github_actions
+  ADAS_LOG_DIR:  logs/
+  PYTHON_VERSION: '3.11'
+
+# ── Cancel in-progress runs for same branch ──────────────────────────────────
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ── 1. Lint & static analysis ──────────────────────────────────────────────
+  lint:
+    name: Lint (flake8 + mypy)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: adas_framework
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dev tools
+        run: pip install flake8 mypy types-PyYAML
+
+      - name: flake8
+        run: |
+          flake8 core/ can/ diagnostics/ radar/ camera/ sensor_fusion/ \
+                 test_cases/ utilities/ ai_analytics/ replay_tools/ \
+                 --max-line-length=120 --count --statistics
+        continue-on-error: true
+
+      - name: mypy (strict=false)
+        run: mypy core/ --ignore-missing-imports
+        continue-on-error: true
+
+  # ── 2. Smoke tests (headless) ─────────────────────────────────────────────
+  smoke:
+    name: Smoke Tests (headless)
+    runs-on: ubuntu-latest
+    needs: lint
+    defaults:
+      run:
+        working-directory: adas_framework
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements/requirements.txt
+
+      - name: Run smoke tests
+        run: |
+          pytest test_cases/ \
+            -m "smoke" \
+            --no-hardware \
+            --sw-version "${{ github.event.inputs.sw_version || 'ci' }}" \
+            -v \
+            --tb=short \
+            --html=test_reports/smoke_report.html \
+            --self-contained-html \
+            --junitxml=test_reports/smoke_junit.xml \
+            -q
+        env:
+          ADAS_ENV: ${{ env.ADAS_ENV }}
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-reports
+          path: adas_framework/test_reports/
+
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-junit
+          path: adas_framework/test_reports/smoke_junit.xml
+
+      - name: Publish test results
+        if: always()
+        uses: mikepenz/action-junit-report@v4
+        with:
+          report_paths: 'adas_framework/test_reports/*_junit.xml'
+          check_name:   'Smoke Test Results'
+
+  # ── 3. Regression tests ───────────────────────────────────────────────────
+  regression:
+    name: Regression Tests
+    runs-on: ubuntu-latest
+    needs: smoke
+    if: >
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.event.inputs.test_suite != 'smoke')
+    defaults:
+      run:
+        working-directory: adas_framework
+
+    strategy:
+      fail-fast: false
+      matrix:
+        feature: [acc, aeb, lka, tsr, bsd, dms]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements/requirements.txt
+
+      - name: Run ${{ matrix.feature }} regression
+        run: |
+          pytest test_cases/${{ matrix.feature }}/ \
+            -m "regression" \
+            --no-hardware \
+            -v \
+            --tb=short \
+            --alluredir=allure-results/ \
+            --junitxml=test_reports/${{ matrix.feature }}_junit.xml
+        env:
+          ADAS_ENV: ${{ env.ADAS_ENV }}
+        continue-on-error: true
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-${{ matrix.feature }}
+          path: |
+            adas_framework/test_reports/
+            adas_framework/allure-results/
+
+  # ── 4. Allure report publishing ────────────────────────────────────────────
+  allure-report:
+    name: Publish Allure Report
+    runs-on: ubuntu-latest
+    needs: regression
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded_artifacts/
+
+      - name: Merge allure results
+        run: |
+          mkdir -p allure-results
+          find downloaded_artifacts/ -name "*.json" -exec cp {} allure-results/ \;
+
+      - name: Publish Allure Report
+        uses: simple-elf/allure-publish-action@master
+        with:
+          allure_results: allure-results
+          allure_history: allure-history
+          keep_reports:   20
+
+  # ── 5. Hardware tests (self-hosted HIL runner) ────────────────────────────
+  hardware-tests:
+    name: HIL Hardware Tests
+    runs-on: [self-hosted, hil-bench]
+    needs: smoke
+    if: >
+      (github.event_name == 'workflow_dispatch' &&
+       github.event.inputs.run_hardware == 'true') ||
+      (github.ref == 'refs/heads/main' && github.event_name == 'push')
+    environment: hil-production
+    defaults:
+      run:
+        working-directory: adas_framework
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: pip install -r requirements/requirements.txt
+
+      - name: Run hardware smoke tests
+        run: |
+          pytest test_cases/ \
+            -m "hardware and smoke" \
+            --channel PCAN_USBBUS1 \
+            --interface pcan \
+            --sw-version "${{ github.event.inputs.sw_version || github.sha }}" \
+            -v \
+            --tb=long \
+            --junitxml=test_reports/hardware_junit.xml
+
+      - name: Upload hardware results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardware-results
+          path: adas_framework/test_reports/

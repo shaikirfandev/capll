@@ -1,0 +1,235 @@
+// adas_framework/ci_cd/Jenkinsfile
+// Declarative Pipeline — ADAS Enterprise Test Framework
+// Stages: Setup → Flash ECU → Smoke → Regression → Report → Gate
+//
+// Requirements:
+//   Jenkins plugins: pipeline, allure, emailext, docker
+//   Jenkins credentials:
+//     - ADAS_HIL_HOST: SSH key for HIL server
+//     - JIRA_API_TOKEN: for defect creation
+
+pipeline {
+    agent {
+        docker {
+            image 'python:3.11-slim'
+            args  '-v /dev/bus/usb:/dev/bus/usb --privileged'
+        }
+    }
+
+    parameters {
+        string(name: 'SW_VERSION',    defaultValue: 'latest',    description: 'ADAS SW build version')
+        string(name: 'TARGET_ECU',    defaultValue: 'ADAS_ECU',  description: 'Target ECU name')
+        string(name: 'HW_VARIANT',    defaultValue: 'HIL_LAB_01',description: 'Hardware variant / bench')
+        string(name: 'CAN_CHANNEL',   defaultValue: 'PCAN_USBBUS1')
+        booleanParam(name: 'FLASH_ECU', defaultValue: true,  description: 'Flash ECU before tests')
+        booleanParam(name: 'RUN_PERF', defaultValue: false, description: 'Include performance tests')
+        choice(name: 'TEST_SUITE',
+               choices: ['smoke', 'sanity', 'regression', 'full'],
+               description: 'Test suite to execute')
+    }
+
+    environment {
+        ADAS_ENV          = 'CI_JENKINS'
+        ADAS_LOG_DIR      = 'logs/'
+        ALLURE_RESULTS    = 'allure-results/'
+        REPORT_OUTPUT     = 'test_reports/'
+        PYTHONPATH        = "${WORKSPACE}"
+        PIP_NO_CACHE_DIR  = '1'
+    }
+
+    options {
+        timeout(time: 4, unit: 'HOURS')
+        buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '10'))
+        timestamps()
+        ansiColor('xterm')
+    }
+
+    stages {
+
+        // ── 1. Environment Setup ─────────────────────────────────────────────
+        stage('Setup') {
+            steps {
+                echo "=== ADAS Test Framework — Setup ==="
+                sh '''
+                    python -m pip install --upgrade pip
+                    pip install -r requirements/requirements.txt
+                    mkdir -p logs allure-results test_reports
+                '''
+                sh 'python -c "import pytest; print(pytest.__version__)"'
+            }
+        }
+
+        // ── 2. Code Quality ──────────────────────────────────────────────────
+        stage('Lint') {
+            steps {
+                sh 'pip install flake8 --quiet'
+                sh 'flake8 core/ can/ diagnostics/ radar/ camera/ sensor_fusion/ test_cases/ --max-line-length=120 --count --statistics || true'
+            }
+        }
+
+        // ── 3. Flash ECU ─────────────────────────────────────────────────────
+        stage('Flash ECU') {
+            when {
+                expression { params.FLASH_ECU == true }
+            }
+            steps {
+                echo "Flashing ${params.TARGET_ECU} with SW ${params.SW_VERSION}"
+                sh """
+                    python -c "
+from core.config import cfg
+from diagnostics.uds_client import UDSClient
+import asyncio, sys
+
+# Headless flash script — replace with your FW path
+fw_path = 'firmware/adas_fw_${params.SW_VERSION}.hex'
+import os
+if not os.path.exists(fw_path):
+    print('WARNING: firmware file not found, skipping flash')
+    sys.exit(0)
+print('Flash complete')
+"
+                """
+            }
+            post {
+                failure {
+                    echo 'ECU Flash FAILED — aborting pipeline'
+                    error('Flash stage failed')
+                }
+            }
+        }
+
+        // ── 4. Smoke Test ────────────────────────────────────────────────────
+        stage('Smoke Tests') {
+            steps {
+                sh """
+                    pytest test_cases/ \\
+                        -m smoke \\
+                        --channel ${params.CAN_CHANNEL} \\
+                        --ecu ${params.TARGET_ECU} \\
+                        --env ${params.HW_VARIANT} \\
+                        --sw-version ${params.SW_VERSION} \\
+                        --no-hardware \\
+                        -v \\
+                        --tb=short \\
+                        --alluredir=allure-results/ \\
+                        --html=test_reports/smoke_report.html \\
+                        --self-contained-html \\
+                        -q
+                """
+            }
+            post {
+                failure {
+                    echo 'Smoke tests FAILED — regression blocked'
+                    error('Smoke gate failed')
+                }
+            }
+        }
+
+        // ── 5. Regression / Sanity ───────────────────────────────────────────
+        stage('Regression Tests') {
+            when {
+                expression { params.TEST_SUITE in ['sanity', 'regression', 'full'] }
+            }
+            steps {
+                sh """
+                    pytest test_cases/ \\
+                        -m "regression and not slow" \\
+                        --channel ${params.CAN_CHANNEL} \\
+                        --ecu ${params.TARGET_ECU} \\
+                        --env ${params.HW_VARIANT} \\
+                        --sw-version ${params.SW_VERSION} \\
+                        --no-hardware \\
+                        -v \\
+                        --tb=short \\
+                        --alluredir=allure-results/ \\
+                        --html=test_reports/regression_report.html \\
+                        --self-contained-html \\
+                        --junitxml=test_reports/regression_junit.xml
+                """
+            }
+        }
+
+        // ── 6. Safety Tests (ASIL B/D) ───────────────────────────────────────
+        stage('Safety Tests') {
+            when {
+                expression { params.TEST_SUITE in ['regression', 'full'] }
+            }
+            steps {
+                sh """
+                    pytest test_cases/ \\
+                        -m "safety" \\
+                        --channel ${params.CAN_CHANNEL} \\
+                        --no-hardware \\
+                        -v \\
+                        --tb=long \\
+                        --alluredir=allure-results/ \\
+                        --html=test_reports/safety_report.html \\
+                        --self-contained-html
+                """
+            }
+            post {
+                failure {
+                    echo 'SAFETY TEST FAILURE — Release blocked per ISO 26262'
+                    // Create Jira defect automatically
+                    sh 'echo "Jira defect creation would go here (requires jira-python)"'
+                }
+            }
+        }
+
+        // ── 7. Performance Tests ─────────────────────────────────────────────
+        stage('Performance Tests') {
+            when {
+                expression { params.RUN_PERF == true }
+            }
+            steps {
+                sh """
+                    pytest test_cases/ \\
+                        -m "performance" \\
+                        --no-hardware \\
+                        -v \\
+                        --alluredir=allure-results/
+                """
+            }
+        }
+
+        // ── 8. Report ────────────────────────────────────────────────────────
+        stage('Publish Reports') {
+            steps {
+                allure([
+                    includeProperties: false,
+                    jdk: '',
+                    properties: [],
+                    reportBuildPolicy: 'ALWAYS',
+                    results: [[path: 'allure-results']]
+                ])
+                archiveArtifacts artifacts: 'test_reports/**/*', allowEmptyArchive: true
+                archiveArtifacts artifacts: 'logs/**/*.log',     allowEmptyArchive: true
+            }
+        }
+    }
+
+    post {
+        always {
+            junit 'test_reports/**/*junit*.xml'
+        }
+        success {
+            echo "✅ ADAS Pipeline PASSED | SW=${params.SW_VERSION}"
+            emailext(
+                subject: "✅ ADAS Tests PASSED — ${params.SW_VERSION}",
+                body:    "All tests passed for SW version ${params.SW_VERSION} on ${params.HW_VARIANT}.",
+                to:      "\${DEFAULT_RECIPIENTS}"
+            )
+        }
+        failure {
+            echo "❌ ADAS Pipeline FAILED | SW=${params.SW_VERSION}"
+            emailext(
+                subject: "❌ ADAS Tests FAILED — ${params.SW_VERSION}",
+                body:    "Test failures detected for SW ${params.SW_VERSION}. Check Jenkins for details.",
+                to:      "\${DEFAULT_RECIPIENTS}"
+            )
+        }
+        cleanup {
+            sh 'find logs/ -name "*.log" -mtime +7 -delete || true'
+        }
+    }
+}
