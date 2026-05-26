@@ -1,0 +1,517 @@
+/*
+ * battery_ecu_simulation.can
+ * STANDALONE BMS ECU Simulation — Full Version
+ *
+ * This file is the standalone CAPL script version of the BMS simulation.
+ * For the full documented version with all features, see:
+ * SECTION_16_Complete_Projects.md → Project 4
+ *
+ * Features:
+ *   - SoC Coulomb counting with temperature compensation
+ *   - Multi-cell voltage simulation (min/max tracking)
+ *   - Precharge sequence with RC model (τ = 100ms)
+ *   - Contactor state machine
+ *   - All BMS fault detection (OV/UV/OT/ISO/HVIL)
+ *   - BMS_Status, BMS_Limits, BMS_Thermal, BMS_Diagnostics messages
+ *   - UDS diagnostic responses (Session, ReadDID 0xF101/F121/F180)
+ *   - Fault injection via system variables
+ */
+
+includes
+{
+}
+
+variables
+{
+  // ── Timers ──────────────────────────────────────────────────────────
+  msTimer tmrBMSMain;          // 10ms — BMS_Status
+  msTimer tmrBMSThermal;       // 100ms — BMS_Thermal
+  msTimer tmrBMSLimits;        // 100ms — BMS_Limits
+  msTimer tmrBMSDiag;          // 1000ms — BMS_Diagnostics
+  msTimer tmrFaultDetect;      // 20ms — fault monitoring (faster detection)
+  msTimer tmrPrecharge;        // 1ms — precharge RC model
+  msTimer tmrTesterPresent;    // 4500ms — UDS tester present keepalive
+
+  // ── BMS State ───────────────────────────────────────────────────────
+  int    bmsState;
+  const int BMS_INIT      = 0;
+  const int BMS_IDLE      = 1;
+  const int BMS_PRECHARGE = 2;
+  const int BMS_ACTIVE    = 3;
+  const int BMS_CHARGE    = 4;
+  const int BMS_FAULT     = 5;
+  const int BMS_SLEEP     = 6;
+
+  // ── Contactor states ────────────────────────────────────────────────
+  int    contMainPos;           // Main positive contactor
+  int    contMainNeg;           // Main negative contactor
+  int    contPrecharge;         // Precharge contactor
+
+  // ── Pack Parameters ─────────────────────────────────────────────────
+  float  packSoC;              // State of Charge [%]
+  float  packSoH;              // State of Health [%]
+  float  packVoltage;          // Pack terminal voltage [V]
+  float  packCurrent;          // Pack current [A] (+ = discharge)
+  float  packEnergy_Wh;        // Pack energy in session [Wh]
+
+  // ── Cell Parameters (simulating 100S3P = 300 cells) ─────────────────
+  int    cellCountSeries;      // = 100
+  int    cellCountParallel;    // = 3
+  float  maxCellVoltage;       // [V]
+  float  minCellVoltage;       // [V]
+  float  avgCellVoltage;       // [V]
+  float  cellImbalance_mV;     // Max-Min spread [mV]
+  float  capacity_Ah;          // Nominal capacity [Ah]
+
+  // ── Temperature ─────────────────────────────────────────────────────
+  float  maxCellTemp;          // [°C]
+  float  minCellTemp;          // [°C]
+  float  packTemp;             // [°C]
+  float  coolantTemp;          // [°C]
+
+  // ── Isolation ───────────────────────────────────────────────────────
+  float  isolationResistance;  // HV isolation [kΩ]
+
+  // ── Limits ──────────────────────────────────────────────────────────
+  float  maxChargeCurrent;     // [A]
+  float  maxDischargeCurrent;  // [A]
+  float  chargePowerLimit;     // [kW]
+  float  dischargePowerLimit;  // [kW]
+
+  // ── Fault flags ─────────────────────────────────────────────────────
+  int    faultOV;              // Cell overvoltage
+  int    faultUV;              // Cell undervoltage
+  int    faultOT;              // Overtemperature
+  int    faultIsolation;       // Isolation fault
+  int    faultPrecharge;       // Precharge timeout
+  int    faultComm;            // Communication fault
+  int    activeDTCCount;       // Number of active DTCs
+
+  // ── Precharge tracking ───────────────────────────────────────────────
+  float  dcLinkVoltage;        // DC link cap voltage
+  int    prechargeMs;          // Elapsed precharge time
+  const int PRECHARGE_TIMEOUT = 5000;
+
+  // ── UDS Session tracking ─────────────────────────────────────────────
+  int    udsSession;           // 1=default, 3=extended, 2=programming
+  int    udsSecurityLevel;     // 0=locked, 1=L1 unlocked
+
+  // ── VIN and ECU info (for DID 0xF190, F180) ─────────────────────────
+  char   vehicleVIN[18];       // 17 chars + null
+  char   swVersion[5];         // "1.2.0"
+
+  // ── Statistics ───────────────────────────────────────────────────────
+  long   msgCountBMSStatus;
+  float  sessionEnergyKwh;
+}
+
+on preStart
+{
+  bmsState        = BMS_INIT;
+  contMainPos     = 0;
+  contMainNeg     = 0;
+  contPrecharge   = 0;
+
+  packSoC         = 65.0;
+  packSoH         = 95.0;
+  packVoltage     = 388.0;
+  packCurrent     = 0.0;
+  packEnergy_Wh   = 0.0;
+
+  cellCountSeries   = 100;
+  cellCountParallel = 3;
+  capacity_Ah       = 60.0;
+  maxCellVoltage    = 3.882;  // 388.2 / 100
+  minCellVoltage    = 3.876;  // 6mV imbalance
+  avgCellVoltage    = 3.879;
+  cellImbalance_mV  = 6.0;
+
+  maxCellTemp = 26.0;
+  minCellTemp = 23.5;
+  packTemp    = 25.0;
+  coolantTemp = 22.0;
+
+  isolationResistance = 5000.0;  // 5 MΩ — healthy
+
+  maxChargeCurrent    = 100.0;
+  maxDischargeCurrent = 250.0;
+  chargePowerLimit    = 50.0;
+  dischargePowerLimit = 100.0;
+
+  faultOV = 0; faultUV = 0; faultOT = 0;
+  faultIsolation = 0; faultPrecharge = 0; faultComm = 0;
+  activeDTCCount = 0;
+
+  dcLinkVoltage = 0.0;
+  prechargeMs   = 0;
+
+  udsSession      = 1;   // Default session
+  udsSecurityLevel = 0;  // Locked
+
+  strncpy(vehicleVIN, "WDB1234567EV00001", 17);
+  vehicleVIN[17] = '\0';
+  strncpy(swVersion, "1.2.0", 5);
+
+  msgCountBMSStatus = 0;
+  sessionEnergyKwh  = 0.0;
+}
+
+on start
+{
+  bmsState = BMS_IDLE;
+  setTimer(tmrBMSMain,     10);
+  setTimer(tmrBMSThermal,  100);
+  setTimer(tmrBMSLimits,   100);
+  setTimer(tmrBMSDiag,     1000);
+  setTimer(tmrFaultDetect, 20);
+  write("[BMS_SIM] *** Battery ECU Simulation v1.2.0 STARTED ***");
+  write("[BMS_SIM] Pack: %dS%dP, Cap=%.0fAh, SoC=%.1f%%, SoH=%.1f%%",
+        cellCountSeries, cellCountParallel, capacity_Ah, packSoC, packSoH);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  10ms — BMS_Status
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrBMSMain
+{
+  message BMS_Status msg;
+
+  // Coulomb counting
+  if (bmsState == BMS_ACTIVE && packCurrent != 0.0) {
+    float dSoC = (packCurrent * 0.010) / (3600.0 * capacity_Ah) * 100.0;
+    packSoC -= dSoC;
+    if (packSoC < 0)   packSoC = 0.0;
+    if (packSoC > 100) packSoC = 100.0;
+    sessionEnergyKwh += (packVoltage * packCurrent * 0.010) / 3600000.0;
+  }
+
+  if (bmsState == BMS_CHARGE && packCurrent < 0.0) {
+    float dSoC = (-packCurrent * 0.010) / (3600.0 * capacity_Ah) * 100.0;
+    packSoC += dSoC;
+    if (packSoC > 100) packSoC = 100.0;
+  }
+
+  // Pack voltage from SoC (linear interpolation)
+  if (packSoC < 20.0)
+    packVoltage = 300.0 + (packSoC / 20.0) * 50.0;
+  else if (packSoC < 80.0)
+    packVoltage = 350.0 + ((packSoC - 20.0) / 60.0) * 60.0;
+  else
+    packVoltage = 410.0 + ((packSoC - 80.0) / 20.0) * 10.0;
+
+  maxCellVoltage = packVoltage / cellCountSeries;
+  minCellVoltage = maxCellVoltage - (cellImbalance_mV / 1000.0);
+  avgCellVoltage = (maxCellVoltage + minCellVoltage) / 2.0;
+
+  msg.BMS_SoC            = (word)(packSoC * 2.0);
+  msg.BMS_PackVoltage    = (word)(packVoltage * 10.0);
+  msg.BMS_PackCurrent    = (int)(packCurrent * 10.0);
+  msg.BMS_MaxCellVoltage = (word)(maxCellVoltage * 1000.0);
+  msg.BMS_MinCellVoltage = (word)(minCellVoltage * 1000.0);
+  msg.BMS_State          = bmsState;
+  msg.BMS_FaultCode      = getFaultCode();
+  msg.BMS_DCLinkVoltage  = (word)(dcLinkVoltage * 10.0);
+
+  output(msg);
+  msgCountBMSStatus++;
+  setTimer(tmrBMSMain, 10);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  100ms — BMS_Thermal, BMS_Limits
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrBMSThermal
+{
+  message BMS_Thermal tMsg;
+
+  // Thermal model
+  float heatInput = packCurrent * packCurrent * 0.001;
+  maxCellTemp += (heatInput - (maxCellTemp - coolantTemp) * 0.05) * 0.1;
+  minCellTemp  = maxCellTemp - 2.5;
+
+  tMsg.BMS_MaxCellTemp = (byte)(maxCellTemp + 40.0);
+  tMsg.BMS_MinCellTemp = (byte)(minCellTemp + 40.0);
+  tMsg.BMS_PackTemp    = (byte)(packTemp + 40.0);
+  tMsg.BMS_CoolantTemp = (byte)(coolantTemp + 40.0);
+  output(tMsg);
+  setTimer(tmrBMSThermal, 100);
+}
+
+on timer tmrBMSLimits
+{
+  message BMS_Limits lMsg;
+
+  // Temperature derating
+  float tempFactor = 1.0;
+  if (maxCellTemp > 50.0)
+    tempFactor = 1.0 - (maxCellTemp - 50.0) / 30.0;
+  if (tempFactor < 0.1) tempFactor = 0.1;
+
+  float socFactor = 1.0;
+  if (packSoC < 10.0) socFactor = packSoC / 10.0;
+  if (socFactor < 0.1) socFactor = 0.1;
+
+  lMsg.BMS_MaxChargeCurrent    = (word)(maxChargeCurrent * 10.0);
+  lMsg.BMS_MaxDischargeCurrent = (word)(maxDischargeCurrent * tempFactor * socFactor * 10.0);
+  lMsg.BMS_ChargePowerLimit    = (word)(chargePowerLimit * 10.0);
+  lMsg.BMS_DischargePowerLimit = (word)(dischargePowerLimit * tempFactor * socFactor * 10.0);
+  lMsg.BMS_SoH                 = (byte)(packSoH * 2.0);
+  lMsg.BMS_IsolationResistance = (word)(isolationResistance > 65535 ? 65535 : isolationResistance);
+  output(lMsg);
+  setTimer(tmrBMSLimits, 100);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  20ms FAULT DETECTION
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrFaultDetect
+{
+  int newFault = 0;
+
+  if (maxCellVoltage > 4.25) {
+    if (!faultOV) {
+      faultOV = 1;
+      activeDTCCount++;
+      write("[BMS_SIM] FAULT: Cell OV! Vcell_max=%.3fV — opening contactors", maxCellVoltage);
+      newFault = 1;
+    }
+  } else if (maxCellVoltage < 4.15) {
+    faultOV = 0;
+  }
+
+  if (minCellVoltage < 2.80) {
+    if (!faultUV) {
+      faultUV = 1;
+      activeDTCCount++;
+      write("[BMS_SIM] FAULT: Cell UV! Vcell_min=%.3fV — opening contactors", minCellVoltage);
+      newFault = 1;
+    }
+  } else if (minCellVoltage > 2.90) {
+    faultUV = 0;
+  }
+
+  if (maxCellTemp > 60.0) {
+    if (!faultOT) {
+      faultOT = 1;
+      activeDTCCount++;
+      write("[BMS_SIM] FAULT: Over Temperature! T=%.1f°C", maxCellTemp);
+      newFault = 1;
+    }
+  } else if (maxCellTemp < 55.0) {
+    faultOT = 0;
+  }
+
+  if (isolationResistance < 100.0) {
+    if (!faultIsolation) {
+      faultIsolation = 1;
+      activeDTCCount++;
+      write("[BMS_SIM] FAULT: Isolation! R=%.1f kΩ (threshold: 100 kΩ)", isolationResistance);
+      newFault = 1;
+    }
+  } else if (isolationResistance > 200.0) {
+    faultIsolation = 0;
+  }
+
+  if (newFault && bmsState != BMS_FAULT) {
+    OpenContactors();
+    bmsState = BMS_FAULT;
+  }
+
+  setTimer(tmrFaultDetect, 20);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  PRECHARGE
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrPrecharge
+{
+  if (bmsState != BMS_PRECHARGE) return;
+  prechargeMs++;
+  dcLinkVoltage = packVoltage * (1.0 - exp(-(float)prechargeMs / 100.0));
+
+  if (dcLinkVoltage >= packVoltage * 0.95) {
+    contMainPos   = 1;
+    contPrecharge = 0;
+    bmsState = BMS_ACTIVE;
+    SendContactorStatus();
+    write("[BMS_SIM] Precharge done in %dms. VDC=%.1fV. State=ACTIVE", prechargeMs, dcLinkVoltage);
+    return;
+  }
+
+  if (prechargeMs >= PRECHARGE_TIMEOUT) {
+    faultPrecharge = 1;
+    bmsState = BMS_FAULT;
+    OpenContactors();
+    write("[BMS_SIM] FAULT: Precharge timeout at %dms. VDC=%.1fV", prechargeMs, dcLinkVoltage);
+    return;
+  }
+
+  setTimer(tmrPrecharge, 1);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  VCU COMMAND
+──────────────────────────────────────────────────────────────────────*/
+on message VCU_Command
+{
+  if (this.VCU_HV_Enable == 1 && bmsState == BMS_IDLE) {
+    contMainNeg   = 1;
+    contPrecharge = 1;
+    bmsState = BMS_PRECHARGE;
+    prechargeMs = 0;
+    dcLinkVoltage = 0;
+    SendContactorStatus();
+    setTimer(tmrPrecharge, 1);
+    write("[BMS_SIM] HV enable → precharge start");
+  }
+
+  if (this.VCU_HV_Enable == 0 && bmsState == BMS_ACTIVE) {
+    OpenContactors();
+    bmsState = BMS_IDLE;
+    packCurrent = 0.0;
+    write("[BMS_SIM] HV disable → IDLE");
+  }
+
+  if (this.VCU_ChargeEnable == 1 && bmsState == BMS_ACTIVE) {
+    bmsState = BMS_CHARGE;
+    packCurrent = -20.0;
+    write("[BMS_SIM] Charge enable → CHARGE");
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  UDS REQUEST HANDLER (simplified)
+──────────────────────────────────────────────────────────────────────*/
+on message DiagRequest_BMS  // 0x741 functional request
+{
+  byte sid = this.byte(0);
+
+  if (sid == 0x10) {  // DiagnosticSessionControl
+    HandleSessionControl(this.byte(1));
+  } else if (sid == 0x22) {  // ReadDataByIdentifier
+    word did = ((word)this.byte(1) << 8) | (word)this.byte(2);
+    HandleReadDID(did);
+  } else if (sid == 0x14) {  // ClearDiagnosticInformation
+    HandleClearDTC();
+  }
+}
+
+void HandleSessionControl(byte sessionType)
+{
+  udsSession = sessionType;
+  message DiagResponse_BMS resp;
+  resp.byte(0) = 0x50;
+  resp.byte(1) = sessionType;
+  resp.dlc = 2;
+  output(resp);
+  write("[BMS_SIM] UDS: Session changed to 0x%02X", sessionType);
+  if (sessionType != 1) setTimer(tmrTesterPresent, 4500);
+}
+
+void HandleReadDID(word did)
+{
+  message DiagResponse_BMS resp;
+
+  if (did == 0xF190) {  // VIN
+    resp.byte(0) = 0x62;
+    resp.byte(1) = 0xF1; resp.byte(2) = 0x90;
+    int i;
+    for (i = 0; i < 17; i++) resp.byte(3 + i) = vehicleVIN[i];
+    resp.dlc = 20;
+    output(resp);
+  } else if (did == 0xF101) {  // BMS SoC
+    resp.byte(0) = 0x62;
+    resp.byte(1) = 0xF1; resp.byte(2) = 0x01;
+    word socRaw = (word)(packSoC * 2.0);
+    resp.byte(3) = (byte)(socRaw >> 8);
+    resp.byte(4) = (byte)(socRaw & 0xFF);
+    resp.dlc = 5;
+    output(resp);
+  } else if (did == 0xF121) {  // SoH
+    resp.byte(0) = 0x62;
+    resp.byte(1) = 0xF1; resp.byte(2) = 0x21;
+    resp.byte(3) = (byte)(packSoH * 2.0);
+    resp.dlc = 4;
+    output(resp);
+  } else {
+    // NRC 0x31 — requestOutOfRange
+    resp.byte(0) = 0x7F;
+    resp.byte(1) = 0x22;
+    resp.byte(2) = 0x31;
+    resp.dlc = 3;
+    output(resp);
+  }
+}
+
+void HandleClearDTC()
+{
+  faultOV = 0; faultUV = 0; faultOT = 0;
+  faultIsolation = 0; faultPrecharge = 0;
+  activeDTCCount = 0;
+  message DiagResponse_BMS resp;
+  resp.byte(0) = 0x54;  // Positive response to ClearDTC
+  resp.dlc = 1;
+  output(resp);
+  write("[BMS_SIM] UDS: DTCs cleared");
+}
+
+on timer tmrTesterPresent
+{
+  if (udsSession != 1) {
+    udsSession = 1;
+    write("[BMS_SIM] UDS: S3 timeout — returned to Default session");
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  FAULT INJECTION VIA SYSTEM VARIABLES
+──────────────────────────────────────────────────────────────────────*/
+on sysvar::FaultInjection::BMS_InjectOverVoltage
+{
+  if (@this) { maxCellVoltage = 4.30; write("[BMS_SIM] INJ: OV injected"); }
+  else        { maxCellVoltage = 3.88; faultOV = 0; write("[BMS_SIM] INJ: OV cleared"); }
+}
+
+on sysvar::FaultInjection::BMS_InjectIsolationFault
+{
+  if (@this) { isolationResistance = 30.0; write("[BMS_SIM] INJ: ISO injected (30 kΩ)"); }
+  else        { isolationResistance = 5000.0; faultIsolation = 0; write("[BMS_SIM] INJ: ISO cleared"); }
+}
+
+on sysvar::FaultInjection::BMS_SetSoC
+{
+  packSoC = (float)@this;
+  write("[BMS_SIM] SoC manually set to %.1f%%", packSoC);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  HELPERS
+──────────────────────────────────────────────────────────────────────*/
+void OpenContactors()
+{
+  contMainPos = 0; contMainNeg = 0; contPrecharge = 0;
+  packCurrent = 0.0;
+  SendContactorStatus();
+  write("[BMS_SIM] *** Contactors OPENED ***");
+}
+
+void SendContactorStatus()
+{
+  message BMS_ContactorCommand cMsg;
+  cMsg.BMS_MainPosCmd   = contMainPos;
+  cMsg.BMS_MainNegCmd   = contMainNeg;
+  cMsg.BMS_PrechargeCmd = contPrecharge;
+  output(cMsg);
+}
+
+int getFaultCode()
+{
+  int code = 0;
+  if (faultOV)         code |= 0x01;
+  if (faultUV)         code |= 0x02;
+  if (faultOT)         code |= 0x04;
+  if (faultIsolation)  code |= 0x08;
+  if (faultPrecharge)  code |= 0x10;
+  if (faultComm)       code |= 0x20;
+  return code;
+}

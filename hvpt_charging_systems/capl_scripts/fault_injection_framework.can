@@ -1,0 +1,299 @@
+/*
+ * fault_injection_framework.can
+ * Universal Fault Injection Framework for EV Powertrain Testing
+ *
+ * Supported fault types:
+ *   1. BMS Cell Overvoltage
+ *   2. BMS Cell Undervoltage
+ *   3. BMS Over Temperature
+ *   4. HV Isolation Fault
+ *   5. BMS CAN Timeout (suppress message)
+ *   6. VCU CAN Timeout
+ *   7. HV Interlock Open (HVIL fault)
+ *   8. Inverter Fault (MCU_FaultCode)
+ *   9. OBC Fault
+ *
+ * API:
+ *   sysvar FaultInjection::FaultType = <type>
+ *   sysvar FaultInjection::FaultActive = 1 → inject
+ *   sysvar FaultInjection::FaultActive = 0 → clear
+ */
+
+variables
+{
+  // ── Active fault tracking ───────────────────────────────────────────
+  int    activeFaultType;       // Currently active fault (0=none)
+  int    faultActive;           // Master enable flag
+
+  const int FAULT_NONE          = 0;
+  const int FAULT_BMS_OV        = 1;
+  const int FAULT_BMS_UV        = 2;
+  const int FAULT_BMS_OVERTEMP  = 3;
+  const int FAULT_ISOLATION     = 4;
+  const int FAULT_BMS_TIMEOUT   = 5;
+  const int FAULT_VCU_TIMEOUT   = 6;
+  const int FAULT_HVIL          = 7;
+  const int FAULT_MCU_FAULT     = 8;
+  const int FAULT_OBC_FAULT     = 9;
+
+  // ── Normal message replacement storage ─────────────────────────────
+  int    bmsSuppressed;         // 1 = BMS message sending suppressed
+  int    vcuSuppressed;         // 1 = VCU message sending suppressed
+
+  // ── Override values ─────────────────────────────────────────────────
+  float  injectedCellVoltage;   // Overvoltage/undervoltage injection value
+  float  injectedCellTemp;      // Overtemperature injection value
+  float  injectedIsolation;     // Isolation resistance injection [kΩ]
+
+  // ── Fault injection message timers ─────────────────────────────────
+  msTimer tmrFaultOverride;     // 10ms — sends override messages during fault
+
+  // ── Statistics ───────────────────────────────────────────────────────
+  int    totalFaultInjections;
+  int    faultDetectedByDUT;    // Did the DUT detect and respond?
+  double faultInjectedAt;       // Timestamp of injection
+  double faultDetectedAt;       // Timestamp of DUT response
+
+  // ── Detection timeouts ───────────────────────────────────────────────
+  msTimer tmrDetectionTimeout;
+  const int DETECTION_TIMEOUT_MS = 2000;  // 2 second max for DUT to react
+}
+
+on preStart
+{
+  activeFaultType      = FAULT_NONE;
+  faultActive          = 0;
+  bmsSuppressed        = 0;
+  vcuSuppressed        = 0;
+  totalFaultInjections = 0;
+  faultDetectedByDUT   = 0;
+
+  // Default injection values
+  injectedCellVoltage = 4.30;    // 4.30V = overvoltage (limit typically 4.25V)
+  injectedCellTemp    = 65.0;    // 65°C = overtemperature
+  injectedIsolation   = 30.0;    // 30 kΩ = isolation fault
+}
+
+on start
+{
+  write("[FAULT_INJ] Fault Injection Framework READY");
+  write("[FAULT_INJ] Supported faults: OV, UV, OT, ISO, BMS_TIMEOUT, VCU_TIMEOUT, HVIL, MCU, OBC");
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  FAULT INJECTION TRIGGER — sysvar::FaultInjection::FaultActive
+──────────────────────────────────────────────────────────────────────*/
+on sysvar::FaultInjection::FaultActive
+{
+  faultActive = @this;
+  activeFaultType = getValue(sysvar::FaultInjection::FaultType);
+
+  if (faultActive == 1) {
+    InjectFault(activeFaultType);
+  } else {
+    ClearFault(activeFaultType);
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  FAULT TYPE SELECTOR (without trigger — used for pre-configuration)
+──────────────────────────────────────────────────────────────────────*/
+on sysvar::FaultInjection::FaultType
+{
+  activeFaultType = @this;
+  write("[FAULT_INJ] Fault type set to %d (%s)", activeFaultType,
+        getFaultName(activeFaultType));
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  INJECT FAULT — Main dispatch
+──────────────────────────────────────────────────────────────────────*/
+void InjectFault(int faultType)
+{
+  totalFaultInjections++;
+  faultInjectedAt = timeNow() / 100000.0;  // ms
+  faultDetectedByDUT = 0;
+
+  write("[FAULT_INJ] ══════════════════════════════════════════");
+  write("[FAULT_INJ] INJECTING FAULT: %s (type=%d) at T=%.1fms",
+        getFaultName(faultType), faultType, faultInjectedAt);
+  write("[FAULT_INJ] Waiting for DUT response (timeout=%dms)...", DETECTION_TIMEOUT_MS);
+
+  switch (faultType) {
+    case FAULT_BMS_OV: {
+      injectedCellVoltage = getValue(sysvar::FaultInjection::OV_Voltage);
+      if (injectedCellVoltage < 4.20) injectedCellVoltage = 4.30;
+      setTimer(tmrFaultOverride, 10);
+      break;
+    }
+    case FAULT_BMS_UV: {
+      injectedCellVoltage = getValue(sysvar::FaultInjection::UV_Voltage);
+      if (injectedCellVoltage > 2.80) injectedCellVoltage = 2.70;
+      setTimer(tmrFaultOverride, 10);
+      break;
+    }
+    case FAULT_BMS_OVERTEMP: {
+      injectedCellTemp = getValue(sysvar::FaultInjection::OT_Temperature);
+      if (injectedCellTemp < 60.0) injectedCellTemp = 65.0;
+      setTimer(tmrFaultOverride, 10);
+      break;
+    }
+    case FAULT_ISOLATION: {
+      injectedIsolation = getValue(sysvar::FaultInjection::Isolation_kOhm);
+      if (injectedIsolation > 100.0) injectedIsolation = 30.0;
+      setTimer(tmrFaultOverride, 10);
+      break;
+    }
+    case FAULT_BMS_TIMEOUT: {
+      bmsSuppressed = 1;
+      write("[FAULT_INJ] BMS message transmission SUPPRESSED");
+      break;
+    }
+    case FAULT_VCU_TIMEOUT: {
+      vcuSuppressed = 1;
+      write("[FAULT_INJ] VCU message transmission SUPPRESSED");
+      break;
+    }
+    case FAULT_HVIL: {
+      // Inject HVIL open by setting signal to 0 in MCU message
+      message MCU_HVStatus hvilMsg;
+      hvilMsg.MCU_HVIL_Status = 0;  // 0 = HVIL open (fault)
+      output(hvilMsg);
+      write("[FAULT_INJ] HVIL fault injected (MCU_HVIL_Status = 0)");
+      break;
+    }
+    case FAULT_MCU_FAULT: {
+      message MCU_Status faultMsg;
+      faultMsg.MCU_FaultCode = 0x05;  // Over-temperature fault code
+      faultMsg.MCU_State     = 0x06;  // FAULT state
+      output(faultMsg);
+      write("[FAULT_INJ] MCU fault injected (FaultCode=0x05)");
+      break;
+    }
+    case FAULT_OBC_FAULT: {
+      message OBC_Status obcFaultMsg;
+      obcFaultMsg.OBC_FaultCode  = 0x02;  // Output overvoltage
+      obcFaultMsg.OBC_State      = 0x05;  // FAULT state
+      output(obcFaultMsg);
+      write("[FAULT_INJ] OBC fault injected (FaultCode=0x02)");
+      break;
+    }
+  }
+
+  setTimer(tmrDetectionTimeout, DETECTION_TIMEOUT_MS);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  CLEAR FAULT
+──────────────────────────────────────────────────────────────────────*/
+void ClearFault(int faultType)
+{
+  cancelTimer(tmrFaultOverride);
+  bmsSuppressed = 0;
+  vcuSuppressed = 0;
+
+  write("[FAULT_INJ] FAULT CLEARED: %s", getFaultName(faultType));
+
+  if (faultDetectedByDUT) {
+    double responseMs = faultDetectedAt - faultInjectedAt;
+    write("[FAULT_INJ] ✓ DUT detected fault in %.1f ms", responseMs);
+  } else {
+    write("[FAULT_INJ] ✗ DUT did NOT detect fault within timeout!");
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  10ms OVERRIDE TIMER — Sends fault signals continuously
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrFaultOverride
+{
+  if (!faultActive) return;
+
+  message BMS_Status faultBmsMsg;
+  message BMS_Thermal faultTempMsg;
+
+  switch (activeFaultType) {
+    case FAULT_BMS_OV: {
+      faultBmsMsg.BMS_MaxCellVoltage = (word)(injectedCellVoltage * 1000.0);
+      faultBmsMsg.BMS_MinCellVoltage = (word)((injectedCellVoltage - 0.01) * 1000.0);
+      faultBmsMsg.BMS_SoC = 190;  // 95% SoC (× 2 scale factor)
+      faultBmsMsg.BMS_PackVoltage = (word)(injectedCellVoltage * 100 * 10.0);
+      output(faultBmsMsg);
+      break;
+    }
+    case FAULT_BMS_UV: {
+      faultBmsMsg.BMS_MinCellVoltage = (word)(injectedCellVoltage * 1000.0);
+      faultBmsMsg.BMS_MaxCellVoltage = (word)((injectedCellVoltage + 0.01) * 1000.0);
+      faultBmsMsg.BMS_SoC = 4;    // 2% SoC
+      output(faultBmsMsg);
+      break;
+    }
+    case FAULT_BMS_OVERTEMP: {
+      faultTempMsg.BMS_MaxCellTemp = (byte)(injectedCellTemp + 40.0);
+      faultTempMsg.BMS_MinCellTemp = (byte)(injectedCellTemp - 2.0 + 40.0);
+      output(faultTempMsg);
+      break;
+    }
+    case FAULT_ISOLATION: {
+      message BMS_Limits isoMsg;
+      isoMsg.BMS_IsolationResistance = (word)(injectedIsolation);
+      output(isoMsg);
+      break;
+    }
+  }
+
+  setTimer(tmrFaultOverride, 10);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  DUT RESPONSE DETECTION — Monitor VCU/BMS reaction
+──────────────────────────────────────────────────────────────────────*/
+on message VCU_FaultResponse
+{
+  if (faultActive && !faultDetectedByDUT) {
+    faultDetectedAt = timeNow() / 100000.0;
+    faultDetectedByDUT = 1;
+    double responseMs = faultDetectedAt - faultInjectedAt;
+    write("[FAULT_INJ] ✓ DUT responded to fault %s in %.1f ms (code=0x%02X)",
+          getFaultName(activeFaultType), responseMs, this.VCU_FaultCode);
+    cancelTimer(tmrDetectionTimeout);
+  }
+}
+
+on message BMS_ContactorCommand
+{
+  if (faultActive && this.BMS_MainPosCmd == 0 && !faultDetectedByDUT) {
+    faultDetectedAt = timeNow() / 100000.0;
+    faultDetectedByDUT = 1;
+    double responseMs = faultDetectedAt - faultInjectedAt;
+    write("[FAULT_INJ] ✓ BMS opened contactors after fault in %.1f ms", responseMs);
+    cancelTimer(tmrDetectionTimeout);
+  }
+}
+
+on timer tmrDetectionTimeout
+{
+  if (faultActive && !faultDetectedByDUT) {
+    write("[FAULT_INJ] ✗ DETECTION TIMEOUT! DUT did not respond to %s within %dms",
+          getFaultName(activeFaultType), DETECTION_TIMEOUT_MS);
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  HELPER: Fault name lookup
+──────────────────────────────────────────────────────────────────────*/
+char[] getFaultName(int faultType)
+{
+  switch (faultType) {
+    case FAULT_BMS_OV:       return "BMS_OV (Overvoltage)";
+    case FAULT_BMS_UV:       return "BMS_UV (Undervoltage)";
+    case FAULT_BMS_OVERTEMP: return "BMS_OT (Overtemperature)";
+    case FAULT_ISOLATION:    return "ISOLATION (HV Isolation Fault)";
+    case FAULT_BMS_TIMEOUT:  return "BMS_TIMEOUT (CAN Timeout)";
+    case FAULT_VCU_TIMEOUT:  return "VCU_TIMEOUT (CAN Timeout)";
+    case FAULT_HVIL:         return "HVIL (Interlock Open)";
+    case FAULT_MCU_FAULT:    return "MCU_FAULT (Inverter Fault)";
+    case FAULT_OBC_FAULT:    return "OBC_FAULT (Charger Fault)";
+    default:                 return "UNKNOWN";
+  }
+}

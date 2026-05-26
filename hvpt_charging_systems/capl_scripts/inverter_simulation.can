@@ -1,0 +1,361 @@
+/*
+ * inverter_simulation.can
+ * Inverter / MCU (Motor Control Unit) Simulation Node
+ *
+ * Simulates:
+ *   - Torque command processing from VCU
+ *   - FOC (Field Oriented Control) model (simplified)
+ *   - Motor speed calculation
+ *   - Regen braking
+ *   - IGBT over-temperature protection
+ *   - HV interlock (HVIL) monitoring
+ *   - DC bus voltage monitoring
+ */
+
+variables
+{
+  // ── Timers ─────────────────────────────────────────────────────────
+  msTimer tmrMCUStatus;     // 5ms cyclic (fast for torque feedback)
+  msTimer tmrMCUTorque;     // 2ms torque control loop
+  msTimer tmrThermal;       // 100ms thermal model
+
+  // ── MCU State Machine ───────────────────────────────────────────────
+  int    mcuState;
+  const int MCU_INIT     = 0;
+  const int MCU_IDLE     = 1;
+  const int MCU_READY    = 2;  // HV enabled, pre-charged
+  const int MCU_ACTIVE   = 3;  // Drive mode
+  const int MCU_REGEN    = 4;  // Regenerative braking
+  const int MCU_FAULT    = 5;
+
+  // ── Motor/Inverter Parameters ────────────────────────────────────
+  float  torqueRequest;     // Torque request from VCU [Nm] (+ = propulsion, - = regen)
+  float  torqueActual;      // Actual output torque [Nm]
+  float  motorSpeed;        // Motor shaft speed [rpm]
+  float  vehicleSpeed;      // Vehicle speed [km/h]
+  float  dcBusVoltage;      // HV DC bus voltage [V]
+  float  motorPhaseCurrent; // Peak phase current [A]
+  float  motorPower;        // Motor shaft power [W]
+
+  // ── Thermal Model ─────────────────────────────────────────────────
+  float  igbtTemp;          // IGBT junction temperature [°C]
+  float  motorTemp;         // Motor winding temperature [°C]
+  float  coolantTemp;       // Coolant inlet temperature [°C]
+  float  ambientTemp;       // Ambient temperature [°C]
+
+  // ── Motor Parameters (simplified 150kW motor) ────────────────────
+  const float MAX_TORQUE   = 320.0;  // [Nm]
+  const float MAX_SPEED    = 12000.0;// [rpm]
+  const float MAX_POWER    = 150000.0;// [W] = 150 kW
+  const float BASE_SPEED   = 3500.0; // [rpm] — base speed for field weakening
+  const float MOTOR_POLES  = 4.0;    // Number of pole pairs
+  const float GEAR_RATIO   = 9.5;    // Gear ratio (motor to wheel)
+  const float WHEEL_RADIUS = 0.34;   // Tire radius [m]
+
+  // ── Protection Limits ─────────────────────────────────────────────
+  const float IGBT_OT_THRESHOLD  = 150.0;  // IGBT OT fault threshold [°C]
+  const float IGBT_OT_WARNING    = 130.0;  // Warning level
+  const float MOTOR_OT_THRESHOLD = 180.0;  // Motor OT fault [°C]
+  const float DC_OV_THRESHOLD    = 450.0;  // DC bus OV threshold [V]
+  const float DC_UV_THRESHOLD    = 250.0;  // DC bus UV threshold [V]
+
+  // ── Fault Flags ───────────────────────────────────────────────────
+  int    faultIGBT_OT;
+  int    faultMotor_OT;
+  int    faultDC_OV;
+  int    faultDC_UV;
+  int    faultHVIL;
+  int    faultPhaseOC;    // Phase overcurrent
+  int    faultDesaturation;  // IGBT desaturation (HW fault)
+
+  // ── Control Limits (from BMS) ────────────────────────────────────
+  float  bmsMaxDischargeCurrent;  // Max motor current from BMS
+  float  bmsDischargePowerLimit;  // Max power from BMS
+
+  // ── Torque response ───────────────────────────────────────────────
+  float  torqueRampRate;    // Nm per 2ms control loop step
+}
+
+on preStart
+{
+  mcuState               = MCU_INIT;
+  torqueRequest          = 0.0;
+  torqueActual           = 0.0;
+  motorSpeed             = 0.0;
+  vehicleSpeed           = 0.0;
+  dcBusVoltage           = 0.0;    // Not yet pre-charged
+  motorPhaseCurrent      = 0.0;
+  motorPower             = 0.0;
+  igbtTemp               = 25.0;
+  motorTemp              = 25.0;
+  coolantTemp            = 25.0;
+  ambientTemp            = 25.0;
+  faultIGBT_OT  = 0; faultMotor_OT  = 0;
+  faultDC_OV    = 0; faultDC_UV     = 0;
+  faultHVIL     = 0; faultPhaseOC   = 0;
+  faultDesaturation = 0;
+  bmsMaxDischargeCurrent = 250.0;
+  bmsDischargePowerLimit = 100000.0;  // 100 kW default
+  torqueRampRate = 50.0;  // 50 Nm per 2ms = 25,000 Nm/s ramp
+}
+
+on start
+{
+  setTimer(tmrMCUStatus, 5);
+  setTimer(tmrMCUTorque, 2);
+  setTimer(tmrThermal, 100);
+  write("[MCU_SIM] Inverter Simulation STARTED. State=INIT");
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  5ms CYCLIC — MCU_Status Message (0x200)
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrMCUStatus
+{
+  message MCU_Status mcuMsg;
+
+  // Calculate vehicle speed from motor speed
+  vehicleSpeed = (motorSpeed / GEAR_RATIO) * (2.0 * 3.14159 * WHEEL_RADIUS) * 60.0 / 1000.0;
+
+  mcuMsg.MCU_State          = mcuState;
+  mcuMsg.MCU_TorqueActual   = (int)(torqueActual * 10.0);    // 0.1Nm, signed
+  mcuMsg.MCU_MotorSpeed     = (word)(motorSpeed);             // rpm
+  mcuMsg.MCU_VehicleSpeed   = (word)(vehicleSpeed * 10.0);   // 0.1 km/h
+  mcuMsg.MCU_DCBusVoltage   = (word)(dcBusVoltage * 10.0);
+  mcuMsg.MCU_PhaseCurrent   = (word)(motorPhaseCurrent * 10.0);
+  mcuMsg.MCU_IGBT_Temp      = (byte)(igbtTemp + 40.0);       // offset -40°C
+  mcuMsg.MCU_MotorTemp      = (byte)(motorTemp + 40.0);
+  mcuMsg.MCU_FaultCode      = getMCUFaultCode();
+  mcuMsg.MCU_HVIL_Status    = faultHVIL ? 0 : 1;            // 1=OK, 0=fault
+
+  output(mcuMsg);
+  setTimer(tmrMCUStatus, 5);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  2ms TORQUE CONTROL LOOP
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrMCUTorque
+{
+  if (mcuState == MCU_FAULT || mcuState == MCU_IDLE || mcuState == MCU_INIT) {
+    torqueActual      = 0.0;
+    motorPhaseCurrent = 0.0;
+    motorPower        = 0.0;
+    // Motor coasts down when in idle/fault
+    if (motorSpeed > 0) motorSpeed -= 50.0;
+    if (motorSpeed < 0) motorSpeed = 0;
+    setTimer(tmrMCUTorque, 2);
+    return;
+  }
+
+  // Power limit from BMS
+  float maxTorqueByPower = 0.0;
+  if (motorSpeed > 10.0) {
+    maxTorqueByPower = bmsDischargePowerLimit / (motorSpeed * 2.0 * 3.14159 / 60.0);
+  } else {
+    maxTorqueByPower = MAX_TORQUE;  // Unlimited at standstill
+  }
+
+  // Field weakening above base speed
+  float maxTorque = MAX_TORQUE;
+  if (motorSpeed > BASE_SPEED) {
+    maxTorque = MAX_TORQUE * (BASE_SPEED / motorSpeed);
+    if (maxTorque < 10.0) maxTorque = 10.0;
+  }
+
+  // Apply all limits
+  if (maxTorqueByPower < maxTorque) maxTorque = maxTorqueByPower;
+
+  // Clamp torque request
+  float requestClamped = torqueRequest;
+  if (requestClamped > maxTorque)  requestClamped = maxTorque;
+  if (requestClamped < -MAX_TORQUE) requestClamped = -MAX_TORQUE;
+
+  // Ramp actual torque towards request
+  float error = requestClamped - torqueActual;
+  if (error > torqueRampRate)  error = torqueRampRate;
+  if (error < -torqueRampRate) error = -torqueRampRate;
+  torqueActual += error;
+
+  // Determine state based on torque
+  if (torqueActual < -1.0) {
+    mcuState = MCU_REGEN;
+  } else if (torqueActual > 1.0) {
+    mcuState = MCU_ACTIVE;
+  } else {
+    mcuState = MCU_READY;
+  }
+
+  // Motor dynamics: speed changes based on torque
+  // Simplified: assume vehicle mass 2000kg, effective inertia
+  // Δω = (T × Gear × η - F_drag) × dt / J
+  float drag = motorSpeed * 0.002;  // Simplified drag
+  float dSpeed = (torqueActual * GEAR_RATIO * 0.85 - drag) * 0.002 / 0.5;
+  motorSpeed += dSpeed;
+  if (motorSpeed < 0) motorSpeed = 0;
+  if (motorSpeed > MAX_SPEED) motorSpeed = MAX_SPEED;
+
+  // Motor power
+  motorPower = torqueActual * motorSpeed * 2.0 * 3.14159 / 60.0;
+
+  // Phase current estimate
+  if (motorSpeed > 10.0) {
+    motorPhaseCurrent = (torqueActual * MOTOR_POLES) / (1.5 * 0.12);  // Simplified
+  } else {
+    motorPhaseCurrent = 0.0;
+  }
+  if (motorPhaseCurrent < 0) motorPhaseCurrent = -motorPhaseCurrent;  // abs value
+
+  // Overcurrent check
+  if (motorPhaseCurrent > bmsMaxDischargeCurrent * 1.5) {
+    faultPhaseOC = 1;
+    mcuState = MCU_FAULT;
+    write("[MCU_SIM] FAULT: Phase overcurrent! I=%.1fA", motorPhaseCurrent);
+  }
+
+  setTimer(tmrMCUTorque, 2);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  100ms THERMAL MODEL
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrThermal
+{
+  // IGBT thermal model: Rthjc=0.02°C/W, Cth=100J/°C
+  float igbtHeat = (motorPhaseCurrent * motorPhaseCurrent) * 0.002;  // I²R losses
+  float igbtCooling = (igbtTemp - coolantTemp) * 0.5;
+  igbtTemp += (igbtHeat - igbtCooling) * 0.1;
+
+  // Motor thermal model
+  float motorHeat = (motorPower > 0 ? motorPower : -motorPower) * 0.02;
+  float motorCooling = (motorTemp - coolantTemp) * 0.3;
+  motorTemp += (motorHeat - motorCooling) * 0.1;
+
+  // IGBT OT protection
+  if (igbtTemp >= IGBT_OT_THRESHOLD && !faultIGBT_OT) {
+    faultIGBT_OT = 1;
+    mcuState = MCU_FAULT;
+    write("[MCU_SIM] FAULT: IGBT Overtemperature! T=%.1f°C (limit=%.1f°C)",
+          igbtTemp, IGBT_OT_THRESHOLD);
+  } else if (igbtTemp >= IGBT_OT_WARNING) {
+    // Derate: reduce max torque
+    float derating = (IGBT_OT_THRESHOLD - igbtTemp) / (IGBT_OT_THRESHOLD - IGBT_OT_WARNING);
+    torqueRampRate = 50.0 * derating;
+  } else {
+    faultIGBT_OT = 0;
+    torqueRampRate = 50.0;
+  }
+
+  // Motor OT protection
+  if (motorTemp >= MOTOR_OT_THRESHOLD && !faultMotor_OT) {
+    faultMotor_OT = 1;
+    mcuState = MCU_FAULT;
+    write("[MCU_SIM] FAULT: Motor Overtemperature! T=%.1f°C", motorTemp);
+  }
+
+  setTimer(tmrThermal, 100);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  VCU TORQUE COMMAND HANDLER
+──────────────────────────────────────────────────────────────────────*/
+on message VCU_TorqueCommand
+{
+  if (mcuState == MCU_FAULT) {
+    write("[MCU_SIM] Torque command rejected — MCU in FAULT state");
+    return;
+  }
+
+  torqueRequest = this.VCU_TorqueRequest * 0.1;  // scale 0.1 Nm
+
+  if (torqueRequest < -300.0 || torqueRequest > MAX_TORQUE) {
+    write("[MCU_SIM] WARNING: Torque request %.1fNm out of range", torqueRequest);
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  BMS STATUS — HV Enable and limits
+──────────────────────────────────────────────────────────────────────*/
+on message BMS_Status
+{
+  dcBusVoltage = this.BMS_PackVoltage * 0.1;
+
+  if (dcBusVoltage > DC_OV_THRESHOLD && !faultDC_OV) {
+    faultDC_OV = 1;
+    mcuState = MCU_FAULT;
+    write("[MCU_SIM] FAULT: DC bus overvoltage! V=%.1fV", dcBusVoltage);
+  }
+  if (dcBusVoltage < DC_UV_THRESHOLD && dcBusVoltage > 50.0 && !faultDC_UV) {
+    faultDC_UV = 1;
+    mcuState = MCU_FAULT;
+    write("[MCU_SIM] FAULT: DC bus undervoltage! V=%.1fV", dcBusVoltage);
+  }
+}
+
+on message BMS_Limits
+{
+  bmsMaxDischargeCurrent = this.BMS_MaxDischargeCurrent * 0.1;
+  bmsDischargePowerLimit = this.BMS_DischargePowerLimit * 10.0;  // scale 10W
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  HV ENABLE HANDLER
+──────────────────────────────────────────────────────────────────────*/
+on message VCU_Command
+{
+  int hvEnable = this.VCU_HV_Enable;
+  if (hvEnable == 1 && mcuState == MCU_IDLE) {
+    mcuState = MCU_READY;
+    write("[MCU_SIM] HV Enable received — MCU entering READY state");
+  }
+  if (hvEnable == 0 && mcuState != MCU_FAULT) {
+    mcuState = MCU_IDLE;
+    torqueRequest = 0.0;
+    write("[MCU_SIM] HV disabled — MCU entering IDLE");
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  FAULT INJECTION (for testing)
+──────────────────────────────────────────────────────────────────────*/
+on sysvar::FaultInjection::MCU_InjectIGBT_OT
+{
+  if (@this == 1) {
+    igbtTemp = IGBT_OT_THRESHOLD + 5.0;
+    write("[MCU_SIM] FAULT INJECTED: IGBT OT (T=%.1f°C)", igbtTemp);
+  } else {
+    igbtTemp = 40.0;
+    faultIGBT_OT = 0;
+    if (mcuState == MCU_FAULT) mcuState = MCU_READY;
+    write("[MCU_SIM] IGBT OT fault CLEARED");
+  }
+}
+
+on sysvar::FaultInjection::MCU_InjectHVIL
+{
+  faultHVIL = @this;
+  if (faultHVIL) {
+    mcuState = MCU_FAULT;
+    torqueRequest = 0.0;
+    write("[MCU_SIM] FAULT INJECTED: HVIL open");
+  } else {
+    write("[MCU_SIM] HVIL fault CLEARED");
+    if (mcuState == MCU_FAULT) mcuState = MCU_READY;
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  HELPER
+──────────────────────────────────────────────────────────────────────*/
+int getMCUFaultCode()
+{
+  int code = 0;
+  if (faultIGBT_OT)      code |= 0x01;
+  if (faultMotor_OT)     code |= 0x02;
+  if (faultDC_OV)        code |= 0x04;
+  if (faultDC_UV)        code |= 0x08;
+  if (faultHVIL)         code |= 0x10;
+  if (faultPhaseOC)      code |= 0x20;
+  if (faultDesaturation) code |= 0x40;
+  return code;
+}

@@ -1,0 +1,266 @@
+/*
+ * network_monitor_tool.can
+ * CAN Network Health Monitor
+ *
+ * Monitors: Message timeouts, bus load, error frames, CAN Bus-Off
+ * Reports:  Write window statistics every 5 seconds
+ *
+ * Monitored ECUs:
+ *   BMS   — 0x310 (10ms)
+ *   VCU   — 0x100 (10ms)
+ *   MCU   — 0x200 (5ms)
+ *   OBC   — 0x400 (100ms)
+ */
+
+variables
+{
+  // ── Timers ─────────────────────────────────────────────────────────
+  msTimer tmrBMSWatchdog;
+  msTimer tmrVCUWatchdog;
+  msTimer tmrMCUWatchdog;
+  msTimer tmrOBCWatchdog;
+  msTimer tmrReportSummary;
+  msTimer tmrBusLoad;
+
+  // ── Timeout thresholds (ms) ─────────────────────────────────────────
+  const int BMS_TIMEOUT_MS = 50;   // 5× nominal period
+  const int VCU_TIMEOUT_MS = 50;
+  const int MCU_TIMEOUT_MS = 25;
+  const int OBC_TIMEOUT_MS = 500;
+
+  // ── Timeout flags ───────────────────────────────────────────────────
+  int bmsTimeout;
+  int vcuTimeout;
+  int mcuTimeout;
+  int obcTimeout;
+
+  // ── Message statistics ──────────────────────────────────────────────
+  long bmsMsgCount;
+  long vcuMsgCount;
+  long mcuMsgCount;
+  long obcMsgCount;
+  long totalMsgCount;
+  long errorFrameCount;
+
+  // ── Period tracking for jitter analysis ────────────────────────────
+  double bmsLastTime;
+  double vcuLastTime;
+  double mcuLastTime;
+  double obcLastTime;
+
+  double bmsMaxPeriodMs;
+  double vcuMaxPeriodMs;
+  double mcuMaxPeriodMs;
+  double obcMaxPeriodMs;
+
+  // ── Bus load calculation ────────────────────────────────────────────
+  long   busLoadBitCount;          // Bits counted in current 1s window
+  float  busLoadPercent;
+  float  busLoadPeak;
+  const int CAN_BITRATE = 500000;  // 500 kbps
+  const int LOAD_WINDOW_MS = 1000; // 1-second window
+
+  // ── Report interval ─────────────────────────────────────────────────
+  const int REPORT_INTERVAL_MS = 5000;
+
+  // ── Bus-Off detection ───────────────────────────────────────────────
+  int busOffDetected;
+  long busOffCount;
+}
+
+on preStart
+{
+  bmsTimeout = 0; vcuTimeout = 0; mcuTimeout = 0; obcTimeout = 0;
+  bmsMsgCount = 0; vcuMsgCount = 0; mcuMsgCount = 0; obcMsgCount = 0;
+  totalMsgCount = 0; errorFrameCount = 0;
+
+  bmsLastTime = 0; vcuLastTime = 0; mcuLastTime = 0; obcLastTime = 0;
+  bmsMaxPeriodMs = 0; vcuMaxPeriodMs = 0; mcuMaxPeriodMs = 0; obcMaxPeriodMs = 0;
+
+  busLoadBitCount = 0; busLoadPercent = 0.0; busLoadPeak = 0.0;
+  busOffDetected = 0; busOffCount = 0;
+}
+
+on start
+{
+  setTimer(tmrBMSWatchdog, BMS_TIMEOUT_MS);
+  setTimer(tmrVCUWatchdog, VCU_TIMEOUT_MS);
+  setTimer(tmrMCUWatchdog, MCU_TIMEOUT_MS);
+  setTimer(tmrOBCWatchdog, OBC_TIMEOUT_MS);
+  setTimer(tmrReportSummary, REPORT_INTERVAL_MS);
+  setTimer(tmrBusLoad, LOAD_WINDOW_MS);
+
+  write("[NET_MON] Network Monitor STARTED");
+  write("[NET_MON] Monitoring: BMS(0x310,10ms) VCU(0x100,10ms) MCU(0x200,5ms) OBC(0x400,100ms)");
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  MESSAGE HANDLERS — Reset watchdog + measure period
+──────────────────────────────────────────────────────────────────────*/
+on message 0x310  // BMS_Status
+{
+  double now = timeNow() / 100000.0;  // Convert to ms
+  if (bmsLastTime > 0) {
+    double period = now - bmsLastTime;
+    if (period > bmsMaxPeriodMs) bmsMaxPeriodMs = period;
+  }
+  bmsLastTime = now;
+  bmsMsgCount++;
+  totalMsgCount++;
+  bmsTimeout = 0;
+  busLoadBitCount += 47 + 8 * 8;  // overhead + 8 bytes data
+  setTimer(tmrBMSWatchdog, BMS_TIMEOUT_MS);
+}
+
+on message 0x100  // VCU_Command
+{
+  double now = timeNow() / 100000.0;
+  if (vcuLastTime > 0) {
+    double period = now - vcuLastTime;
+    if (period > vcuMaxPeriodMs) vcuMaxPeriodMs = period;
+  }
+  vcuLastTime = now;
+  vcuMsgCount++;
+  totalMsgCount++;
+  vcuTimeout = 0;
+  busLoadBitCount += 47 + 8 * 8;
+  setTimer(tmrVCUWatchdog, VCU_TIMEOUT_MS);
+}
+
+on message 0x200  // MCU_Status
+{
+  double now = timeNow() / 100000.0;
+  if (mcuLastTime > 0) {
+    double period = now - mcuLastTime;
+    if (period > mcuMaxPeriodMs) mcuMaxPeriodMs = period;
+  }
+  mcuLastTime = now;
+  mcuMsgCount++;
+  totalMsgCount++;
+  mcuTimeout = 0;
+  busLoadBitCount += 47 + 8 * 5;
+  setTimer(tmrMCUWatchdog, MCU_TIMEOUT_MS);
+}
+
+on message 0x400  // OBC_Status
+{
+  double now = timeNow() / 100000.0;
+  if (obcLastTime > 0) {
+    double period = now - obcLastTime;
+    if (period > obcMaxPeriodMs) obcMaxPeriodMs = period;
+  }
+  obcLastTime = now;
+  obcMsgCount++;
+  totalMsgCount++;
+  obcTimeout = 0;
+  busLoadBitCount += 47 + 8 * 6;
+  setTimer(tmrOBCWatchdog, OBC_TIMEOUT_MS);
+}
+
+// Count all other messages for bus load
+on message *
+{
+  if (this.id != 0x310 && this.id != 0x100 &&
+      this.id != 0x200 && this.id != 0x400) {
+    totalMsgCount++;
+    busLoadBitCount += 47 + 8 * this.dlc;
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  WATCHDOG TIMEOUTS — Alert when ECU message missing
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrBMSWatchdog
+{
+  if (!bmsTimeout) {
+    bmsTimeout = 1;
+    write("[NET_MON] *** TIMEOUT: BMS_Status (0x310) — no message for %dms ***", BMS_TIMEOUT_MS);
+  }
+  setTimer(tmrBMSWatchdog, BMS_TIMEOUT_MS);
+}
+
+on timer tmrVCUWatchdog
+{
+  if (!vcuTimeout) {
+    vcuTimeout = 1;
+    write("[NET_MON] *** TIMEOUT: VCU_Command (0x100) — no message for %dms ***", VCU_TIMEOUT_MS);
+  }
+  setTimer(tmrVCUWatchdog, VCU_TIMEOUT_MS);
+}
+
+on timer tmrMCUWatchdog
+{
+  if (!mcuTimeout) {
+    mcuTimeout = 1;
+    write("[NET_MON] *** TIMEOUT: MCU_Status (0x200) — no message for %dms ***", MCU_TIMEOUT_MS);
+  }
+  setTimer(tmrMCUWatchdog, MCU_TIMEOUT_MS);
+}
+
+on timer tmrOBCWatchdog
+{
+  if (!obcTimeout) {
+    obcTimeout = 1;
+    write("[NET_MON] *** TIMEOUT: OBC_Status (0x400) — no message for %dms ***", OBC_TIMEOUT_MS);
+  }
+  setTimer(tmrOBCWatchdog, OBC_TIMEOUT_MS);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  1s BUS LOAD CALCULATION
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrBusLoad
+{
+  busLoadPercent = ((float)busLoadBitCount / CAN_BITRATE) * 100.0;
+  if (busLoadPercent > busLoadPeak) busLoadPeak = busLoadPercent;
+
+  if (busLoadPercent > 70.0) {
+    write("[NET_MON] WARNING: High bus load = %.1f%% (limit: 60%%)", busLoadPercent);
+  }
+
+  // Update system variable for panel display
+  sysSetVariable(sysvar::NetworkHealth::BusLoad, busLoadPercent);
+
+  busLoadBitCount = 0;
+  setTimer(tmrBusLoad, LOAD_WINDOW_MS);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  ERROR FRAME DETECTION
+──────────────────────────────────────────────────────────────────────*/
+on errorFrame
+{
+  errorFrameCount++;
+  write("[NET_MON] ERROR FRAME detected! Total error frames: %d", errorFrameCount);
+  sysSetVariable(sysvar::NetworkHealth::ErrorFrameCount, errorFrameCount);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  5s SUMMARY REPORT
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrReportSummary
+{
+  write("═══════════════════════════════════════════════════════════");
+  write("[NET_MON] NETWORK HEALTH SUMMARY (last %ds)", REPORT_INTERVAL_MS / 1000);
+  write("───────────────────────────────────────────────────────────");
+  write("  Bus Load:    Current=%.1f%%, Peak=%.1f%%", busLoadPercent, busLoadPeak);
+  write("  Error Frames: %d", errorFrameCount);
+  write("  Total Messages: %d", totalMsgCount);
+  write("");
+  write("  ECU          | Count  | MaxPeriod | Status");
+  write("  BMS  (0x310) | %6d | %7.2f ms | %s",
+        bmsMsgCount, bmsMaxPeriodMs, bmsTimeout ? "TIMEOUT!" : "OK");
+  write("  VCU  (0x100) | %6d | %7.2f ms | %s",
+        vcuMsgCount, vcuMaxPeriodMs, vcuTimeout ? "TIMEOUT!" : "OK");
+  write("  MCU  (0x200) | %6d | %7.2f ms | %s",
+        mcuMsgCount, mcuMaxPeriodMs, mcuTimeout ? "TIMEOUT!" : "OK");
+  write("  OBC  (0x400) | %6d | %7.2f ms | %s",
+        obcMsgCount, obcMaxPeriodMs, obcTimeout ? "TIMEOUT!" : "OK");
+  write("═══════════════════════════════════════════════════════════");
+
+  // Reset peak tracking for next window
+  bmsMaxPeriodMs = 0; vcuMaxPeriodMs = 0;
+  mcuMaxPeriodMs = 0; obcMaxPeriodMs = 0;
+
+  setTimer(tmrReportSummary, REPORT_INTERVAL_MS);
+}

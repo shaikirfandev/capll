@@ -1,0 +1,216 @@
+/*
+ * vehicle_wakeup_logic.can
+ * Vehicle Wake/Sleep State Machine Simulation
+ * Implements KL15/KL30 power mode management
+ *
+ * Power Modes:
+ *   OFF        — KL30 on, KL15 off, CAN bus silent
+ *   ACCESSORY  — KL15 short press, low power mode
+ *   READY      — KL15 long press / ignition on
+ *   ACTIVE     — drive ready
+ *   CHARGING   — vehicle parked, charging active
+ *   SLEEP      — deep sleep after timeout
+ */
+
+variables
+{
+  msTimer tmrPowerMode;         // 100ms cyclic
+  msTimer tmrSleepTimeout;      // Inactivity timer
+  msTimer tmrWakeup;            // Wake transition timer
+
+  // State machine
+  int     vehicleMode;
+  const int MODE_OFF       = 0;
+  const int MODE_ACCESSORY = 1;
+  const int MODE_READY     = 2;
+  const int MODE_ACTIVE    = 3;
+  const int MODE_CHARGING  = 4;
+  const int MODE_SLEEP     = 5;
+
+  // KL signals
+  int     kl15State;            // 1=on, 0=off
+  int     kl30State;            // Always 1 when vehicle has 12V
+  int     chargePlugConnected;  // 1=plug inserted
+
+  // Timing
+  int     sleepTimeoutMs;       // Time until sleep
+  const int SLEEP_TIMEOUT_MS = 600000;  // 10 minutes inactivity → sleep
+
+  // CAN wakeup sources
+  int     wakeupFromCAN;        // CAN message received during sleep
+  int     wakeupFromCharge;     // Charge plug event
+  int     wakeupFromTimer;      // Scheduled wakeup
+
+  // Power consumption simulation (mA)
+  float   quiescentCurrent;
+
+  // Gateway keep-alive tracking
+  int     lastKeepaliveMs;
+}
+
+on preStart
+{
+  vehicleMode       = MODE_OFF;
+  kl15State         = 0;
+  kl30State         = 1;         // 12V always present
+  chargePlugConnected = 0;
+  sleepTimeoutMs    = 0;
+  wakeupFromCAN     = 0;
+  wakeupFromCharge  = 0;
+  wakeupFromTimer   = 0;
+  quiescentCurrent  = 0.0;
+  lastKeepaliveMs   = 0;
+}
+
+on start
+{
+  setTimer(tmrPowerMode, 100);
+  write("[WAKE_SIM] Vehicle Wake/Sleep State Machine STARTED");
+  write("[WAKE_SIM] Initial state: OFF, KL15=%d, KL30=%d", kl15State, kl30State);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  100ms CYCLIC — Power Mode Broadcasting
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrPowerMode
+{
+  message VCU_PowerMode modeMsg;
+  message VCU_WakeupStatus wakeMsg;
+
+  modeMsg.VCU_VehicleMode = vehicleMode;
+  modeMsg.VCU_KL15State   = kl15State;
+  modeMsg.VCU_KL30State   = kl30State;
+  output(modeMsg);
+
+  wakeMsg.VCU_WakeupCause   = getWakeupCause();
+  wakeMsg.VCU_QuiescentMA   = (word)(quiescentCurrent * 10.0);
+  output(wakeMsg);
+
+  // Update quiescent current per mode
+  switch (vehicleMode) {
+    case MODE_SLEEP:     quiescentCurrent = 2.5;   break;  // Deep sleep: 2.5 mA
+    case MODE_OFF:       quiescentCurrent = 5.0;   break;  // Off: gateway standby
+    case MODE_ACCESSORY: quiescentCurrent = 150.0; break;  // Accessory: radio, etc.
+    case MODE_READY:     quiescentCurrent = 500.0; break;  // Ready: all ECUs awake
+    case MODE_ACTIVE:    quiescentCurrent = 800.0; break;  // Active: powertrain on
+    case MODE_CHARGING:  quiescentCurrent = 300.0; break;  // Charging: OBC active
+  }
+
+  // Sleep timeout countdown
+  if (vehicleMode == MODE_OFF) {
+    sleepTimeoutMs += 100;
+    if (sleepTimeoutMs >= SLEEP_TIMEOUT_MS) {
+      write("[WAKE_SIM] Sleep timeout reached (%ds). Entering SLEEP mode.",
+            SLEEP_TIMEOUT_MS / 1000);
+      vehicleMode = MODE_SLEEP;
+      sleepTimeoutMs = 0;
+    }
+  }
+
+  setTimer(tmrPowerMode, 100);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  KL15 IGNITION HANDLER
+──────────────────────────────────────────────────────────────────────*/
+on sysvar::VehicleControl::KL15_On
+{
+  if (@this == 1) {
+    kl15State = 1;
+    if (vehicleMode == MODE_SLEEP || vehicleMode == MODE_OFF) {
+      write("[WAKE_SIM] KL15 ON — waking from %s to READY",
+            getModeString(vehicleMode));
+      vehicleMode = MODE_READY;
+      sleepTimeoutMs = 0;
+      // Send wakeup frame to all ECUs
+      SendWakeupFrame();
+    }
+  } else {
+    kl15State = 0;
+    if (vehicleMode == MODE_ACTIVE || vehicleMode == MODE_READY) {
+      write("[WAKE_SIM] KL15 OFF — entering OFF mode (sleep timer starting)");
+      vehicleMode = MODE_OFF;
+      sleepTimeoutMs = 0;
+    }
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  CHARGE PLUG HANDLER
+──────────────────────────────────────────────────────────────────────*/
+on sysvar::VehicleControl::ChargePlugConnect
+{
+  chargePlugConnected = @this;
+  if (chargePlugConnected == 1) {
+    wakeupFromCharge = 1;
+    if (vehicleMode == MODE_SLEEP || vehicleMode == MODE_OFF) {
+      write("[WAKE_SIM] Charge plug connected — waking from %s to CHARGING",
+            getModeString(vehicleMode));
+      vehicleMode = MODE_CHARGING;
+      SendWakeupFrame();
+    }
+  } else {
+    write("[WAKE_SIM] Charge plug disconnected");
+    if (vehicleMode == MODE_CHARGING) {
+      vehicleMode = MODE_OFF;
+    }
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  CAN KEEPALIVE MONITORING (gateway debug bus 0x1FF)
+──────────────────────────────────────────────────────────────────────*/
+on message 0x1FF  // Gateway keepalive
+{
+  if (vehicleMode == MODE_SLEEP) {
+    write("[WAKE_SIM] WARNING: Keepalive message 0x1FF received in SLEEP mode!");
+    write("[WAKE_SIM] This will prevent sleep! Check source ECU.");
+    wakeupFromCAN = 1;
+  }
+  lastKeepaliveMs = 0;
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  ACTIVE STATE HANDLER (drive request from VCU)
+──────────────────────────────────────────────────────────────────────*/
+on message VCU_DriveReady
+{
+  if (this.VCU_ReadyState == 1 && vehicleMode == MODE_READY) {
+    write("[WAKE_SIM] Drive ready — entering ACTIVE mode");
+    vehicleMode = MODE_ACTIVE;
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  HELPERS
+──────────────────────────────────────────────────────────────────────*/
+void SendWakeupFrame()
+{
+  message NM_WakeupFrame wakeFrame;
+  wakeFrame.NM_WakeupSource = getWakeupCause();
+  wakeFrame.NM_NodeID       = 0x01;  // VCU node ID
+  output(wakeFrame);
+  write("[WAKE_SIM] Wakeup frame sent (source=%d)", getWakeupCause());
+}
+
+int getWakeupCause()
+{
+  if (kl15State)         return 1;  // KL15
+  if (chargePlugConnected) return 2;  // Charge plug
+  if (wakeupFromCAN)     return 3;  // CAN activity
+  if (wakeupFromTimer)   return 4;  // Scheduled
+  return 0;
+}
+
+char[] getModeString(int mode)
+{
+  switch (mode) {
+    case MODE_OFF:       return "OFF";
+    case MODE_ACCESSORY: return "ACCESSORY";
+    case MODE_READY:     return "READY";
+    case MODE_ACTIVE:    return "ACTIVE";
+    case MODE_CHARGING:  return "CHARGING";
+    case MODE_SLEEP:     return "SLEEP";
+    default:             return "UNKNOWN";
+  }
+}

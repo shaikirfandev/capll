@@ -1,0 +1,382 @@
+/*
+ * charging_system_simulation.can
+ * Complete OBC (Onboard Charger) Simulation Node for CANoe
+ *
+ * Simulates:
+ *   - J1772 CP pilot signal interpretation
+ *   - AC charging CC/CV algorithm
+ *   - ISO 15118 handshake (simplified CAN-level representation)
+ *   - Temperature derating
+ *   - Charging fault detection
+ *   - VCU/BMS command interface
+ */
+
+variables
+{
+  // ── Timers ─────────────────────────────────────────────────────────
+  msTimer tmrOBCStatus;       // 100ms cyclic
+  msTimer tmrCCCV;            // 10ms CC/CV algorithm loop
+  msTimer tmrCPMonitor;       // 50ms pilot signal monitoring
+
+  // ── OBC State Machine ───────────────────────────────────────────────
+  int    obcState;
+  const int OBC_IDLE       = 0;  // No plug, waiting
+  const int OBC_CP_DETECT  = 1;  // Plug inserted, CP detected
+  const int OBC_HANDSHAKE  = 2;  // 15118 / protocol handshake
+  const int OBC_CC_MODE    = 3;  // Constant Current charging
+  const int OBC_CV_MODE    = 4;  // Constant Voltage charging
+  const int OBC_COMPLETE   = 5;  // Charge complete
+  const int OBC_FAULT      = 6;  // Fault state
+  const int OBC_PAUSED     = 7;  // Paused (by VCU/BMS)
+
+  // ── CP Pilot Signal State ─────────────────────────────────────────
+  int    cpState;             // J1772 CP state (A/B/C/D)
+  float  cpDutyCycle;         // 0.0–1.0
+  float  evseMaxCurrent;      // EVSE-allowed current from CP duty cycle [A]
+
+  // ── AC Supply Parameters ──────────────────────────────────────────
+  float  acInputVoltage;      // AC input voltage [V RMS]
+  float  acInputFrequency;    // 50 or 60 Hz
+  float  acInputCurrent;      // Actual input current [A]
+  float  acInputPower;        // AC input power [W]
+
+  // ── DC Output Parameters ─────────────────────────────────────────
+  float  dcOutputVoltage;     // DC output to battery [V]
+  float  dcOutputCurrent;     // DC output current [A]
+  float  dcOutputPower;       // DC output power [W]
+
+  // ── Battery Target (from BMS) ────────────────────────────────────
+  float  bmsTargetVoltage;    // BMS CV target voltage [V]
+  float  bmsMaxChargeCurrent; // BMS max charge current [A]
+  float  bmsSoC;              // BMS SoC [%]
+
+  // ── CC/CV Algorithm Parameters ───────────────────────────────────
+  float  ccCurrentSetpoint;   // CC phase current setpoint [A]
+  float  cvVoltageSetpoint;   // CV phase voltage setpoint [V]
+  float  transitionVoltage;   // CC→CV transition voltage [V]
+  const float CC_CV_TRANSITION_FACTOR = 0.985;  // Transition at 98.5% of Vmax
+
+  // ── Efficiency & Derating ────────────────────────────────────────
+  float  obcEfficiency;       // OBC efficiency (0.85–0.95)
+  float  obcTemperature;      // OBC internal temperature [°C]
+  float  currentDerating;     // Derating factor 0.0–1.0
+
+  // ── Fault Flags ───────────────────────────────────────────────────
+  int    faultInputOV;        // Input overvoltage
+  int    faultInputUV;        // Input undervoltage
+  int    faultOutputOV;       // Output overvoltage
+  int    faultOutputOC;       // Output overcurrent
+  int    faultOverTemp;       // OBC overtemperature
+  int    faultCPLost;         // CP signal lost
+
+  // ── Charge Session Energy ─────────────────────────────────────────
+  float  sessionEnergyWh;     // Energy delivered this session [Wh]
+  float  sessionTimeS;        // Session duration [s]
+  int    chargeEnabled;       // VCU charge enable flag
+}
+
+on preStart
+{
+  obcState          = OBC_IDLE;
+  cpState           = 0;      // State A (no vehicle)
+  cpDutyCycle       = 0.0;
+  evseMaxCurrent    = 0.0;
+  acInputVoltage    = 230.0;  // European 230V
+  acInputFrequency  = 50.0;
+  acInputCurrent    = 0.0;
+  acInputPower      = 0.0;
+  dcOutputVoltage   = 0.0;
+  dcOutputCurrent   = 0.0;
+  dcOutputPower     = 0.0;
+  bmsTargetVoltage  = 420.0;
+  bmsMaxChargeCurrent = 100.0;
+  bmsSoC            = 20.0;
+  ccCurrentSetpoint = 0.0;
+  cvVoltageSetpoint = 420.0;
+  transitionVoltage = 420.0 * CC_CV_TRANSITION_FACTOR;
+  obcEfficiency     = 0.92;
+  obcTemperature    = 30.0;
+  currentDerating   = 1.0;
+  faultInputOV = 0; faultInputUV = 0; faultOutputOV = 0;
+  faultOutputOC = 0; faultOverTemp = 0; faultCPLost = 0;
+  sessionEnergyWh = 0.0;
+  sessionTimeS    = 0.0;
+  chargeEnabled   = 0;
+}
+
+on start
+{
+  setTimer(tmrOBCStatus, 100);
+  setTimer(tmrCPMonitor, 50);
+  write("[OBC_SIM] Charging System Simulation STARTED. State=IDLE");
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  100ms CYCLIC — OBC_Status Message (0x400)
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrOBCStatus
+{
+  message OBC_Status obcMsg;
+
+  obcMsg.OBC_State           = obcState;
+  obcMsg.OBC_OutputVoltage   = (word)(dcOutputVoltage * 10.0);  // 0.1V resolution
+  obcMsg.OBC_OutputCurrent   = (word)(dcOutputCurrent * 10.0);  // 0.1A resolution
+  obcMsg.OBC_OutputPower     = (word)(dcOutputPower / 10.0);    // 10W resolution
+  obcMsg.OBC_Temperature     = (byte)(obcTemperature + 40.0);   // offset -40°C
+  obcMsg.OBC_FaultCode       = getOBCFaultCode();
+  obcMsg.OBC_InputVoltage    = (word)(acInputVoltage * 10.0);
+  obcMsg.OBC_InputCurrent    = (word)(acInputCurrent * 10.0);
+  obcMsg.OBC_CP_State        = cpState;
+
+  output(obcMsg);
+
+  // Update session energy
+  if (obcState == OBC_CC_MODE || obcState == OBC_CV_MODE) {
+    sessionEnergyWh += (dcOutputPower / 1000.0) * (100.0 / 3600.0);  // 100ms interval
+    sessionTimeS += 0.1;
+  }
+
+  // Temperature model
+  if (obcState == OBC_CC_MODE || obcState == OBC_CV_MODE) {
+    obcTemperature += 0.05 * (dcOutputCurrent / 100.0);
+    if (obcTemperature > 80.0) {
+      faultOverTemp = 1;
+      obcState = OBC_FAULT;
+      write("[OBC_SIM] FAULT: OBC Overtemperature! T=%.1f°C", obcTemperature);
+    }
+  } else {
+    if (obcTemperature > 25.0) obcTemperature -= 0.02;
+  }
+
+  setTimer(tmrOBCStatus, 100);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  CP PILOT MONITORING
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrCPMonitor
+{
+  // Simulate CP signal state reading
+  // In real OBC: read ADC for CP voltage/frequency
+  // Here: state driven by sysvar
+  int cpInput = getValue(sysvar::Charging::CP_State);
+
+  switch (cpInput) {
+    case 0:   // State A: no vehicle (12V DC, no PWM)
+      cpState = 0;
+      evseMaxCurrent = 0.0;
+      if (obcState != OBC_IDLE && obcState != OBC_FAULT) {
+        write("[OBC_SIM] CP went to state A — EVSE disconnected");
+        EndChargingSession();
+      }
+      break;
+
+    case 1:   // State B: vehicle connected (9V, PWM start)
+      cpState = 1;
+      cpDutyCycle = (float)getValue(sysvar::Charging::CP_DutyCycle) / 100.0;
+      evseMaxCurrent = decodeCPDutyCycle(cpDutyCycle);
+      if (obcState == OBC_IDLE) {
+        obcState = OBC_CP_DETECT;
+        write("[OBC_SIM] CP State B detected. EVSE max current: %.0fA", evseMaxCurrent);
+        if (chargeEnabled) {
+          obcState = OBC_HANDSHAKE;
+          setTimer(tmrCCCV, 10);
+        }
+      }
+      break;
+
+    case 2:   // State C: vehicle ready to charge (6V, PWM)
+      cpState = 2;
+      break;
+
+    case 3:   // State E/F: fault
+      faultCPLost = 1;
+      obcState = OBC_FAULT;
+      write("[OBC_SIM] FAULT: CP signal fault (state E/F)");
+      break;
+  }
+
+  setTimer(tmrCPMonitor, 50);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  CC/CV ALGORITHM (10ms loop)
+──────────────────────────────────────────────────────────────────────*/
+on timer tmrCCCV
+{
+  if (obcState == OBC_FAULT || obcState == OBC_IDLE || obcState == OBC_COMPLETE) {
+    dcOutputCurrent = 0.0;
+    dcOutputVoltage = 0.0;
+    dcOutputPower   = 0.0;
+    acInputCurrent  = 0.0;
+    acInputPower    = 0.0;
+    return;
+  }
+
+  if (obcState == OBC_PAUSED) {
+    // Ramp down current during pause
+    if (dcOutputCurrent > 0) {
+      dcOutputCurrent -= 5.0;
+      if (dcOutputCurrent < 0) dcOutputCurrent = 0;
+    }
+    setTimer(tmrCCCV, 10);
+    return;
+  }
+
+  if (obcState == OBC_HANDSHAKE) {
+    // Simulate 500ms handshake delay then start CC
+    obcState = OBC_CC_MODE;
+    ccCurrentSetpoint = calculateCCCurrent();
+    cvVoltageSetpoint = bmsTargetVoltage;
+    transitionVoltage = bmsTargetVoltage * CC_CV_TRANSITION_FACTOR;
+    write("[OBC_SIM] Handshake complete. Starting CC at %.1fA. CV target=%.1fV",
+          ccCurrentSetpoint, cvVoltageSetpoint);
+  }
+
+  // Calculate temperature derating
+  if (obcTemperature > 65.0) {
+    currentDerating = 1.0 - (obcTemperature - 65.0) / 30.0;
+    if (currentDerating < 0.1) currentDerating = 0.1;
+  } else {
+    currentDerating = 1.0;
+  }
+
+  float maxCurrent = ccCurrentSetpoint * currentDerating;
+
+  // CC Phase: constant current until Vpack reaches transition voltage
+  if (obcState == OBC_CC_MODE) {
+    dcOutputCurrent = maxCurrent;
+    // Voltage rises as battery charges
+    dcOutputVoltage += dcOutputCurrent * 0.0005;  // Simplified voltage rise
+
+    if (dcOutputVoltage >= transitionVoltage) {
+      obcState = OBC_CV_MODE;
+      write("[OBC_SIM] CC→CV transition at V=%.1fV, I=%.1fA", dcOutputVoltage, dcOutputCurrent);
+    }
+
+    // Check near full SoC
+    if (bmsSoC >= 99.5) {
+      write("[OBC_SIM] SoC=%.1f%% — Charge complete!", bmsSoC);
+      obcState = OBC_COMPLETE;
+      dcOutputCurrent = 0.0;
+      write("[OBC_SIM] Session: %.1f Wh in %.0f seconds", sessionEnergyWh, sessionTimeS);
+    }
+  }
+
+  // CV Phase: constant voltage, current tapers
+  else if (obcState == OBC_CV_MODE) {
+    dcOutputVoltage = cvVoltageSetpoint;
+    // Current tapers as battery approaches full
+    float soCRemaining = (100.0 - bmsSoC) / 20.0;  // Full current until SoC-20%
+    if (soCRemaining > 1.0) soCRemaining = 1.0;
+    dcOutputCurrent = maxCurrent * soCRemaining;
+
+    if (dcOutputCurrent < 3.0) {  // Termination threshold
+      write("[OBC_SIM] CV current < 3A — Charge COMPLETE. SoC=%.1f%%", bmsSoC);
+      obcState = OBC_COMPLETE;
+      dcOutputCurrent = 0.0;
+    }
+  }
+
+  // Clamp output
+  if (dcOutputVoltage > bmsTargetVoltage + 2.0) {
+    faultOutputOV = 1;
+    obcState = OBC_FAULT;
+    write("[OBC_SIM] FAULT: Output overvoltage! V=%.1fV", dcOutputVoltage);
+    return;
+  }
+
+  // Calculate DC power and back-calculate AC
+  dcOutputPower  = dcOutputVoltage * dcOutputCurrent;
+  acInputPower   = dcOutputPower / obcEfficiency;
+  acInputCurrent = acInputPower / acInputVoltage;
+
+  setTimer(tmrCCCV, 10);
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  VCU COMMAND HANDLER
+──────────────────────────────────────────────────────────────────────*/
+on message VCU_ChargeCommand
+{
+  chargeEnabled = this.VCU_ChargeEnable;
+
+  if (chargeEnabled == 1) {
+    if (obcState == OBC_CP_DETECT || obcState == OBC_IDLE) {
+      obcState = OBC_HANDSHAKE;
+      setTimer(tmrCCCV, 10);
+      write("[OBC_SIM] VCU charge enable → starting charge");
+    } else if (obcState == OBC_PAUSED) {
+      obcState = OBC_CC_MODE;
+      write("[OBC_SIM] VCU resume → resuming charge");
+    }
+  } else {
+    if (obcState == OBC_CC_MODE || obcState == OBC_CV_MODE) {
+      obcState = OBC_PAUSED;
+      write("[OBC_SIM] VCU charge disable → pausing");
+    }
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  BMS LIMITS HANDLER
+──────────────────────────────────────────────────────────────────────*/
+on message BMS_Limits
+{
+  bmsMaxChargeCurrent = this.BMS_MaxChargeCurrent * 0.1;   // scale 0.1
+  bmsTargetVoltage    = this.BMS_TargetVoltage * 0.1;       // scale 0.1
+}
+
+on message BMS_Status
+{
+  bmsSoC = this.BMS_SoC * 0.5;  // scale 0.5
+}
+
+/*──────────────────────────────────────────────────────────────────────
+  HELPERS
+──────────────────────────────────────────────────────────────────────*/
+float decodeCPDutyCycle(float duty)
+{
+  // SAE J1772 CP current table
+  if (duty < 0.03)  return 0.0;
+  if (duty <= 0.85) return duty * 0.6 * 100.0;   // 6-51A: I = duty × 60A
+  if (duty <= 0.96) return (duty - 0.64) * 250.0; // 51-80A: I = (duty-0.64) × 250
+  return 0.0;
+}
+
+float calculateCCCurrent()
+{
+  float evseLimit = evseMaxCurrent;
+  float bmsLimit  = bmsMaxChargeCurrent;
+  float obcLimit  = 32.0;  // OBC hardware limit [A]
+
+  // Take minimum of all constraints
+  float current = evseLimit < bmsLimit ? evseLimit : bmsLimit;
+  if (current > obcLimit) current = obcLimit;
+  return current;
+}
+
+void EndChargingSession()
+{
+  cancelTimer(tmrCCCV);
+  dcOutputCurrent = 0.0;
+  dcOutputVoltage = 0.0;
+  dcOutputPower   = 0.0;
+  acInputCurrent  = 0.0;
+  obcState = OBC_IDLE;
+  write("[OBC_SIM] Charge session ended. Energy=%.1f Wh, Duration=%.0f s",
+        sessionEnergyWh, sessionTimeS);
+  sessionEnergyWh = 0.0;
+  sessionTimeS    = 0.0;
+}
+
+int getOBCFaultCode()
+{
+  if (faultOutputOV) return 0x01;
+  if (faultOutputOC) return 0x02;
+  if (faultOverTemp) return 0x04;
+  if (faultCPLost)   return 0x08;
+  if (faultInputOV)  return 0x10;
+  if (faultInputUV)  return 0x20;
+  return 0x00;
+}
