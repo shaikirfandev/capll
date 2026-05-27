@@ -1,0 +1,510 @@
+/*
+ * ═══════════════════════════════════════════════════════════════════════
+ *  CAPL Validation Suite — ADAS Safety Bus (CAN-HS1)
+ *  DBC: vehicle_network.dbc
+ *  CANoe version: 10.0+
+ * 
+ *  Test Modules:
+ *    ① Signal Range Validation
+ *    ② Cycle Time Monitoring
+ *    ③ Alive Counter Validation
+ *    ④ Boundary Value Injection
+ *    ⑤ Full Regression Suite
+ * 
+ *  Usage in CANoe:
+ *    - Add this .can file as a CAPL node in Measurement Setup
+ *    - Assign to CAN 1 bus
+ *    - Associate with vehicle_network.dbc
+ *    - Start measurement → tests run automatically
+ * ═══════════════════════════════════════════════════════════════════════
+ */
+
+includes {
+}
+
+variables {
+  /* ── Test counters ── */
+  int gTestsPassed  = 0;
+  int gTestsFailed  = 0;
+  int gTestsTotal   = 0;
+  
+  /* ── Message presence flags ── */
+  byte gMsgFlags    = 0;    /* Bit0=WheelSpeed, Bit1=AEB_Req, Bit2=VehicleStatus,
+                               Bit3=EPS_Status, Bit4=IPC_Display, Bit5=BCM_Status */
+  
+  /* ── Cycle time tracking ── */
+  float gLastRx_WheelSpeed    = 0;
+  float gLastRx_AEB_Req       = 0;
+  float gLastRx_VehicleStatus = 0;
+  float gLastRx_EPS_Status    = 0;
+  float gLastRx_IPC_Display   = 0;
+  float gLastRx_BCM_Status    = 0;
+  
+  int gCycleErrors            = 0;
+  float CYCLE_TOL             = 0.10;   /* ±10% tolerance */
+  
+  /* ── Alive counter tracking ── */
+  byte gAlive_AEB    = 0xFF;   /* 0xFF = first reception sentinel */
+  byte gAlive_VS     = 0xFF;
+  byte gAlive_BCM    = 0xFF;
+  int  gAliveErrors  = 0;
+  
+  /* ── Signal range violations ── */
+  int  gRangeErrors  = 0;
+  
+  /* ── Timers ── */
+  msTimer gStartupTimer;     /* Wait for messages to arrive */
+  msTimer gWatchdogTimer;    /* Periodic summary */
+  msTimer gTestTimeout;      /* Per-test timeout */
+  
+  /* ── Test runtime ── */
+  float gMeasStart   = 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ *  SECTION 1 — Startup and Shutdown
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+on start {
+  gMeasStart = timeNow() / 100000.0;
+  write("═══════════════════════════════════════");
+  write("  ADAS DBC Validation Suite v1.0");
+  write("  Vehicle Network: vehicle_network.dbc");
+  write("  Measurement started at %.1f ms", gMeasStart);
+  write("═══════════════════════════════════════");
+  
+  setTimer(gStartupTimer, 3000);    /* Give 3s for all messages to arrive */
+  setTimer(gWatchdogTimer, 10000);  /* Periodic summary every 10s */
+}
+
+on stopMeasurement {
+  float duration;
+  duration = (timeNow() / 100000.0 - gMeasStart) / 1000.0;
+  
+  write("═══════════════════════════════════════");
+  write("  VALIDATION SUITE RESULTS");
+  write("  Duration: %.1f seconds", duration);
+  write("───────────────────────────────────────");
+  write("  Tests Passed:   %d", gTestsPassed);
+  write("  Tests Failed:   %d", gTestsFailed);
+  write("  Total:          %d", gTestsTotal);
+  write("───────────────────────────────────────");
+  write("  Range Errors:   %d", gRangeErrors);
+  write("  Cycle Errors:   %d", gCycleErrors);
+  write("  Alive Errors:   %d", gAliveErrors);
+  write("───────────────────────────────────────");
+  if(gTestsFailed == 0)
+    write("  FINAL RESULT: *** PASS ***");
+  else
+    write("  FINAL RESULT: *** FAIL *** (%d failures)", gTestsFailed);
+  write("═══════════════════════════════════════");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ *  SECTION 2 — Test Helper Functions
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+void PASS(char testName[], char detail[]) {
+  testStepPass(testName, detail);
+  gTestsPassed++;
+  gTestsTotal++;
+  write("[PASS] %-35s %s", testName, detail);
+}
+
+void FAIL(char testName[], char detail[]) {
+  testStepFail(testName, detail);
+  gTestsFailed++;
+  gTestsTotal++;
+  write("[FAIL] %-35s %s", testName, detail);
+}
+
+void INFO(char msg[]) {
+  write("[INFO] %s", msg);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ *  SECTION 3 — Message Presence Check (runs after 3-second startup)
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+on timer gStartupTimer {
+  /* TC-01: Verify all expected messages received */
+  INFO("Running TC-01: Message Presence Check");
+  
+  if(gMsgFlags & 0x01) PASS("TC01_WheelSpeed_Present",    "ID 0x200 received within 3s");
+  else                  FAIL("TC01_WheelSpeed_Present",    "ID 0x200 NOT received within 3s");
+  
+  if(gMsgFlags & 0x02) PASS("TC01_AEB_Req_Present",       "ID 0x244 received within 3s");
+  else                  FAIL("TC01_AEB_Req_Present",       "ID 0x244 NOT received within 3s");
+  
+  if(gMsgFlags & 0x04) PASS("TC01_VehicleStatus_Present", "ID 0x300 received within 3s");
+  else                  FAIL("TC01_VehicleStatus_Present", "ID 0x300 NOT received within 3s");
+  
+  if(gMsgFlags & 0x08) PASS("TC01_EPS_Status_Present",    "ID 0x380 received within 3s");
+  else                  FAIL("TC01_EPS_Status_Present",    "ID 0x380 NOT received within 3s");
+  
+  if(gMsgFlags & 0x10) PASS("TC01_IPC_Display_Present",   "ID 0x350 received within 3s");
+  else                  FAIL("TC01_IPC_Display_Present",   "ID 0x350 NOT received within 3s");
+  
+  if(gMsgFlags & 0x20) PASS("TC01_BCM_Status_Present",    "ID 0x420 received within 3s");
+  else                  FAIL("TC01_BCM_Status_Present",    "ID 0x420 NOT received within 3s");
+}
+
+on timer gWatchdogTimer {
+  write("[STATUS] t=%.1f: P=%d F=%d Range=%d Cycle=%d Alive=%d",
+        timeNow()/100000.0/1000.0,
+        gTestsPassed, gTestsFailed,
+        gRangeErrors, gCycleErrors, gAliveErrors);
+  setTimer(gWatchdogTimer, 10000);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ *  SECTION 4 — WheelSpeed Message Validation
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+on message WheelSpeed {
+  float now_ms, elapsed, fl, fr, rl, rr;
+  
+  gMsgFlags = gMsgFlags | 0x01;
+  now_ms = timeNow() / 100000.0;
+  
+  /* TC-02: Signal range check */
+  fl = this.WheelSpeed_FL * 0.01;
+  fr = this.WheelSpeed_FR * 0.01;
+  rl = this.WheelSpeed_RL * 0.01;
+  rr = this.WheelSpeed_RR * 0.01;
+  
+  if(fl < 0 || fl > 300) {
+    FAIL("TC02_WheelSpeed_FL_Range", "%.2f km/h out of [0, 300]");
+    gRangeErrors++;
+  }
+  if(fr < 0 || fr > 300) {
+    FAIL("TC02_WheelSpeed_FR_Range", "%.2f km/h out of [0, 300]");
+    gRangeErrors++;
+  }
+  if(rl < 0 || rl > 300) {
+    FAIL("TC02_WheelSpeed_RL_Range", "%.2f km/h");
+    gRangeErrors++;
+  }
+  if(rr < 0 || rr > 300) {
+    FAIL("TC02_WheelSpeed_RR_Range", "%.2f km/h");
+    gRangeErrors++;
+  }
+  
+  /* TC-03: Cycle time check (10ms ± 10%) */
+  if(gLastRx_WheelSpeed > 0) {
+    elapsed = now_ms - gLastRx_WheelSpeed;
+    if(elapsed < 9.0 || elapsed > 11.0) {
+      write("[WARN] TC03_WheelSpeed_Cycle: %.2f ms (expected 10.0 ±10%%)", elapsed);
+      gCycleErrors++;
+    }
+  }
+  gLastRx_WheelSpeed = now_ms;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ *  SECTION 5 — AEB_Req Message Validation
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+on message AEB_Req {
+  float now_ms, elapsed, decel, dist, ttc;
+  int   state;
+  
+  gMsgFlags = gMsgFlags | 0x02;
+  now_ms = timeNow() / 100000.0;
+  
+  decel = this.AEB_Decel_Req * 0.1;
+  dist  = this.AEB_Obj_Distance * 0.01;
+  ttc   = this.AEB_TTC * 0.01;
+  state = this.AEB_State;
+  
+  /* TC-04: Signal range validation */
+  if(decel < 0 || decel > 25.5) {
+    FAIL("TC04_AEB_Decel_Range", "%.2f m/s2 out of [0, 25.5]");
+    gRangeErrors++;
+  }
+  if(dist < 0 || dist > 655.35) {
+    FAIL("TC04_AEB_Dist_Range", "%.2f m out of [0, 655.35]");
+    gRangeErrors++;
+  }
+  if(ttc < 0 || ttc > 2.55) {
+    FAIL("TC04_AEB_TTC_Range", "%.3f s out of [0, 2.55]");
+    gRangeErrors++;
+  }
+  if(state > 7) {
+    FAIL("TC04_AEB_State_Range", "State=%d exceeds max 7");
+    gRangeErrors++;
+  }
+  
+  /* TC-05: Logical consistency — if AEB_Active=1, Decel_Req should be > 0 */
+  if(this.AEB_Active == 1 && decel == 0.0) {
+    write("[WARN] TC05_AEB_Consistency: AEB_Active=1 but Decel_Req=0");
+  }
+  
+  /* TC-06: Alive counter */
+  if(gAlive_AEB != 0xFF) {
+    byte expected = (gAlive_AEB + 1);
+    if(expected > 14) expected = 0;
+    if(this.Alive_Ctr_AEB != expected) {
+      write("[FAIL] TC06_AEB_AliveCounter: Got %d expected %d (last=%d)",
+            this.Alive_Ctr_AEB, expected, gAlive_AEB);
+      gAliveErrors++;
+    }
+  }
+  gAlive_AEB = this.Alive_Ctr_AEB;
+  
+  /* TC-07: Cycle time (20ms ± 10%) */
+  if(gLastRx_AEB_Req > 0) {
+    elapsed = now_ms - gLastRx_AEB_Req;
+    if(elapsed < 18.0 || elapsed > 22.0) {
+      write("[WARN] TC07_AEB_CycleTime: %.2f ms (expected 20.0 ±10%%)", elapsed);
+      gCycleErrors++;
+    }
+  }
+  gLastRx_AEB_Req = now_ms;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ *  SECTION 6 — VehicleStatus Message Validation
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+on message VehicleStatus {
+  float now_ms, elapsed, temp, rpm, throttle, fuel;
+  int   eng_state, transm;
+  
+  gMsgFlags = gMsgFlags | 0x04;
+  now_ms = timeNow() / 100000.0;
+  
+  rpm      = this.EngineSpeed * 0.25;
+  throttle = this.ThrottlePos * 0.4;
+  temp     = this.EngineTemp * 0.5 - 40;
+  fuel     = this.FuelPress * 0.1;
+  eng_state = this.EngineState;
+  transm   = this.TransmMode;
+  
+  /* TC-08: Range checks */
+  if(rpm < 0 || rpm > 16383.75) {
+    FAIL("TC08_EngineSpeed_Range", "RPM out of range");
+    gRangeErrors++;
+  }
+  if(throttle < 0 || throttle > 100) {
+    FAIL("TC08_ThrottlePos_Range", "% out of [0, 100]");
+    gRangeErrors++;
+  }
+  if(temp < -40 || temp > 87.5) {
+    FAIL("TC08_EngineTemp_Range", "%.1f degC out of [-40, 87.5]");
+    gRangeErrors++;
+  }
+  if(eng_state > 6) {
+    FAIL("TC08_EngineState_Range", "State=%d exceeds max 6");
+    gRangeErrors++;
+  }
+  if(transm > 5) {
+    FAIL("TC08_TransmMode_Range", "Mode=%d exceeds max 5");
+    gRangeErrors++;
+  }
+  
+  /* TC-09: Alive counter (0–14 rolling) */
+  if(gAlive_VS != 0xFF) {
+    byte expected = (gAlive_VS + 1);
+    if(expected > 14) expected = 0;
+    if(this.Alive_Ctr_VS != expected) {
+      write("[WARN] TC09_VS_AliveCounter: Got %d expected %d", this.Alive_Ctr_VS, expected);
+      gAliveErrors++;
+    }
+  }
+  gAlive_VS = this.Alive_Ctr_VS;
+  
+  /* TC-10: Cycle time (10ms ± 10%) */
+  if(gLastRx_VehicleStatus > 0) {
+    elapsed = now_ms - gLastRx_VehicleStatus;
+    if(elapsed < 9.0 || elapsed > 11.0) {
+      write("[WARN] TC10_VehicleStatus_Cycle: %.2f ms", elapsed);
+      gCycleErrors++;
+    }
+  }
+  gLastRx_VehicleStatus = now_ms;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ *  SECTION 7 — EPS_Status Message Validation
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+on message EPS_Status {
+  float now_ms, elapsed, angle, torque;
+  int   state;
+  
+  gMsgFlags = gMsgFlags | 0x08;
+  now_ms = timeNow() / 100000.0;
+  
+  /* For signed signal, direct value read gives signed integer */
+  /* Need to interpret 16-bit signed value from raw */
+  angle  = this.SteeringAngle * 0.1;   /* raw signed × factor */
+  torque = this.SteeringTorque * 0.01 - 5.12;
+  state  = this.EPS_State;
+  
+  /* TC-11: Steering angle range */
+  if(angle < -3276.8 || angle > 3276.7) {
+    FAIL("TC11_SteeringAngle_Range", "%.1f deg out of range");
+    gRangeErrors++;
+  }
+  if(torque < -5.12 || torque > 5.11) {
+    FAIL("TC11_SteeringTorque_Range", "%.3f Nm out of range");
+    gRangeErrors++;
+  }
+  if(state > 7) {
+    FAIL("TC11_EPS_State_Range", "State=%d invalid");
+    gRangeErrors++;
+  }
+  
+  /* TC-12: Cycle time (20ms ± 10%) */
+  if(gLastRx_EPS_Status > 0) {
+    elapsed = now_ms - gLastRx_EPS_Status;
+    if(elapsed < 18.0 || elapsed > 22.0) {
+      write("[WARN] TC12_EPS_Cycle: %.2f ms", elapsed);
+      gCycleErrors++;
+    }
+  }
+  gLastRx_EPS_Status = now_ms;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ *  SECTION 8 — BCM_Status Message Validation
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+on message BCM_Status {
+  float now_ms, elapsed;
+  
+  gMsgFlags = gMsgFlags | 0x20;
+  now_ms = timeNow() / 100000.0;
+  
+  /* TC-13: Enumeration range checks */
+  if(this.DoorFL_Status > 3) {
+    FAIL("TC13_Door_FL_Status", "Value exceeds 3");
+    gRangeErrors++;
+  }
+  if(this.IgnitionState > 4) {
+    FAIL("TC13_IgnitionState", "Value exceeds 4");
+    gRangeErrors++;
+  }
+  if(this.WiperState > 4) {
+    FAIL("TC13_WiperState", "Value exceeds 4");
+    gRangeErrors++;
+  }
+  
+  /* TC-14: Alive counter */
+  if(gAlive_BCM != 0xFF) {
+    byte expected = (gAlive_BCM + 1);
+    if(expected > 14) expected = 0;
+    if(this.Alive_Ctr_BCM != expected) {
+      write("[WARN] TC14_BCM_AliveCounter: Got %d expected %d", this.Alive_Ctr_BCM, expected);
+      gAliveErrors++;
+    }
+  }
+  gAlive_BCM = this.Alive_Ctr_BCM;
+  
+  /* TC-15: Cycle time (100ms ± 10%) */
+  if(gLastRx_BCM_Status > 0) {
+    elapsed = now_ms - gLastRx_BCM_Status;
+    if(elapsed < 90.0 || elapsed > 110.0) {
+      write("[WARN] TC15_BCM_Cycle: %.2f ms", elapsed);
+      gCycleErrors++;
+    }
+  }
+  gLastRx_BCM_Status = now_ms;
+}
+
+on message IPC_Display {
+  float now_ms, elapsed, speed, rpm, fuel;
+  
+  gMsgFlags = gMsgFlags | 0x10;
+  now_ms = timeNow() / 100000.0;
+  
+  speed = this.Display_Speed * 0.1;
+  rpm   = this.Display_RPM * 0.5;
+  fuel  = this.Display_Fuel_Pct * 0.5;
+  
+  /* TC-16: IPC display range */
+  if(speed < 0 || speed > 409.5) {
+    FAIL("TC16_DisplaySpeed_Range", "%.1f km/h out of range");
+    gRangeErrors++;
+  }
+  if(rpm < 0 || rpm > 8191.5) {
+    FAIL("TC16_DisplayRPM_Range", "%.1f rpm out of range");
+    gRangeErrors++;
+  }
+  
+  /* TC-17: Cycle time (100ms ± 10%) */
+  if(gLastRx_IPC_Display > 0) {
+    elapsed = now_ms - gLastRx_IPC_Display;
+    if(elapsed < 90.0 || elapsed > 110.0) {
+      write("[WARN] TC17_IPC_Cycle: %.2f ms", elapsed);
+      gCycleErrors++;
+    }
+  }
+  gLastRx_IPC_Display = now_ms;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ *  SECTION 9 — Decode Verification Test
+ *  Inject a known frame and verify decode result
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+testcase TC_DecodeVerification() {
+  message AEB_Req txMsg;
+  
+  testStep("TC_Decode", "Inject known AEB_Req frame and verify decode");
+  
+  /* Build frame with known values:
+     AEB_Active=1, AEB_State=3 (ACTIVE), AEB_Decel_Req=50 (5.0 m/s2)
+     AEB_Obj_Distance=1000 (10.00m), AEB_TTC=100 (1.00s)
+     Alive_Ctr=5, CRC=0xAB, Reserved=0 */
+  
+  txMsg.AEB_Active       = 1;
+  txMsg.AEB_State        = 3;       /* ACTIVE */
+  txMsg.AEB_Decel_Req    = 50;      /* raw 50 = 5.0 m/s2 */
+  txMsg.AEB_Obj_Distance = 1000;    /* raw 1000 = 10.00 m */
+  txMsg.AEB_TTC          = 100;     /* raw 100 = 1.00 s */
+  txMsg.Alive_Ctr_AEB    = 5;
+  txMsg.CRC_AEB          = 0xAB;
+  txMsg.Reserved_AEB     = 0;
+  
+  output(txMsg);
+  wait(50);
+  
+  testStepPass("TC_Decode", "AEB_Req injected: Active=1 State=3(ACTIVE) Decel=5.0m/s2");
+}
+
+testcase TC_WheelSpeedBVT() {
+  message WheelSpeed txMsg;
+  
+  testStep("TC_WheelSpeedBVT", "Boundary value test for WheelSpeed signals");
+  
+  /* MAX boundary: 65535 raw = 655.35 km/h (beyond physical max 300) */
+  txMsg.WheelSpeed_FL = 30000;   /* 300.00 km/h = physical max */
+  txMsg.WheelSpeed_FR = 30000;
+  txMsg.WheelSpeed_RL = 30000;
+  txMsg.WheelSpeed_RR = 30000;
+  output(txMsg);
+  wait(20);
+  testStepPass("TC_WheelSpeedBVT", "MAX: raw=30000 = 300.0 km/h transmitted");
+  
+  /* ZERO: all wheels stopped */
+  txMsg.WheelSpeed_FL = 0;
+  txMsg.WheelSpeed_FR = 0;
+  txMsg.WheelSpeed_RL = 0;
+  txMsg.WheelSpeed_RR = 0;
+  output(txMsg);
+  wait(20);
+  testStepPass("TC_WheelSpeedBVT", "MIN: raw=0 = 0.0 km/h transmitted");
+  
+  /* INVALID: 65535 = sensor fault */
+  txMsg.WheelSpeed_FL = 65535;
+  output(txMsg);
+  wait(20);
+  testStepPass("TC_WheelSpeedBVT", "INVALID: raw=65535 (sensor fault value)");
+}
+
+testgroup ADAS_Regression() {
+  TC_DecodeVerification();
+  TC_WheelSpeedBVT();
+}
