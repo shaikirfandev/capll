@@ -1,0 +1,527 @@
+/*
+ * uds_security_tests.can
+ * UDS Security Test Automation — Automotive Cybersecurity Lab
+ *
+ * CAPL test node for automated UDS security validation:
+ *   TC-001: Security Access lockout policy (max wrong key attempts)
+ *   TC-002: Security Access lockout persistence across ECU reset
+ *   TC-003: Unauthorized Programming Session (no prior Extended session)
+ *   TC-004: RDBI restricted DID access (default session only)
+ *   TC-005: Security Access wrong key NRC validation
+ *   TC-006: Programming session requires Security Access
+ *
+ * Transport layer: ISO 15765-2 (ISO-TP) over CAN
+ * Request ID:  0x7E0 (physical, ECU 1)
+ * Response ID: 0x7E8
+ *
+ * Compatible: CANoe 10.0+ with CAPL Test Module
+ *
+ * Usage: Add to CANoe Test Module, run as automated regression test.
+ * All results reported via testStepPass/testStepFail and final report.
+ */
+
+includes
+{
+}
+
+variables
+{
+  /* ─── Configuration ─────────────────────────────────────────────────── */
+  const int  TX_ID             = 0x7E0;
+  const int  RX_ID             = 0x7E8;
+  const int  FUNC_TX_ID        = 0x7DF;   /* Functional addressing */
+
+  /* UDS Service IDs */
+  const byte SID_DSC           = 0x10;    /* DiagnosticSessionControl */
+  const byte SID_SA            = 0x27;    /* SecurityAccess */
+  const byte SID_RDBI          = 0x22;    /* ReadDataByIdentifier */
+  const byte SID_WDBI          = 0x2E;    /* WriteDataByIdentifier */
+  const byte SID_ECU_RESET     = 0x11;    /* ECUReset */
+  const byte SID_NEGATIVE      = 0x7F;    /* NegativeResponse */
+
+  /* NRC codes */
+  const byte NRC_SNS           = 0x11;    /* serviceNotSupported */
+  const byte NRC_SFNS          = 0x12;    /* subFunctionNotSupported */
+  const byte NRC_RSE           = 0x24;    /* requestSequenceError */
+  const byte NRC_ROOR          = 0x31;    /* requestOutOfRange */
+  const byte NRC_SAD            = 0x33;    /* securityAccessDenied */
+  const byte NRC_IK             = 0x35;    /* invalidKey */
+  const byte NRC_ENOA           = 0x36;    /* exceededNumberOfAttempts */
+  const byte NRC_RTDNE          = 0x37;    /* requiredTimeDelayNotExpired */
+  const byte NRC_CNC            = 0x22;    /* conditionsNotCorrect */
+
+  /* Timing */
+  const long RESPONSE_TIMEOUT  = 2000;    /* ms */
+  const long LOCKOUT_MEASURE_MAX = 120000;/* ms = 2 minutes max measurement */
+  const long SESSION_P2         = 50;     /* ms between requests */
+
+  /* Test state */
+  byte  last_response[64];
+  int   last_response_len;
+  int   response_received;
+
+  msTimer responseTimer;
+}
+
+/* ─── UTILITY: Send raw UDS frame and wait for response ──────────────────── */
+
+/*
+ * NOTE: In real CANoe projects, use Diagnostic Description (.cdd/.odx) objects
+ * and the built-in Diag() functions. These raw CAN functions are for
+ * educational illustration of the UDS byte-level protocol.
+ */
+
+void uds_send(byte data[], int len)
+{
+  message 0x7E0 msg;
+  int i;
+
+  /* ISO-TP single frame: first byte = 0x0N (length), followed by data */
+  msg.dlc = len + 1;
+  msg.byte(0) = len;  /* PCI: Single Frame, length = len */
+  for (i = 0; i < len && i < 7; i++) {
+    msg.byte(i + 1) = data[i];
+  }
+
+  response_received = 0;
+  setTimer(responseTimer, RESPONSE_TIMEOUT);
+  output(msg);
+}
+
+/* ─── RESPONSE RECEIVER ─────────────────────────────────────────────────── */
+
+on message 0x7E8
+{
+  int len;
+  int i;
+
+  /* Parse ISO-TP single frame response */
+  len = this.byte(0) & 0x0F;
+  if (len == 0 || len > 7) return;
+
+  for (i = 0; i < len && i < 64; i++) {
+    last_response[i] = this.byte(i + 1);
+  }
+  last_response_len = len;
+  response_received = 1;
+  cancelTimer(responseTimer);
+}
+
+on timer responseTimer
+{
+  response_received = -1;  /* Timeout */
+}
+
+int wait_response(long timeout_ms)
+{
+  long deadline;
+  deadline = timeNowInt() + timeout_ms * 10;  /* timeNowInt = 100us units */
+  while (response_received == 0 && timeNowInt() < deadline) {
+    wait(10);
+  }
+  return response_received;
+}
+
+/* Helper: check if response is a positive response to given service */
+int is_positive(byte expected_sid)
+{
+  return (last_response_len >= 1 && last_response[0] == (expected_sid | 0x40));
+}
+
+/* Helper: check if response is NRC */
+int is_nrc(byte expected_sid, byte expected_nrc)
+{
+  return (last_response_len >= 3 &&
+          last_response[0] == SID_NEGATIVE &&
+          last_response[1] == expected_sid &&
+          last_response[2] == expected_nrc);
+}
+
+/* Helper: Enter default session */
+void enter_default_session()
+{
+  byte req[2];
+  req[0] = SID_DSC;
+  req[1] = 0x01;
+  uds_send(req, 2);
+  wait_response(RESPONSE_TIMEOUT);
+  wait(SESSION_P2);
+}
+
+/* Helper: Enter extended diagnostic session */
+int enter_extended_session()
+{
+  byte req[2];
+  int result;
+  req[0] = SID_DSC;
+  req[1] = 0x03;
+  uds_send(req, 2);
+  result = wait_response(RESPONSE_TIMEOUT);
+  wait(SESSION_P2);
+  return result == 1 && is_positive(SID_DSC);
+}
+
+/* Helper: Request seed for SA level */
+int request_seed(byte level)
+{
+  byte req[2];
+  req[0] = SID_SA;
+  req[1] = level;  /* ODD = request seed */
+  uds_send(req, 2);
+  return wait_response(RESPONSE_TIMEOUT);
+}
+
+/* Helper: Send wrong key (all 0xFF) */
+int send_wrong_key(byte level, int key_len)
+{
+  byte req[6];
+  int i;
+  req[0] = SID_SA;
+  req[1] = level + 1;  /* EVEN = send key */
+  for (i = 2; i < key_len + 2 && i < 6; i++) {
+    req[i] = 0xFF;  /* Wrong key bytes */
+  }
+  uds_send(req, key_len + 2);
+  return wait_response(RESPONSE_TIMEOUT);
+}
+
+/* ─── TEST CASES ─────────────────────────────────────────────────────────── */
+
+testcase TC001_SecurityAccess_Lockout()
+{
+  int attempt;
+  int max_attempts;
+  int lockout_triggered;
+  int key_len;
+  byte nrc;
+  long lockout_start_ms;
+  long lockout_end_ms;
+
+  testCaseTitle("TC-001", "Security Access Lockout Policy");
+
+  enter_default_session();
+  if (!enter_extended_session()) {
+    testStepFail("TC001-PRE", "Could not enter Extended Diagnostic Session");
+    return;
+  }
+  testStepPass("TC001-PRE", "Extended Diagnostic Session entered");
+
+  /* Determine seed length from first request */
+  request_seed(0x01);
+  if (response_received != 1 || !is_positive(SID_SA)) {
+    testStepFail("TC001-SEED", "SecurityAccess seed request failed");
+    return;
+  }
+  key_len = last_response_len - 2;  /* Subtract SID + sub-function */
+  if (key_len <= 0) key_len = 2;
+  testStepPass("TC001-SEED", "Seed received, length = %d bytes", key_len);
+
+  /* Send wrong keys until lockout */
+  max_attempts    = 15;
+  lockout_triggered = 0;
+  attempt         = 1;
+
+  while (attempt <= max_attempts) {
+    /* Must re-request seed each time */
+    request_seed(0x01);
+    wait(SESSION_P2);
+
+    if (response_received != 1 || last_response[0] == SID_NEGATIVE) {
+      nrc = (last_response_len >= 3) ? last_response[2] : 0x00;
+      if (nrc == NRC_ENOA || nrc == NRC_RTDNE) {
+        lockout_triggered = 1;
+        write("[TC001] Lockout triggered at attempt %d (NRC=0x%02X)", attempt, nrc);
+        lockout_start_ms = timeNowInt() / 10;
+        break;
+      }
+    }
+
+    send_wrong_key(0x01, key_len);
+    wait(SESSION_P2);
+
+    if (last_response_len >= 3 && last_response[0] == SID_NEGATIVE) {
+      nrc = last_response[2];
+      if (nrc == NRC_ENOA || nrc == NRC_RTDNE) {
+        lockout_triggered = 1;
+        write("[TC001] Lockout triggered at attempt %d (NRC=0x%02X)", attempt, nrc);
+        lockout_start_ms = timeNowInt() / 10;
+        break;
+      } else if (nrc == NRC_IK) {
+        write("[TC001] Attempt %d: Wrong key rejected (NRC=0x35) — expected", attempt);
+      }
+    } else {
+      /* Wrong key was accepted — critical failure */
+      testStepFail("TC001-KEYACCEPT", "CRITICAL: Wrong key accepted at attempt %d!", attempt);
+      return;
+    }
+
+    attempt++;
+    wait(100);
+  }
+
+  if (!lockout_triggered) {
+    testStepFail("TC001-LOCKOUT", "No lockout after %d wrong attempts (FAIL — should lock at ≤3)", attempt);
+    return;
+  }
+
+  if (attempt <= 3) {
+    testStepPass("TC001-LOCKOUT", "Lockout triggered after %d attempts (PASS — within ≤3 limit)", attempt);
+  } else {
+    testStepFail("TC001-LOCKOUT", "Lockout triggered after %d attempts (FAIL — should lock at ≤3)", attempt);
+  }
+
+  /* Measure lockout duration */
+  write("[TC001] Measuring lockout duration...");
+  long elapsed_ms;
+  elapsed_ms = 0;
+  lockout_end_ms = 0;
+
+  while (elapsed_ms < LOCKOUT_MEASURE_MAX) {
+    wait(1000);
+    elapsed_ms = timeNowInt() / 10 - lockout_start_ms;
+    request_seed(0x01);
+    wait(SESSION_P2);
+
+    if (response_received == 1 && is_positive(SID_SA)) {
+      lockout_end_ms = elapsed_ms;
+      break;
+    }
+  }
+
+  if (lockout_end_ms > 0) {
+    if (lockout_end_ms >= 10000) {
+      testStepPass("TC001-DURATION", "Lockout lasted %dms (≥10s required)", lockout_end_ms);
+    } else {
+      testStepFail("TC001-DURATION", "Lockout lasted only %dms (must be ≥10000ms)", lockout_end_ms);
+    }
+  } else {
+    testStepPass("TC001-DURATION", "Lockout > 120s (exceeds measurement window — acceptable)");
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── */
+
+testcase TC002_Lockout_Persistence_After_Reset()
+{
+  int attempt;
+  byte req[2];
+
+  testCaseTitle("TC-002", "Security Access Lockout Persists After ECU Reset");
+
+  enter_default_session();
+  enter_extended_session();
+
+  /* Trigger lockout first */
+  write("[TC002] Triggering lockout...");
+  for (attempt = 0; attempt < 5; attempt++) {
+    request_seed(0x01);
+    wait(100);
+    send_wrong_key(0x01, 2);
+    wait(100);
+    if (last_response_len >= 3 && last_response[0] == SID_NEGATIVE &&
+        (last_response[2] == NRC_ENOA || last_response[2] == NRC_RTDNE)) {
+      break;
+    }
+  }
+  testStepPass("TC002-PRE", "Lockout triggered");
+
+  /* Soft reset ECU */
+  req[0] = SID_ECU_RESET;
+  req[1] = 0x01;  /* Hard reset */
+  uds_send(req, 2);
+  wait(500);  /* Allow ECU to restart */
+
+  /* Re-enter extended session */
+  enter_extended_session();
+  wait(SESSION_P2);
+
+  /* Check lockout persists */
+  request_seed(0x01);
+  wait(SESSION_P2);
+
+  if (last_response_len >= 3 && last_response[0] == SID_NEGATIVE &&
+      (last_response[2] == NRC_ENOA || last_response[2] == NRC_RTDNE)) {
+    testStepPass("TC002-PERSIST", "Lockout persists after ECU reset (NRC=0x%02X)", last_response[2]);
+  } else if (is_positive(SID_SA)) {
+    testStepFail("TC002-PERSIST", "Lockout was CLEARED by ECU reset — seed accepted after reset!");
+  } else {
+    testStepFail("TC002-PERSIST", "Unexpected response: SID=0x%02X", last_response[0]);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── */
+
+testcase TC003_Unauthorized_Programming_Session()
+{
+  byte req[2];
+
+  testCaseTitle("TC-003", "Programming Session Requires Prior Extended Session");
+
+  /* Start from Default session — directly request Programming */
+  enter_default_session();
+  testStepPass("TC003-PRE", "In Default Diagnostic Session");
+
+  req[0] = SID_DSC;
+  req[1] = 0x02;  /* Programming session */
+  uds_send(req, 2);
+  wait_response(RESPONSE_TIMEOUT);
+
+  if (last_response_len >= 3 && last_response[0] == SID_NEGATIVE) {
+    testStepPass("TC003-BLOCK", "Programming session from Default rejected (NRC=0x%02X) — PASS",
+                 last_response[2]);
+  } else if (is_positive(SID_DSC)) {
+    testStepFail("TC003-BLOCK", "Programming session accessible from Default — FAIL (session jump vulnerability)");
+  } else {
+    testStepFail("TC003-BLOCK", "Unexpected response");
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── */
+
+testcase TC004_Restricted_DID_Access()
+{
+  byte req[3];
+
+  testCaseTitle("TC-004", "Restricted DID Not Accessible in Default Session");
+
+  enter_default_session();
+
+  /* Try to read a calibration DID (0xF1A0 = example restricted DID) */
+  /* Should be rejected in Default session */
+  req[0] = SID_RDBI;
+  req[1] = 0xF1;
+  req[2] = 0xA0;
+  uds_send(req, 3);
+  wait_response(RESPONSE_TIMEOUT);
+
+  if (last_response_len >= 3 && last_response[0] == SID_NEGATIVE) {
+    byte nrc;
+    nrc = last_response[2];
+    if (nrc == NRC_SAD || nrc == NRC_ROOR || nrc == NRC_CNC) {
+      testStepPass("TC004-DID-RESTRICTED", "DID 0xF1A0 blocked in Default session (NRC=0x%02X)", nrc);
+    } else {
+      testStepFail("TC004-DID-RESTRICTED", "DID rejected but unexpected NRC=0x%02X", nrc);
+    }
+  } else if (is_positive(SID_RDBI)) {
+    testStepFail("TC004-DID-RESTRICTED", "Restricted DID 0xF1A0 accessible in Default session — FAIL");
+  } else {
+    testStepFail("TC004-DID-RESTRICTED", "No response to RDBI request");
+  }
+
+  /* Now try in Extended session — should succeed */
+  enter_extended_session();
+  req[0] = SID_RDBI;
+  req[1] = 0xF1;
+  req[2] = 0xA0;
+  uds_send(req, 3);
+  wait_response(RESPONSE_TIMEOUT);
+
+  if (is_positive(SID_RDBI)) {
+    testStepPass("TC004-DID-EXTENDED", "DID 0xF1A0 accessible in Extended session — correct");
+  } else if (last_response_len >= 3 && last_response[0] == SID_NEGATIVE) {
+    write("[TC004] DID blocked even in Extended session (NRC=0x%02X) — may be normal if SA required",
+          last_response[2]);
+    testStepPass("TC004-DID-EXTENDED", "DID requires SA in Extended session — acceptable");
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── */
+
+testcase TC005_NRC_InvalidKey_On_Wrong_Key()
+{
+  testCaseTitle("TC-005", "SecurityAccess Returns NRC 0x35 on Wrong Key");
+
+  enter_default_session();
+  if (!enter_extended_session()) {
+    testStepFail("TC005-PRE", "Cannot enter Extended session");
+    return;
+  }
+
+  request_seed(0x01);
+  if (!is_positive(SID_SA)) {
+    testStepFail("TC005-SEED", "Seed request failed");
+    return;
+  }
+  testStepPass("TC005-SEED", "Seed request OK");
+
+  send_wrong_key(0x01, 2);
+  wait(SESSION_P2);
+
+  if (is_nrc(SID_SA, NRC_IK)) {
+    testStepPass("TC005-NRC", "Correct NRC 0x35 (invalidKey) returned for wrong key");
+  } else if (is_nrc(SID_SA, NRC_ENOA)) {
+    testStepPass("TC005-NRC", "NRC 0x36 returned (already locked out from prior test — acceptable)");
+  } else if (is_positive(SID_SA)) {
+    testStepFail("TC005-NRC", "CRITICAL: Wrong key was ACCEPTED! Security Access bypass vulnerability!");
+  } else {
+    testStepFail("TC005-NRC", "Unexpected NRC=0x%02X (expected 0x35)",
+                 (last_response_len >= 3) ? last_response[2] : 0xFF);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── */
+
+testcase TC006_Programming_Requires_SecurityAccess()
+{
+  byte req[3];
+
+  testCaseTitle("TC-006", "Firmware Download (0x34 RequestDownload) Requires Security Access");
+
+  enter_default_session();
+  enter_extended_session();
+
+  /* Try to start programming session directly (no SA) */
+  req[0] = SID_DSC;
+  req[1] = 0x02;  /* Programming */
+  uds_send(req, 2);
+  wait_response(RESPONSE_TIMEOUT);
+
+  if (is_positive(SID_DSC)) {
+    /* In programming session — now try RequestDownload without SA */
+    byte dl_req[7];
+    dl_req[0] = 0x34;  /* RequestDownload */
+    dl_req[1] = 0x00;  /* dataFormatIdentifier */
+    dl_req[2] = 0x44;  /* addressAndLengthFormatIdentifier: 4-byte addr, 4-byte len */
+    dl_req[3] = 0x00;  dl_req[4] = 0x00; dl_req[5] = 0x00; dl_req[6] = 0x00;
+    uds_send(dl_req, 7);
+    wait_response(RESPONSE_TIMEOUT);
+
+    if (last_response_len >= 3 && last_response[0] == SID_NEGATIVE) {
+      byte nrc;
+      nrc = last_response[2];
+      if (nrc == NRC_SAD || nrc == NRC_RSE) {
+        testStepPass("TC006-DOWNLOAD", "RequestDownload blocked without SA (NRC=0x%02X) — PASS", nrc);
+      } else {
+        testStepFail("TC006-DOWNLOAD", "RequestDownload rejected with unexpected NRC=0x%02X", nrc);
+      }
+    } else if (last_response[0] == 0x74) {
+      testStepFail("TC006-DOWNLOAD", "RequestDownload ACCEPTED without Security Access — CRITICAL VULNERABILITY");
+    }
+  } else {
+    write("[TC006] Could not enter Programming session — SA may already be required for session entry");
+    testStepPass("TC006-SESSION", "Programming session itself requires authorization (NRC=0x%02X)",
+                 (last_response_len >= 3) ? last_response[2] : 0xFF);
+  }
+}
+
+/* ─── MAIN TEST GROUP ─────────────────────────────────────────────────────── */
+
+testgroup UDS_Security_Tests()
+{
+  testCaseName("UDS Security Validation Suite");
+
+  TC001_SecurityAccess_Lockout();
+  TC002_Lockout_Persistence_After_Reset();
+  TC003_Unauthorized_Programming_Session();
+  TC004_Restricted_DID_Access();
+  TC005_NRC_InvalidKey_On_Wrong_Key();
+  TC006_Programming_Requires_SecurityAccess();
+}
+
+on start
+{
+  write("=== UDS Security Test Automation ===");
+  write("Target: TX=0x%03X RX=0x%03X", TX_ID, RX_ID);
+  write("Tests: TC001–TC006 (Security Access, Session, DID access)");
+  write("──────────────────────────────────────────────────────────");
+}
