@@ -1,0 +1,232 @@
+# ADAS ECU — DID matrix
+# Replace mock_value and expected_format with real ODX/DBC-derived values.
+# Fields:
+#   id:              DID hex string (e.g. "0xF190")
+#   name:            Human-readable identifier
+#   description:     What the DID represents
+#   length:          Expected data length in bytes
+#   data_type:       "hex" | "ascii" | "uint8" | "uint16" | "uint32" | "bitmask"
+#   readable:        true/false
+#   writable:        true/false
+#   io_controllable: true/false (only for 0x2F input/output DID)
+#   sessions:        List of sessions in which this DID is accessible
+#                    Values: default | extended | programming
+#   security_level:  Minimum security level required (0 = none, 1 = level 0x01, etc.)
+#   mock_value:      Simulated response value used in mock mode
+#   expected_format: Python regex to validate decoded ASCII values (optional)
+#   value_range:     [min, max] for numeric types (optional)
+#   write_test_value: Value to use in write-then-read-back tests (writable DIDs only)
+
+dids:
+
+  # ── ISO/OBD standardised DIDs ──────────────────────────────────────────────
+
+  - id: "0xF190"
+    name: "VehicleIdentificationNumber"
+    description: "17-character VIN (ISO 3779)"
+    length: 17
+    data_type: "ascii"
+    readable: true
+    writable: false
+    sessions: [default, extended, programming]
+    security_level: 0
+    mock_value: "1HGCM82633A004352"
+    expected_format: "^[A-HJ-NPR-Z0-9]{17}$"
+
+  - id: "0xF18C"
+    name: "ECUSerialNumber"
+    description: "ECU hardware serial number (8 bytes hex)"
+    length: 8
+    data_type: "hex"
+    readable: true
+    writable: false
+    sessions: [extended]
+    security_level: 0
+    mock_value: "AABB1122CCDD3344"
+
+  - id: "0xF187"
+    name: "VehicleManufacturerSparePartNumber"
+    description: "OEM spare part number for this ECU"
+    length: 10
+    data_type: "ascii"
+    readable: true
+    writable: false
+    sessions: [default, extended]
+    security_level: 0
+    mock_value: "ADASECU001"
+
+  - id: "0xF189"
+    name: "ECUSoftwareVersionNumber"
+    description: "Current flashed software version string"
+    length: 8
+    data_type: "ascii"
+    readable: true
+    writable: false
+    sessions: [default, extended, programming]
+    security_level: 0
+    mock_value: "v1.2.0  "   # padded to 8 bytes
+
+  - id: "0xF197"
+    name: "SystemNameOrEngineType"
+    description: "ECU system name or engine type identifier"
+    length: 8
+    data_type: "ascii"
+    readable: true
+    writable: false
+    sessions: [default, extended]
+    security_level: 0
+    mock_value: "ADAS_L2 "
+
+  - id: "0xF188"
+    name: "ECUProgrammingDate"
+    description: "Last ECU programming date (YYYY-MM-DD in BCD)"
+    length: 4
+    data_type: "hex"
+    readable: true
+    writable: false
+    sessions: [extended, programming]
+    security_level: 0
+    mock_value: "20260601"
+
+  - id: "0xF186"
+    name: "ActiveDiagnosticSession"
+    description: "Currently active UDS diagnostic session"
+    length: 1
+    data_type: "uint8"
+    readable: true
+    writable: false
+    sessions: [default, extended, programming]
+    security_level: 0
+    mock_value: "01"
+
+  # ── ADAS-specific DIDs ─────────────────────────────────────────────────────
+
+  - id: "0xD001"
+    name: "CameraCalibrationStatus"
+    description: "Front camera intrinsic/extrinsic calibration validity flag"
+    length: 2
+    data_type: "hex"
+    readable: true
+    writable: false
+    sessions: [extended]
+    security_level: 0
+    mock_value: "0100"   # 0x01 = calibrated, 0x00 = status byte
+
+  - id: "0xD002"
+    name: "RadarAlignmentStatus"
+    description: "Front radar azimuth alignment flag and offset (milli-degrees)"
+    length: 3
+    data_type: "hex"
+    readable: true
+    writable: false
+    sessions: [extended]
+    security_level: 0
+    mock_value: "010000"
+
+  - id: "0xD003"
+    name: "ADASFeatureEnableFlags"
+    description: "Bitmask: bit0=AEB, bit1=LDW, bit2=ACC, bit3=BSM, bit4=TSR"
+    length: 1
+    data_type: "bitmask"
+    readable: true
+    writable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "1F"    # all 5 features enabled
+    write_test_value: "0F"  # disable TSR for write test
+
+  - id: "0xD004"
+    name: "LaneDepartureWarningConfig"
+    description: "LDW sensitivity (0=low,1=med,2=high) + warning mode byte"
+    length: 2
+    data_type: "hex"
+    readable: true
+    writable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "0101"
+    write_test_value: "0201"
+
+  - id: "0xD005"
+    name: "EmergencyBrakeAssistConfig"
+    description: "AEB activation threshold in km/h (1 byte) + reaction time (1 byte)"
+    length: 2
+    data_type: "hex"
+    readable: true
+    writable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "1E14"  # 30 km/h threshold, 20ms reaction
+    write_test_value: "2314"
+
+  - id: "0xD010"
+    name: "SensorHealthStatus"
+    description: "Combined sensor health bitmask: camera, radar, ultrasonic"
+    length: 2
+    data_type: "bitmask"
+    readable: true
+    writable: false
+    sessions: [extended]
+    security_level: 0
+    mock_value: "0707"  # all sensors healthy
+
+  - id: "0xD011"
+    name: "ObjectDetectionThreshold"
+    description: "Minimum object confidence threshold (0–255 scale)"
+    length: 1
+    data_type: "uint8"
+    readable: true
+    writable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "64"    # 100/255 = ~39%
+    value_range: [50, 200]
+    write_test_value: "7D"
+
+  - id: "0xD012"
+    name: "ForwardCollisionWarningDistance"
+    description: "FCW warning distance in metres (uint16, big-endian)"
+    length: 2
+    data_type: "uint16"
+    readable: true
+    writable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "001E"  # 30 m
+    value_range: [10, 150]
+    write_test_value: "0028"
+
+  - id: "0xD020"
+    name: "BootloaderVersion"
+    description: "Bootloader software version (read-only, programming session)"
+    length: 4
+    data_type: "ascii"
+    readable: true
+    writable: false
+    sessions: [programming]
+    security_level: 0
+    mock_value: "BL01"
+
+  - id: "0xD030"
+    name: "NVMDiagnosticCounter"
+    description: "Non-volatile fault counter reset via extended session"
+    length: 4
+    data_type: "uint32"
+    readable: true
+    writable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "00000000"
+    write_test_value: "00000000"
+
+  - id: "0xD040"
+    name: "CameraExposureControl"
+    description: "Camera exposure override for IO control testing"
+    length: 2
+    data_type: "hex"
+    readable: true
+    writable: false
+    io_controllable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "8000"  # mid exposure

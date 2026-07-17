@@ -1,0 +1,136 @@
+# ADAS ECU — RID (Routine Identifier) matrix
+# Fields:
+#   id:                  RID hex string (e.g. "0x0201")
+#   name:                Human-readable routine name
+#   description:         What the routine does
+#   supports_start:      true/false — 0x31 0x01 supported
+#   supports_stop:       true/false — 0x31 0x02 supported
+#   supports_results:    true/false — 0x31 0x03 supported
+#   sessions:            Sessions in which routine may be started
+#   security_level:      Minimum security level required (0 = none)
+#   expected_duration_ms: Typical execution time (used for timing regression detection)
+#   max_duration_ms:     Hard maximum — exceed this and a timing regression is flagged
+#   mock_result:         Hex string appended to positive 0x71 response (start result)
+#   description_result:  What the result bytes mean
+
+routines:
+
+  - id: "0x0201"
+    name: "ECUSelfTest"
+    description: "Full ECU self-diagnostic routine — RAM, NVM, watchdog"
+    supports_start: true
+    supports_stop: false
+    supports_results: true
+    sessions: [extended]
+    security_level: 0
+    expected_duration_ms: 300
+    max_duration_ms: 1000
+    mock_result: "0100"   # 0x01 = pass, 0x00 = no sub-results
+
+  - id: "0x0202"
+    name: "SensorCalibrationCheck"
+    description: "Verifies all sensor calibration parameters are in valid range"
+    supports_start: true
+    supports_stop: false
+    supports_results: true
+    sessions: [extended]
+    security_level: 1
+    expected_duration_ms: 500
+    max_duration_ms: 2000
+    mock_result: "0100"
+
+  - id: "0x0203"
+    name: "ClearSensorData"
+    description: "Clears all accumulated sensor offset/bias data (requires security)"
+    supports_start: true
+    supports_stop: false
+    supports_results: false
+    sessions: [extended]
+    security_level: 1
+    expected_duration_ms: 200
+    max_duration_ms: 800
+    mock_result: "01"
+
+  - id: "0x0204"
+    name: "ADASFeatureActivation"
+    description: "Activates or deactivates ADAS features via routine option byte"
+    supports_start: true
+    supports_stop: false
+    supports_results: true
+    sessions: [extended]
+    security_level: 1
+    expected_duration_ms: 150
+    max_duration_ms: 600
+    mock_result: "0100"
+
+  - id: "0x0205"
+    name: "RadarSelfCalibration"
+    description: "Triggers radar automatic boresight calibration"
+    supports_start: true
+    supports_stop: true
+    supports_results: true
+    sessions: [extended]
+    security_level: 1
+    expected_duration_ms: 1500
+    max_duration_ms: 5000
+    mock_result: "010000"  # status + 16-bit offset result
+
+  - id: "0x0206"
+    name: "CameraAlignmentVerification"
+    description: "Verifies front camera is within acceptable mounting alignment"
+    supports_start: true
+    supports_stop: false
+    supports_results: true
+    sessions: [extended]
+    security_level: 1
+    expected_duration_ms: 800
+    max_duration_ms: 3000
+    mock_result: "0100"
+
+  - id: "0x0207"
+    name: "LDWCalibrationRoutine"
+    description: "Lane departure warning lane-width calibration"
+    supports_start: true
+    supports_stop: true
+    supports_results: true
+    sessions: [extended]
+    security_level: 1
+    expected_duration_ms: 2000
+    max_duration_ms: 8000
+    mock_result: "010250"  # pass + 600cm lane width
+
+  - id: "0xFF00"
+    name: "SoftwareIntegrityCheck"
+    description: "CRC verification of all flashed software partitions"
+    supports_start: true
+    supports_stop: false
+    supports_results: true
+    sessions: [extended, programming]
+    security_level: 0
+    expected_duration_ms: 2000
+    max_duration_ms: 10000
+    mock_result: "0100"
+
+  - id: "0xFF01"
+    name: "MemoryTest"
+    description: "RAM/ROM built-in self test (BIST)"
+    supports_start: true
+    supports_stop: false
+    supports_results: true
+    sessions: [programming]
+    security_level: 1
+    expected_duration_ms: 3000
+    max_duration_ms: 15000
+    mock_result: "0100"
+
+  - id: "0x0300"
+    name: "NVMEraseUserData"
+    description: "Erase all user-configurable NVM parameters (restore defaults)"
+    supports_start: true
+    supports_stop: false
+    supports_results: false
+    sessions: [programming]
+    security_level: 1
+    expected_duration_ms: 500
+    max_duration_ms: 2000
+    mock_result: "01"

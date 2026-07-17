@@ -1,0 +1,3 @@
+# Raw CAN trace and pytest log files land here.
+# This directory is created automatically by the test suite.
+# Files in this directory are excluded from version control.

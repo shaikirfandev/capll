@@ -1,0 +1,142 @@
+# ============================================================
+# Telematics ECU Configuration  (TCU / TBOX)
+# ============================================================
+# The Telematics Control Unit typically lives on a dedicated CAN segment
+# or LVDS/Ethernet backbone.  Below uses classic CAN 500 kbps as a
+# conservative default — adjust for your network topology.
+#
+# Key Tier-1 suppliers: Continental, Harman, Visteon, LG Magna ePowetrains.
+# Obtain the ODX file from the supplier and cross-reference with the OBD
+# gateway DID routing table.
+
+# ── CAN / transport layer ──────────────────────────────────
+can:
+  channel:  1
+  bitrate:  500000
+  can_fd:   false
+  fd_bitrate: 2000000
+  tx_id:  "0x750"        # Tester → TCU  (verify from DBC DIAG_PHYS_TCU_REQ)
+  rx_id:  "0x758"        # TCU → Tester  (DIAG_PHYS_TCU_RSP)
+  func_id: "0x7DF"
+
+# ── UDS sessions ──────────────────────────────────────────
+sessions:
+  default:     0x01
+  extended:    0x03
+  programming: 0x02
+
+# ── Security access ────────────────────────────────────────
+security_access:
+  # Level 0x01/0x02 for extended diagnostic access
+  level: 0x01
+  algorithm: "xor_placeholder"
+  # For remote command simulation (e.g. RVS, RDTE), a separate level is
+  # typically used.  Add a second algorithm entry and reference it in the
+  # telematics tests.
+  remote_command_level: 0x05
+  remote_command_algorithm: "xor_placeholder"
+
+# ── DIDs ──────────────────────────────────────────────────
+dids:
+  software_version:
+    id: "0xF189"
+    length: 20
+    writable: false
+    description: "TCU application software version"
+
+  hardware_version:
+    id: "0xF191"
+    length: 10
+    writable: false
+    description: "TCU hardware part number"
+
+  vin:
+    id: "0xF190"
+    length: 17
+    writable: false
+    description: "Vehicle Identification Number"
+
+  sim_iccid:
+    id: "0x5001"           # Supplier-specific DID
+    length: 20
+    writable: false
+    description: "SIM card ICCID (Integrated Circuit Card Identifier)"
+
+  esim_status:
+    id: "0x5002"
+    length: 4
+    writable: false
+    description: "eSIM provisioning and active profile status"
+
+  gps_fix_status:
+    id: "0x5010"
+    length: 2
+    writable: false
+    description: "GNSS fix type (0=no fix, 1=2D, 2=3D, 3=DGPS)"
+
+  gps_coordinates:
+    id: "0x5011"
+    length: 8
+    writable: false
+    description: "Current latitude/longitude (IEEE 754 float pair)"
+
+  modem_firmware_version:
+    id: "0x5020"
+    length: 20
+    writable: false
+    description: "Cellular modem firmware version string"
+
+  network_registration_status:
+    id: "0x5021"
+    length: 2
+    writable: false
+    description: "LTE/5G network registration state"
+
+  ecall_module_status:
+    id: "0x5030"
+    length: 4
+    writable: false
+    description: "eCall module readiness and MSD storage state"
+
+  antenna_status:
+    id: "0x5040"
+    length: 2
+    writable: false
+    description: "Bitfield: GPS antenna / LTE antenna status"
+
+# ── Routines ──────────────────────────────────────────────
+routines:
+  connectivity_self_test:
+    id: "0x0501"
+    description: "Execute connectivity stack self-test (SIM + modem + network)"
+    expected_status: 0x00
+
+  gps_cold_start:
+    id: "0x0510"
+    description: "Force GNSS module cold start (clears almanac/ephemeris)"
+    expected_status: 0x00
+
+  ecall_test_activation:
+    id: "0x0520"
+    description: "Activate eCall test-mode transmission (no real emergency)"
+    expected_status: 0x00
+
+  remote_command_simulation:
+    id: "0x0530"
+    description: "Simulate a remote vehicle command (doors lock/unlock)"
+    expected_status: 0x00
+
+# ── DTC map ────────────────────────────────────────────────
+dtc_map:
+  "0xU05001": "CAN bus-off — Telematics segment"
+  "0xU05002": "Lost communication with Body Control Module"
+  "0xB30001": "GPS antenna open circuit"
+  "0xB30002": "GPS antenna short to ground"
+  "0xB31001": "LTE antenna open circuit"
+  "0xB31002": "LTE antenna short to battery"
+  "0xB32001": "SIM card not detected"
+  "0xB32002": "SIM card read failure"
+  "0xB33001": "Network registration timeout"
+  "0xB33002": "PDN connection failure"
+  "0xB34001": "eCall module self-test failure"
+  "0xB34002": "eCall MSD storage checksum error"

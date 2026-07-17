@@ -1,0 +1,104 @@
+# ============================================================
+# Infotainment ECU — Session & Hardware Configuration
+# ============================================================
+#
+# This file drives conftest.py session-scoped fixtures.
+# Populate CAN IDs from your DBC file (search for DIAG_PHYS_HU_REQ /
+# DIAG_PHYS_HU_RSP or consult the Tier-1 supplier's diagnostic spec).
+#
+# Timing values are defaults from ISO 14229-1; adjust if your ECU
+# uses a non-standard P2 / P2* or has a short session timeout.
+
+# ── CAN / transport layer ──────────────────────────────────
+can:
+  channel: 1                # Vector Hardware Config 1-based channel number
+  bitrate: 500000           # 500 kbps — classic CAN default
+  can_fd: false             # set true + fd_bitrate for CAN-FD head units
+  fd_bitrate: 2000000       # CAN-FD data-phase bitrate (if can_fd=true)
+  tx_id: "0x730"            # Tester → Infotainment ECU  (verify from DBC)
+  rx_id: "0x738"            # Infotainment ECU → Tester
+  func_id: "0x7DF"          # Functional broadcast (OBD / multi-ECU)
+  app_name: "InfotainmentTestSuite"
+
+# ── ISO-TP parameters ─────────────────────────────────────
+isotp:
+  addressing_mode: normal   # normal | extended | mixed
+  tx_padding: 0xAA          # padding byte for CAN-FD
+  stmin: 0                  # separation time [ms]; 0 = no minimum delay
+  blocksize: 0              # block size; 0 = unlimited
+
+# ── UDS diagnostic sessions ───────────────────────────────
+# P2 / P2* in milliseconds per ISO 14229-1 Table 7.
+# session_timeout_s: time the ECU will drop the session if no TesterPresent arrives.
+sessions:
+  default:
+    id: 0x01
+    p2_ms: 50
+    p2_star_ms: 500
+    session_timeout_s: null   # default session never times out
+  extended:
+    id: 0x03
+    p2_ms: 50
+    p2_star_ms: 500
+    session_timeout_s: 5.0    # ECU drops to default after 5 s without TesterPresent
+  programming:
+    id: 0x02
+    p2_ms: 50
+    p2_star_ms: 5000
+    session_timeout_s: 5.0
+
+# ── ECU Reset types ───────────────────────────────────────
+reset:
+  hard:   0x01
+  key_off_on: 0x02
+  soft:   0x03
+  # approximate ECU boot time after hard reset (seconds)
+  boot_delay_s: 2.0
+
+# ── Security Access ───────────────────────────────────────
+# level_1 is used for extended diagnostic access (DID write, routine control).
+# level_3 (if present) for programming / flashing.
+# Replace algorithm with the OEM-specific implementation name once registered.
+security_access:
+  level_1:
+    request_level: 0x01       # requestSeed sub-function (odd)
+    key_level:    0x02        # sendKey sub-function (even = request + 1)
+    algorithm:    "xor_placeholder"   # REPLACE with real OEM algorithm
+    max_attempts: 3           # ECU locks out after 3 consecutive wrong keys
+    delay_after_lockout_s: 10 # Wait time before attempting again
+    seed_length:  4           # expected seed byte count
+  level_3:
+    request_level: 0x11
+    key_level:    0x12
+    algorithm:    "xor_placeholder"
+    max_attempts: 3
+    delay_after_lockout_s: 10
+    seed_length:  4
+
+# ── IO Control DIDs ───────────────────────────────────────
+# Used with UDS service 0x2F (InputOutputControlByIdentifier).
+# control_option values follow ISO 14229-1 Table 131:
+#   0x00 = returnControlToECU  0x01 = resetToDefault
+#   0x03 = shortTermAdjustment
+io_control:
+  display_backlight:
+    did: "0x3020"
+    max_value: 255
+    control_on:  "0x0300FF"   # shortTermAdjustment → set to 0xFF (max)
+    control_off: "0x030000"   # shortTermAdjustment → set to 0x00 (off)
+    return_ctrl: "0x0000"     # returnControlToECU
+    description: "Force display backlight via IOControl"
+
+  audio_mute:
+    did: "0x3032"
+    control_on:  "0x030001"   # shortTermAdjustment → muted
+    control_off: "0x030000"   # shortTermAdjustment → unmuted
+    return_ctrl: "0x0000"
+    description: "Force audio mute state via IOControl"
+
+  speaker_test_tone:
+    did: "0x3033"
+    control_on:  "0x030001"   # inject test tone
+    control_off: "0x030000"   # stop test tone
+    return_ctrl: "0x0000"
+    description: "Inject speaker test tone via IOControl"

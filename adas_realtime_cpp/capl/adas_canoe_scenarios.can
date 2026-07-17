@@ -1,0 +1,199 @@
+// ============================================================
+// capl/adas_canoe_scenarios.can
+//
+// CANoe/CAPL test environment for ADAS feature validation.
+//
+// HOW TO USE
+// ----------
+// 1.  Import this file into CANoe Simulation Setup.
+// 2.  Assign bus signals to match your project DBC.
+// 3.  Run each test section from Test Module or IL trigger.
+// 4.  All test results are logged via TestStep() and TestReport().
+//
+// SIGNAL NAMES (adapt to your project DBC)
+//   VehicleSpeed_mps          — ego speed, m/s, factor 0.01
+//   YawRate_radps             — ego yaw rate, rad/s, factor 0.01
+//   LeadRange_m               — radar range, m, factor 0.1
+//   LeadRelSpeed_mps          — relative speed, m/s, factor 0.01
+//   LaneOffset_m              — camera lateral offset, m, factor 0.01
+//   HeadingError_rad          — camera heading error, rad, factor 0.001
+//   Cmd_Accel_mps2            — ADAS commanded acceleration
+//   Cmd_Steer_rad             — ADAS commanded steering
+//   AEB_Active                — AEB request bit
+//   LongMode                  — longitudinal ControlMode
+//   LatMode                   — lateral ControlMode
+//   FaultMask                 — Fault bitmask
+// ============================================================
+
+variables {
+    // Test configuration
+    const float kCruiseSpeed   = 22.0;   // m/s
+    const float kTimeGap       = 1.8;    // s
+    const float kMinGap        = 5.0;    // m
+    const float kTTCThreshold  = 1.5;    // s for AEB
+    const int   kTestPeriod_ms = 20;     // 50 Hz control cycle
+
+    // Simulated scenario state
+    float g_ego_speed_mps   = 0.0;
+    float g_lead_range_m    = 100.0;
+    float g_lead_rel_mps    = 0.0;
+    float g_lane_offset_m   = 0.0;
+
+    int g_cycle_count = 0;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Scenario 1 : Free-cruise — no lead, speed builds to set speed
+// ──────────────────────────────────────────────────────────────────────────────
+testcase TC_ACC_FreeCruise() {
+    float t_s = 0.0;
+    g_ego_speed_mps = 15.0;
+    g_lead_range_m  = 200.0;  // Far away — effectively no lead
+    g_lead_rel_mps  = 0.0;
+
+    TestStep("ACC_FreeCruise", "Speed must increase toward cruise speed");
+    while (t_s < 5.0) {
+        setSignal(VehicleSpeed_mps, g_ego_speed_mps);
+        setSignal(LeadRange_m, g_lead_range_m);
+        setSignal(LeadRelSpeed_mps, g_lead_rel_mps);
+        setSignal(LaneOffset_m, 0.0);
+        setSignal(HeadingError_rad, 0.0);
+        TestWaitForSignalChange(Cmd_Accel_mps2, 100);
+        if (getSignal(LongMode) == 2 && getSignal(Cmd_Accel_mps2) > 0.0)
+            TestStepPass("Accelerating in Active mode");
+        g_ego_speed_mps = g_ego_speed_mps + getSignal(Cmd_Accel_mps2) * (kTestPeriod_ms / 1000.0);
+        t_s = t_s + kTestPeriod_ms / 1000.0;
+    }
+    TestCheckTrue(g_ego_speed_mps > 20.0, "Speed reached 20 m/s in 5 s");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Scenario 2 : Time-gap hold — lead vehicle at exactly the target gap
+// ──────────────────────────────────────────────────────────────────────────────
+testcase TC_ACC_TimeGapHold() {
+    g_ego_speed_mps = 20.0;
+    g_lead_range_m  = kMinGap + kTimeGap * g_ego_speed_mps;  // At target gap
+    g_lead_rel_mps  = 0.0;
+
+    setSignal(VehicleSpeed_mps, g_ego_speed_mps);
+    setSignal(LeadRange_m, g_lead_range_m);
+    setSignal(LeadRelSpeed_mps, 0.0);
+    TestWaitForSignalChange(Cmd_Accel_mps2, 100);
+
+    // Commanded acceleration should be near zero (gap is satisfied)
+    TestCheckInRange(getSignal(Cmd_Accel_mps2), -0.5, 0.5,
+                     "ACC_TimeGapHold: command near zero at target gap");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Scenario 3 : Cut-in — lead suddenly appears at 15 m
+// ──────────────────────────────────────────────────────────────────────────────
+testcase TC_ACC_CutIn() {
+    g_ego_speed_mps = 20.0;
+    // Before cut-in: no lead
+    setSignal(VehicleSpeed_mps, g_ego_speed_mps);
+    setSignal(LeadRange_m, 200.0);
+    setSignal(LeadRelSpeed_mps, 0.0);
+    TestWaitForTimeout(100);
+
+    // Cut-in event
+    g_lead_range_m = 15.0;
+    g_lead_rel_mps = -3.0;
+    setSignal(LeadRange_m, g_lead_range_m);
+    setSignal(LeadRelSpeed_mps, g_lead_rel_mps);
+    TestWaitForSignalChange(Cmd_Accel_mps2, 200);
+
+    TestCheckTrue(getSignal(Cmd_Accel_mps2) < 0.0,
+                  "ACC_CutIn: deceleration commanded after cut-in");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Scenario 4 : AEB — stationary object at 10 m, ego at 20 m/s
+// ──────────────────────────────────────────────────────────────────────────────
+testcase TC_AEB_Stationary() {
+    setSignal(VehicleSpeed_mps, 20.0);
+    setSignal(LeadRange_m, 10.0);
+    setSignal(LeadRelSpeed_mps, -20.0);  // Lead stationary → rel = -ego speed
+    setSignal(LaneOffset_m, 0.0);
+    TestWaitForSignalChange(AEB_Active, 200);
+
+    TestCheckTrue(getSignal(AEB_Active) == 1,
+                  "AEB_Stationary: AEB flag must be set within 200 ms");
+    TestCheckTrue(getSignal(Cmd_Accel_mps2) <= -4.0,
+                  "AEB_Stationary: commanded deceleration >= 4 m/s²");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Scenario 5 : Lane centering — drift right, expect left steering
+// ──────────────────────────────────────────────────────────────────────────────
+testcase TC_LKA_LateralCorrection() {
+    setSignal(VehicleSpeed_mps, 20.0);
+    setSignal(LaneOffset_m, 0.4);       // 0.4 m right of centre
+    setSignal(HeadingError_rad, 0.0);
+    setSignal(LeadRange_m, 100.0);
+    setSignal(LeadRelSpeed_mps, 0.0);
+
+    TestWaitForSignalChange(Cmd_Steer_rad, 100);
+    TestCheckTrue(getSignal(LatMode) == 2, "LKA: lateral mode Active");
+    TestCheckTrue(getSignal(Cmd_Steer_rad) < 0.0,
+                  "LKA_LateralCorrection: steer left when offset right");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Scenario 6 : Fault injection — CAN counter fail on VehicleSpeed
+// ──────────────────────────────────────────────────────────────────────────────
+testcase TC_Fault_StaleCAN() {
+    // Stop sending vehicle speed (simulate missing message)
+    stopSignal(VehicleSpeed_mps);
+    TestWaitForTimeout(150);  // > max_frame_age (100 ms)
+
+    TestCheckTrue(getSignal(LongMode) == 1 || getSignal(LongMode) == 4,
+                  "Fault_StaleCAN: standby or fault mode after CAN loss");
+    TestCheckTrue((getSignal(FaultMask) & 0x02) != 0,
+                  "Fault_StaleCAN: FrameStale bit set");
+
+    // Restore
+    startSignal(VehicleSpeed_mps);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Scenario 7 : Driver override — ADAS deactivates immediately
+// ──────────────────────────────────────────────────────────────────────────────
+testcase TC_DriverOverride() {
+    setSignal(VehicleSpeed_mps, 20.0);
+    setSignal(LeadRange_m, 50.0);
+    setSignal(LeadRelSpeed_mps, 0.0);
+    setSignal(LaneOffset_m, 0.1);
+
+    // Simulate driver steering torque override flag
+    setSignal(DriverOverride, 1);
+    TestWaitForTimeout(50);
+
+    TestCheckTrue(getSignal(LongMode) == 1, "DriverOverride: longitudinal standby");
+    TestCheckTrue(getSignal(LatMode) == 1,  "DriverOverride: lateral standby");
+    TestCheckTrue((getSignal(FaultMask) & 0x08) != 0, "DriverOverride: fault bit set");
+
+    setSignal(DriverOverride, 0);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Scenario 8 : Stop-and-go — lead decelerates to standstill
+// ──────────────────────────────────────────────────────────────────────────────
+testcase TC_ACC_StopAndGo() {
+    g_ego_speed_mps = 10.0;
+    g_lead_range_m  = 20.0;
+    g_lead_rel_mps  = -1.0;  // Lead closing slowly
+
+    for (int step = 0; step < 200; step++) {
+        setSignal(VehicleSpeed_mps, g_ego_speed_mps);
+        setSignal(LeadRange_m, g_lead_range_m);
+        setSignal(LeadRelSpeed_mps, g_lead_rel_mps);
+        TestWaitForTimeout(kTestPeriod_ms);
+
+        const float cmd = getSignal(Cmd_Accel_mps2);
+        g_ego_speed_mps = max(0.0, g_ego_speed_mps + cmd * 0.02);
+        g_lead_range_m  = max(0.0, g_lead_range_m + g_lead_rel_mps * 0.02);
+        if (g_lead_range_m < kMinGap + 1.0) g_lead_rel_mps = 0.0;
+    }
+    TestCheckTrue(g_ego_speed_mps < 3.0, "StopAndGo: ego nearly stopped behind lead");
+}

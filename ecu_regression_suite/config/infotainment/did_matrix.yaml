@@ -1,0 +1,204 @@
+# Infotainment ECU — DID matrix
+# Replace mock_value and expected_format with real ODX/DBC-derived values.
+
+dids:
+
+  # ── ISO/OBD standardised DIDs ──────────────────────────────────────────────
+
+  - id: "0xF190"
+    name: "VehicleIdentificationNumber"
+    description: "17-character VIN (ISO 3779)"
+    length: 17
+    data_type: "ascii"
+    readable: true
+    writable: false
+    sessions: [default, extended, programming]
+    security_level: 0
+    mock_value: "1HGCM82633A004352"
+    expected_format: "^[A-HJ-NPR-Z0-9]{17}$"
+
+  - id: "0xF18C"
+    name: "ECUSerialNumber"
+    description: "Infotainment ECU hardware serial number"
+    length: 8
+    data_type: "hex"
+    readable: true
+    writable: false
+    sessions: [extended]
+    security_level: 0
+    mock_value: "11223344AABBCCDD"
+
+  - id: "0xF187"
+    name: "VehicleManufacturerSparePartNumber"
+    description: "OEM spare part number for infotainment head unit"
+    length: 10
+    data_type: "ascii"
+    readable: true
+    writable: false
+    sessions: [default, extended]
+    security_level: 0
+    mock_value: "IVI_HU_001"
+
+  - id: "0xF189"
+    name: "ECUSoftwareVersionNumber"
+    description: "Current infotainment software version"
+    length: 8
+    data_type: "ascii"
+    readable: true
+    writable: false
+    sessions: [default, extended, programming]
+    security_level: 0
+    mock_value: "v2.0.4  "
+
+  - id: "0xF197"
+    name: "SystemNameOrEngineType"
+    description: "Infotainment system name"
+    length: 8
+    data_type: "ascii"
+    readable: true
+    writable: false
+    sessions: [default, extended]
+    security_level: 0
+    mock_value: "IVI_GEN3"
+
+  - id: "0xF186"
+    name: "ActiveDiagnosticSession"
+    description: "Currently active UDS diagnostic session"
+    length: 1
+    data_type: "uint8"
+    readable: true
+    writable: false
+    sessions: [default, extended, programming]
+    security_level: 0
+    mock_value: "01"
+
+  # ── Infotainment-specific DIDs ─────────────────────────────────────────────
+
+  - id: "0xE001"
+    name: "DisplayBrightnessSetting"
+    description: "Current display brightness level (0–255)"
+    length: 1
+    data_type: "uint8"
+    readable: true
+    writable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "80"     # 128/255 = 50%
+    value_range: [0, 255]
+    write_test_value: "A0"
+
+  - id: "0xE002"
+    name: "AudioVolumeCalibration"
+    description: "Amplifier volume calibration offset (signed byte, -10 to +10 dB)"
+    length: 2
+    data_type: "hex"
+    readable: true
+    writable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "0000"
+    write_test_value: "0001"
+
+  - id: "0xE003"
+    name: "NavigationMapVersion"
+    description: "Installed navigation map version string"
+    length: 8
+    data_type: "ascii"
+    readable: true
+    writable: false
+    sessions: [extended]
+    security_level: 0
+    mock_value: "EU2026Q2"
+
+  - id: "0xE004"
+    name: "BluetoothPairingConfig"
+    description: "Bluetooth pairing mode (0=off,1=discoverable,2=paired-only)"
+    length: 1
+    data_type: "uint8"
+    readable: true
+    writable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "02"
+    write_test_value: "01"
+
+  - id: "0xE005"
+    name: "WiFiSSIDConfiguration"
+    description: "Current WiFi hotspot SSID (max 16 bytes, null-padded)"
+    length: 16
+    data_type: "ascii"
+    readable: true
+    writable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "CarHotspot     "
+    write_test_value: "TestSSID        "
+
+  - id: "0xE006"
+    name: "ScreenResolutionSetting"
+    description: "Display resolution code (0=720p, 1=1080p, 2=1440p)"
+    length: 1
+    data_type: "uint8"
+    readable: true
+    writable: false
+    sessions: [extended]
+    security_level: 0
+    mock_value: "01"
+
+  - id: "0xE010"
+    name: "InfotainmentFeatureFlags"
+    description: "Bitmask: bit0=Android Auto, bit1=CarPlay, bit2=OTA, bit3=ConnectedSvcs"
+    length: 1
+    data_type: "bitmask"
+    readable: true
+    writable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "0F"
+    write_test_value: "07"
+
+  - id: "0xE011"
+    name: "ConnectedServicesConfig"
+    description: "Connected services endpoint URL hash + enabled flag"
+    length: 5
+    data_type: "hex"
+    readable: true
+    writable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "01AABBCCDD"
+    write_test_value: "01AABBCCDD"
+
+  - id: "0xE012"
+    name: "OTAUpdateStatus"
+    description: "OTA update state: 0=idle,1=downloading,2=ready_to_install,3=error"
+    length: 1
+    data_type: "uint8"
+    readable: true
+    writable: false
+    sessions: [extended]
+    security_level: 0
+    mock_value: "00"
+
+  - id: "0xE020"
+    name: "SpeakerIOControlDID"
+    description: "Audio amplifier test output — IO control only"
+    length: 2
+    data_type: "hex"
+    readable: true
+    writable: false
+    io_controllable: true
+    sessions: [extended]
+    security_level: 1
+    mock_value: "0000"
+
+  - id: "0xE030"
+    name: "TouchscreenCalibrationData"
+    description: "Touchscreen calibration matrix (read-only extended)"
+    length: 8
+    data_type: "hex"
+    readable: true
+    writable: false
+    sessions: [extended]
+    security_level: 0
+    mock_value: "0100020003000400"

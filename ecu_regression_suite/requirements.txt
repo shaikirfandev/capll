@@ -1,0 +1,22 @@
+# ── Core runtime ──────────────────────────────────────────────────────────────
+python-can[vector]>=4.3.1        # CAN bus abstraction with Vector backend
+can-isotp>=2.0.0                 # ISO 15765-2 transport layer
+udsoncan>=1.21.0                 # UDS ISO 14229-1 service layer (optional for real hw)
+
+# ── Config / validation ───────────────────────────────────────────────────────
+pyyaml>=6.0.1
+pydantic>=2.5.0
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+loguru>=0.7.2
+
+# ── Regression diff ───────────────────────────────────────────────────────────
+deepdiff>=6.7.1                  # structural diff for baseline comparison
+
+# ── Test framework ────────────────────────────────────────────────────────────
+pytest>=7.4.3
+pytest-html>=4.1.1               # HTML report plugin (optional, suite also self-generates)
+pytest-xdist>=3.5.0             # parallel execution: pytest -n auto --ecu adas
+
+# ── Optional: Allure reporting ────────────────────────────────────────────────
+# allure-pytest>=2.13.2

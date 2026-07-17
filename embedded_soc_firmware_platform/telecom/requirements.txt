@@ -1,0 +1,9 @@
+requests
+scapy
+pytest
+robotframework
+robotframework-requests
+aiohttp
+python-gelf
+pyOpenSSL
+paramiko

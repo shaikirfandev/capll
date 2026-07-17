@@ -1,0 +1,485 @@
+# ============================================================
+# Infotainment ECU — Data Identifier (DID) Catalogue
+# ============================================================
+#
+# How to populate from real sources:
+#   ODX / PDX:  open in ODXLINKS / PTC DiagAccess; copy DID 0x-address and
+#               DataObjectProp byte length into the "id" / "length" fields.
+#   DBC:        cross-reference diagnostic signal names with the DID catalogue
+#               provided by the Tier-1 supplier.
+#   ARXML:      extract from DataElements in the ComStack / DCM config.
+#
+# Field guide:
+#   id               — 2-byte DID hex string  e.g. "0xF189"
+#   length           — expected VALUE length in bytes (NOT including the 2 DID echo bytes)
+#   writable         — true  = WDBI (0x2E) is supported
+#   session          — minimum session required for RDBI  (default|extended|programming)
+#   write_session    — minimum session required for WDBI
+#   security         — true = WDBI requires prior security access unlock
+#   description      — human-readable label
+#   decode           — optional interpretation rules
+#     type           — uint | string | bcd | enum | bytes
+#     unit           — SI unit for numeric types
+#     scale          — multiply raw byte value to get physical value
+#     values         — enum mapping  {raw_byte: "label"}
+# ============================================================
+
+# ── ISO 14229 standard DIDs ────────────────────────────────
+vin:
+  id: "0xF190"
+  length: 17
+  writable: false
+  session: default
+  description: "Vehicle Identification Number (17 ASCII chars)"
+  decode: { type: string }
+
+software_version:
+  id: "0xF189"
+  length: 20
+  writable: false
+  session: default
+  description: "ECU application software version string"
+  decode: { type: string }
+
+boot_software_version:
+  id: "0xF180"
+  length: 20
+  writable: false
+  session: default
+  description: "Boot software / bootloader version string"
+  decode: { type: string }
+
+hardware_version:
+  id: "0xF191"
+  length: 10
+  writable: false
+  session: default
+  description: "ECU hardware part number"
+  decode: { type: string }
+
+ecu_serial_number:
+  id: "0xF18C"
+  length: 16
+  writable: false
+  session: default
+  description: "ECU serial number (alphanumeric)"
+  decode: { type: string }
+
+system_supplier_id:
+  id: "0xF18A"
+  length: 10
+  writable: false
+  session: default
+  description: "Tier-1 supplier identifier code"
+  decode: { type: bytes }
+
+# ── Bluetooth ──────────────────────────────────────────────
+bluetooth_module_status:
+  id: "0x3001"           # Replace with actual supplier DID from ODX
+  length: 4
+  writable: true
+  session: extended
+  write_session: extended
+  security: true
+  description: "BT module power state and firmware readiness"
+  decode:
+    type: enum
+    values:
+      0x00: "off"
+      0x01: "initialising"
+      0x02: "ready"
+      0x03: "fault"
+
+bluetooth_pairing_count:
+  id: "0x3002"
+  length: 2
+  writable: false
+  session: extended
+  description: "Number of paired devices stored (0-8)"
+  decode: { type: uint, unit: "devices" }
+
+bluetooth_a2dp_state:
+  id: "0x3003"
+  length: 2
+  writable: false
+  session: extended
+  description: "A2DP audio streaming connection state"
+  decode:
+    type: enum
+    values:
+      0x00: "disconnected"
+      0x01: "connected"
+      0x02: "streaming"
+
+bluetooth_hfp_state:
+  id: "0x3004"
+  length: 2
+  writable: false
+  session: extended
+  description: "HFP hands-free profile call state"
+  decode:
+    type: enum
+    values:
+      0x00: "idle"
+      0x01: "incoming_call"
+      0x02: "active_call"
+      0x03: "outgoing_call"
+
+# ── Wi-Fi / Network ────────────────────────────────────────
+wifi_module_status:
+  id: "0x3010"
+  length: 4
+  writable: true
+  session: extended
+  write_session: extended
+  security: true
+  description: "Wi-Fi module power and association state"
+  decode:
+    type: enum
+    values:
+      0x00: "off"
+      0x01: "enabled_disconnected"
+      0x02: "connected"
+      0x03: "hotspot_active"
+      0x04: "fault"
+
+wifi_ssid:
+  id: "0x3011"
+  length: 32
+  writable: false
+  session: extended
+  description: "Currently connected Wi-Fi SSID (UTF-8)"
+  decode: { type: string }
+
+hotspot_status:
+  id: "0x3012"
+  length: 2
+  writable: true
+  session: extended
+  write_session: extended
+  security: true
+  description: "Mobile Wi-Fi hotspot enable/disable state"
+  decode:
+    type: enum
+    values:
+      0x00: "disabled"
+      0x01: "enabled"
+
+# ── Display / HMI ─────────────────────────────────────────
+display_brightness:
+  id: "0x3020"
+  length: 1
+  writable: true
+  session: extended
+  write_session: extended
+  security: false
+  description: "Main display backlight PWM level (0=off, 255=max)"
+  decode: { type: uint, unit: "%" , scale: 0.392 }  # 255 → 100 %
+
+display_resolution:
+  id: "0x3021"
+  length: 4
+  writable: false
+  session: default
+  description: "Display width (2 bytes) × height (2 bytes) in pixels"
+  decode: { type: bytes }
+
+touch_screen_status:
+  id: "0x3022"
+  length: 2
+  writable: false
+  session: extended
+  description: "Touchscreen controller operational state"
+  decode:
+    type: enum
+    values:
+      0x00: "not_ready"
+      0x01: "ready"
+      0x02: "degraded"
+      0x03: "fault"
+
+hmi_sleep_state:
+  id: "0x3023"
+  length: 1
+  writable: false
+  session: default
+  description: "HMI power state (0=active, 1=dim, 2=sleep, 3=deep-sleep)"
+  decode:
+    type: enum
+    values:
+      0x00: "active"
+      0x01: "dim"
+      0x02: "sleep"
+      0x03: "deep_sleep"
+
+# ── Audio Amplifier ───────────────────────────────────────
+audio_amp_status:
+  id: "0x3030"
+  length: 2
+  writable: false
+  session: extended
+  description: "Audio amplifier IC operational status"
+  decode:
+    type: enum
+    values:
+      0x00: "off"
+      0x01: "standby"
+      0x02: "active"
+      0x03: "fault"
+
+audio_volume_level:
+  id: "0x3031"
+  length: 1
+  writable: true
+  session: extended
+  write_session: extended
+  security: false
+  description: "Current audio output volume (0–100)"
+  decode: { type: uint, unit: "steps" }
+
+mute_state:
+  id: "0x3032"
+  length: 1
+  writable: true
+  session: extended
+  write_session: extended
+  security: false
+  description: "Audio mute state (0=unmuted, 1=muted)"
+  decode:
+    type: enum
+    values:
+      0x00: "unmuted"
+      0x01: "muted"
+
+speaker_channel_status:
+  id: "0x3033"
+  length: 4
+  writable: false
+  session: extended
+  description: "Bitfield of speaker channel fault flags (FL/FR/RL/RR)"
+  decode: { type: bytes }
+
+# ── USB / Media ────────────────────────────────────────────
+usb_port1_status:
+  id: "0x3040"
+  length: 2
+  writable: false
+  session: extended
+  description: "USB port 1 detection and power state"
+  decode:
+    type: enum
+    values:
+      0x00: "no_device"
+      0x01: "device_connected"
+      0x02: "device_enumerated"
+      0x03: "overcurrent"
+      0x04: "fault"
+
+usb_port2_status:
+  id: "0x3041"
+  length: 2
+  writable: false
+  session: extended
+  description: "USB port 2 detection and power state"
+  decode:
+    type: enum
+    values:
+      0x00: "no_device"
+      0x01: "device_connected"
+      0x02: "device_enumerated"
+      0x03: "overcurrent"
+      0x04: "fault"
+
+media_playback_state:
+  id: "0x3042"
+  length: 2
+  writable: false
+  session: extended
+  description: "Media player playback state"
+  decode:
+    type: enum
+    values:
+      0x00: "idle"
+      0x01: "playing"
+      0x02: "paused"
+      0x03: "stopped"
+      0x04: "error"
+
+# ── Radio / Tuner ─────────────────────────────────────────
+tuner_band:
+  id: "0x3050"
+  length: 1
+  writable: true
+  session: extended
+  write_session: extended
+  security: false
+  description: "Active tuner band (0=AM, 1=FM, 2=DAB)"
+  decode:
+    type: enum
+    values:
+      0x00: "AM"
+      0x01: "FM"
+      0x02: "DAB"
+
+fm_frequency:
+  id: "0x3051"
+  length: 4
+  writable: true
+  session: extended
+  write_session: extended
+  security: false
+  description: "FM tuned frequency in kHz (e.g. 98500 = 98.5 MHz)"
+  decode: { type: uint, unit: "kHz" }
+
+dab_service_status:
+  id: "0x3052"
+  length: 2
+  writable: false
+  session: extended
+  description: "DAB service availability and signal quality"
+  decode:
+    type: enum
+    values:
+      0x00: "no_signal"
+      0x01: "signal_acquired"
+      0x02: "service_playing"
+
+signal_strength:
+  id: "0x3053"
+  length: 2
+  writable: false
+  session: extended
+  description: "RF signal strength in dBμV (raw × 0.1)"
+  decode: { type: uint, unit: "dBμV", scale: 0.1 }
+
+# ── Navigation / GPS ──────────────────────────────────────
+gps_fix_status:
+  id: "0x3060"
+  length: 1
+  writable: false
+  session: extended
+  description: "GNSS fix type (0=no fix, 1=2D, 2=3D, 3=DGPS)"
+  decode:
+    type: enum
+    values:
+      0x00: "no_fix"
+      0x01: "2D_fix"
+      0x02: "3D_fix"
+      0x03: "DGPS_fix"
+
+gps_latitude:
+  id: "0x3061"
+  length: 4
+  writable: false
+  session: extended
+  description: "GPS latitude as signed 32-bit integer (degree × 1e-7)"
+  decode: { type: bytes }
+
+gps_longitude:
+  id: "0x3062"
+  length: 4
+  writable: false
+  session: extended
+  description: "GPS longitude as signed 32-bit integer (degree × 1e-7)"
+  decode: { type: bytes }
+
+map_db_version:
+  id: "0x3063"
+  length: 20
+  writable: false
+  session: default
+  description: "Navigation map database version string"
+  decode: { type: string }
+
+navigation_state:
+  id: "0x3064"
+  length: 2
+  writable: false
+  session: extended
+  description: "Navigation engine state"
+  decode:
+    type: enum
+    values:
+      0x00: "idle"
+      0x01: "route_calculated"
+      0x02: "guidance_active"
+      0x03: "recalculating"
+      0x04: "fault"
+
+# ── Voice Recognition ─────────────────────────────────────
+voice_recognition_state:
+  id: "0x3070"
+  length: 1
+  writable: false
+  session: extended
+  description: "Voice recognition engine state"
+  decode:
+    type: enum
+    values:
+      0x00: "inactive"
+      0x01: "listening"
+      0x02: "processing"
+      0x03: "fault"
+
+microphone_status:
+  id: "0x3071"
+  length: 2
+  writable: false
+  session: extended
+  description: "Internal microphone hardware status"
+  decode:
+    type: enum
+    values:
+      0x00: "not_ready"
+      0x01: "ready"
+      0x02: "open_circuit"
+      0x03: "short_circuit"
+
+# ── CarPlay / Android Auto ────────────────────────────────
+carplay_status:
+  id: "0x3080"
+  length: 2
+  writable: false
+  session: extended
+  description: "Apple CarPlay projection session state"
+  decode:
+    type: enum
+    values:
+      0x00: "disconnected"
+      0x01: "connecting"
+      0x02: "active_wired"
+      0x03: "active_wireless"
+      0x04: "fault"
+
+android_auto_status:
+  id: "0x3081"
+  length: 2
+  writable: false
+  session: extended
+  description: "Google Android Auto projection session state"
+  decode:
+    type: enum
+    values:
+      0x00: "disconnected"
+      0x01: "connecting"
+      0x02: "active_wired"
+      0x03: "active_wireless"
+      0x04: "fault"
+
+# ── OTA / Software Update ─────────────────────────────────
+ota_update_status:
+  id: "0x3090"
+  length: 2
+  writable: false
+  session: extended
+  description: "OTA update progress and status"
+  decode:
+    type: enum
+    values:
+      0x00: "idle"
+      0x01: "downloading"
+      0x02: "verifying"
+      0x03: "ready_to_install"
+      0x04: "installing"
+      0x05: "completed"
+      0x06: "failed"

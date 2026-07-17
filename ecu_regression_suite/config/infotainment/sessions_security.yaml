@@ -1,0 +1,70 @@
+# Infotainment ECU — Sessions and Security configuration
+
+sessions:
+  default:
+    session_id: 0x01
+    description: "Default diagnostic session — basic read and status services"
+    p2_ms: 50
+    p2_star_ms: 5000
+    allowed_services:
+      - 0x10
+      - 0x11
+      - 0x22
+      - 0x19
+      - 0x3E
+      - 0x27
+
+  extended:
+    session_id: 0x03
+    description: "Extended session — full DID/RID/IO control access"
+    p2_ms: 50
+    p2_star_ms: 5000
+    allowed_services:
+      - 0x10
+      - 0x11
+      - 0x14
+      - 0x19
+      - 0x22
+      - 0x27
+      - 0x28
+      - 0x2E
+      - 0x2F
+      - 0x31
+      - 0x3E
+
+  programming:
+    session_id: 0x02
+    description: "Programming session — OTA flashing and factory reset"
+    p2_ms: 50
+    p2_star_ms: 5000
+    allowed_services:
+      - 0x10
+      - 0x11
+      - 0x14
+      - 0x22
+      - 0x27
+      - 0x31
+      - 0x3E
+      - 0x34
+      - 0x36
+      - 0x37
+
+security:
+  max_attempts: 3
+  lockout_delay_s: 10
+  levels:
+    "1":
+      name: "Level1_IVIAccess"
+      algorithm: "xor_placeholder"
+      required_sessions: [extended, programming]
+      seed_length: 2
+      key_length: 2
+
+addressing:
+  tx_id: 0x7E2
+  rx_id: 0x7EA
+  func_id: 0x7DF
+
+timing:
+  tester_present_interval_ms: 2000
+  s3_client_timeout_ms: 5000

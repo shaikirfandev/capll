@@ -1,0 +1,7 @@
+numpy>=1.24
+pytest>=7.4
+pytest-html>=4.0
+pytest-xdist>=3.3
+pyserial>=3.5
+pyusb>=1.2
+requests>=2.31

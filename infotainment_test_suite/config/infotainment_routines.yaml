@@ -1,0 +1,148 @@
+# ============================================================
+# Infotainment ECU — Routine Control Catalogue (UDS 0x31)
+# ============================================================
+#
+# Field guide:
+#   id                 — 2-byte Routine Identifier hex string (from ODX)
+#   session            — required session level: extended | programming
+#   security_required  — true = security access unlock needed before start
+#   start_data         — optional additional data bytes for startRoutine request
+#   stop_data          — optional data for stopRoutine
+#   expected_status    — routine result status byte in response (0x00 = pass/complete)
+#   timeout_s          — maximum time (seconds) to wait for completion
+#   description        — human-readable routine purpose
+# ============================================================
+
+# ── Display / HMI ─────────────────────────────────────────
+display_self_test:
+  id: "0x0301"
+  session: extended
+  security_required: true
+  start_data: null
+  expected_status: 0x00
+  timeout_s: 5.0
+  description: "Activate display pixel self-test pattern (all pixels ON/OFF)"
+
+touch_screen_calibration:
+  id: "0x0302"
+  session: extended
+  security_required: true
+  start_data: null
+  expected_status: 0x00
+  timeout_s: 30.0
+  description: "Run touchscreen 5-point calibration procedure"
+
+factory_reset:
+  id: "0x0303"
+  session: programming
+  security_required: true
+  start_data: null
+  expected_status: 0x00
+  timeout_s: 60.0
+  description: "Restore all HMI / user settings to factory defaults"
+
+# ── Audio / Amplifier ─────────────────────────────────────
+audio_self_test:
+  id: "0x0320"
+  session: extended
+  security_required: true
+  start_data: null
+  expected_status: 0x00
+  timeout_s: 10.0
+  description: "Audio amplifier and speaker chain diagnostic"
+
+speaker_channel_test_fl:
+  id: "0x0321"
+  session: extended
+  security_required: true
+  start_data: "0x01"      # 0x01 = front-left channel
+  expected_status: 0x00
+  timeout_s: 5.0
+  description: "Inject test tone on front-left speaker and measure impedance"
+
+speaker_channel_test_fr:
+  id: "0x0322"
+  session: extended
+  security_required: true
+  start_data: "0x02"
+  expected_status: 0x00
+  timeout_s: 5.0
+  description: "Inject test tone on front-right speaker"
+
+# ── Bluetooth ─────────────────────────────────────────────
+bluetooth_self_test:
+  id: "0x0310"
+  session: extended
+  security_required: false
+  start_data: null
+  expected_status: 0x00
+  timeout_s: 10.0
+  description: "BT module hardware RF self-diagnostic"
+
+clear_bluetooth_pairings:
+  id: "0x0311"
+  session: extended
+  security_required: true
+  start_data: null
+  expected_status: 0x00
+  timeout_s: 5.0
+  description: "Erase all stored Bluetooth pairing records"
+
+# ── Navigation / GPS ──────────────────────────────────────
+gps_self_test:
+  id: "0x0340"
+  session: extended
+  security_required: false
+  start_data: null
+  expected_status: 0x00
+  timeout_s: 15.0
+  description: "GNSS module cold-start and satellite acquisition test"
+
+nav_map_integrity_check:
+  id: "0x0341"
+  session: extended
+  security_required: false
+  start_data: null
+  expected_status: 0x00
+  timeout_s: 20.0
+  description: "Navigation map database CRC integrity verification"
+
+# ── Network / Wi-Fi ───────────────────────────────────────
+connectivity_self_test:
+  id: "0x0330"
+  session: extended
+  security_required: false
+  start_data: null
+  expected_status: 0x00
+  timeout_s: 15.0
+  description: "Wi-Fi module RF loop-back test and firmware health check"
+
+# ── Voice Recognition ─────────────────────────────────────
+voice_recognition_self_test:
+  id: "0x0370"
+  session: extended
+  security_required: false
+  start_data: null
+  expected_status: 0x00
+  timeout_s: 10.0
+  description: "Voice engine and microphone hardware self-test"
+
+# ── CarPlay / Android Auto ────────────────────────────────
+projection_session_start:
+  id: "0x0380"
+  session: extended
+  security_required: false
+  start_data: null
+  expected_status: 0x00
+  timeout_s: 30.0
+  description: "Initiate USB wired projection session (CP/AA)"
+
+# ── OTA / Software ────────────────────────────────────────
+software_checksum_verify:
+  id: "0x0390"
+  session: programming
+  security_required: true
+  start_data: null
+  expected_status: 0x00
+  timeout_s: 30.0
+  description: "Verify application software partition CRC"

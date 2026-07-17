@@ -1,0 +1,27 @@
+# ── Core runtime ──────────────────────────────────────────────────────────────
+python-can[vector]>=4.3.1        # CAN bus abstraction with Vector backend
+can-isotp>=2.0.0                 # ISO-TP (ISO 15765-2) transport layer
+udsoncan>=1.21.0                 # UDS (ISO 14229-1) service layer
+
+# ── Config / validation ───────────────────────────────────────────────────────
+pyyaml>=6.0.1
+pydantic>=2.5.0
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+questionary>=2.0.1
+click>=8.1.7
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+loguru>=0.7.2
+
+# ── Test framework ────────────────────────────────────────────────────────────
+pytest>=7.4.3
+pytest-html>=4.1.1               # HTML report plugin
+pytest-xdist>=3.5.0             # optional parallel execution
+
+# ── Report generation ─────────────────────────────────────────────────────────
+Jinja2>=3.1.2
+reportlab>=4.0.9                 # optional PDF rendering
+
+# ── Optional: Allure reporting ────────────────────────────────────────────────
+# allure-pytest>=2.13.2

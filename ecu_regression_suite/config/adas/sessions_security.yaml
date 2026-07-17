@@ -1,0 +1,81 @@
+# ADAS ECU — Sessions and Security Access configuration
+# Used by conftest.py fixtures and MockUDSEngine for session management.
+
+sessions:
+  default:
+    session_id: 0x01
+    description: "Default diagnostic session — basic services only"
+    p2_ms: 50
+    p2_star_ms: 5000
+    allowed_services:
+      - 0x10   # DiagnosticSessionControl
+      - 0x11   # ECUReset
+      - 0x22   # ReadDataByIdentifier (non-secured DIDs)
+      - 0x19   # ReadDTCInformation
+      - 0x3E   # TesterPresent
+      - 0x27   # SecurityAccess (seed request only)
+
+  extended:
+    session_id: 0x03
+    description: "Extended diagnostic session — full DID/RID access"
+    p2_ms: 50
+    p2_star_ms: 5000
+    allowed_services:
+      - 0x10
+      - 0x11
+      - 0x14   # ClearDiagnosticInformation
+      - 0x19
+      - 0x22
+      - 0x27
+      - 0x28   # CommunicationControl
+      - 0x2E   # WriteDataByIdentifier
+      - 0x2F   # InputOutputControlByIdentifier
+      - 0x31   # RoutineControl
+      - 0x3E
+
+  programming:
+    session_id: 0x02
+    description: "Programming session — software update and deep NVM access"
+    p2_ms: 50
+    p2_star_ms: 5000
+    allowed_services:
+      - 0x10
+      - 0x11
+      - 0x14
+      - 0x19
+      - 0x22
+      - 0x27
+      - 0x31
+      - 0x3E
+      - 0x34   # RequestDownload
+      - 0x35   # TransferData (not simulated in mock)
+      - 0x36
+      - 0x37
+
+security:
+  max_attempts: 3
+  lockout_delay_s: 10
+  levels:
+    "1":
+      name: "Level1_Diagnostic"
+      algorithm: "xor_placeholder"   # Replace with OEM algorithm name
+      required_sessions: [extended, programming]
+      seed_length: 2
+      key_length: 2
+    "3":
+      name: "Level3_Calibration"
+      algorithm: "xor_placeholder"
+      required_sessions: [extended]
+      seed_length: 4
+      key_length: 4
+
+# Physical CAN addressing for this ECU
+addressing:
+  tx_id: 0x7E0       # Tester request (physical)
+  rx_id: 0x7E8       # ECU response
+  func_id: 0x7DF     # Functional/broadcast request
+
+# Timing baselines (used for regression detection in rid tests)
+timing:
+  tester_present_interval_ms: 2000
+  s3_client_timeout_ms: 5000   # session keep-alive window

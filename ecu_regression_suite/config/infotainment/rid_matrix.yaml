@@ -1,0 +1,111 @@
+# Infotainment ECU — RID (Routine Identifier) matrix
+
+routines:
+
+  - id: "0x0201"
+    name: "ECUSelfTest"
+    description: "Full infotainment ECU self-diagnostic — CPU, GPU, RAM, NVM, display"
+    supports_start: true
+    supports_stop: false
+    supports_results: true
+    sessions: [extended]
+    security_level: 0
+    expected_duration_ms: 500
+    max_duration_ms: 2000
+    mock_result: "0100"
+
+  - id: "0x0301"
+    name: "DisplayPixelTest"
+    description: "Full-panel pixel defect scan (dead/stuck pixel detection)"
+    supports_start: true
+    supports_stop: true
+    supports_results: true
+    sessions: [extended]
+    security_level: 1
+    expected_duration_ms: 3000
+    max_duration_ms: 10000
+    mock_result: "010000"   # pass + 0 defective pixels (uint16)
+
+  - id: "0x0302"
+    name: "AudioSystemTest"
+    description: "Amplifier and speaker functional test — sine wave injection"
+    supports_start: true
+    supports_stop: true
+    supports_results: true
+    sessions: [extended]
+    security_level: 1
+    expected_duration_ms: 2000
+    max_duration_ms: 8000
+    mock_result: "0100FF"   # pass + loudness level byte
+
+  - id: "0x0303"
+    name: "WiFiConnectivityTest"
+    description: "WiFi antenna RF path continuity and regulatory band check"
+    supports_start: true
+    supports_stop: false
+    supports_results: true
+    sessions: [extended]
+    security_level: 0
+    expected_duration_ms: 1000
+    max_duration_ms: 4000
+    mock_result: "0100"
+
+  - id: "0x0304"
+    name: "BluetoothAntennaTest"
+    description: "Bluetooth RF path continuity and pairing capability check"
+    supports_start: true
+    supports_stop: false
+    supports_results: true
+    sessions: [extended]
+    security_level: 0
+    expected_duration_ms: 800
+    max_duration_ms: 3000
+    mock_result: "0100"
+
+  - id: "0x0305"
+    name: "NavigationSelfTest"
+    description: "GNSS receiver lock, map data integrity, and route engine check"
+    supports_start: true
+    supports_stop: false
+    supports_results: true
+    sessions: [extended]
+    security_level: 0
+    expected_duration_ms: 2500
+    max_duration_ms: 10000
+    mock_result: "0100"
+
+  - id: "0x0306"
+    name: "TouchscreenCalibrationRoutine"
+    description: "4-point touch calibration sequence"
+    supports_start: true
+    supports_stop: false
+    supports_results: true
+    sessions: [extended]
+    security_level: 1
+    expected_duration_ms: 5000
+    max_duration_ms: 20000
+    mock_result: "0100"
+
+  - id: "0xFF00"
+    name: "SoftwareIntegrityCheck"
+    description: "CRC verification of all infotainment software partitions"
+    supports_start: true
+    supports_stop: false
+    supports_results: true
+    sessions: [extended, programming]
+    security_level: 0
+    expected_duration_ms: 3000
+    max_duration_ms: 15000
+    mock_result: "0100"
+
+  - id: "0xFF01"
+    name: "FactoryReset"
+    description: "Erase all user settings and restore factory defaults"
+    supports_start: true
+    supports_stop: false
+    supports_results: false
+    sessions: [programming]
+    security_level: 1
+    expected_duration_ms: 2000
+    max_duration_ms: 8000
+    mock_result: "01"

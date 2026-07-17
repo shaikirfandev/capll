@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Infotainment ECU Test Report</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;font-size:14px;background:#f4f6f9;color:#333}
+header{background:#1a2b4a;color:#fff;padding:18px 32px}
+header h1{font-size:22px;font-weight:600}
+header .meta{font-size:12px;opacity:.75;margin-top:4px}
+.mock-banner{background:#fff3cd;color:#856404;border-bottom:2px solid #ffc107;padding:8px 32px;font-weight:600;font-size:13px}
+.container{max-width:1280px;margin:24px auto;padding:0 20px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:14px;margin-bottom:28px}
+.card{background:#fff;border-radius:8px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);text-align:center}
+.card .label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#888}
+.card .value{font-size:32px;font-weight:700;margin-top:6px}
+.card.total .value{color:#1a2b4a}.card.passed .value{color:#28a745}.card.failed .value{color:#dc3545}
+.card.errors .value{color:#fd7e14}.card.skipped .value{color:#6c757d}.card.rate .value{color:#007bff}
+.progress{height:10px;border-radius:5px;background:#e9ecef;overflow:hidden;margin-bottom:28px}
+.progress-bar{height:100%;background:#28a745}
+h2{font-size:17px;color:#1a2b4a;border-bottom:2px solid #dde3ed;padding-bottom:8px;margin-bottom:16px;margin-top:32px}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);font-size:13px}
+thead tr{background:#1a2b4a;color:#fff}
+th,td{padding:9px 13px;text-align:left;vertical-align:top}
+tbody tr:nth-child(even){background:#f9fafb}
+tbody tr:hover{background:#eef2f7}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;text-transform:uppercase}
+.badge-success{background:#d4edda;color:#155724}.badge-danger{background:#f8d7da;color:#721c24}
+.badge-warning{background:#fff3cd;color:#856404}.badge-secondary{background:#e2e3e5;color:#383d41}
+.sev-critical{color:#dc3545;font-weight:700}.sev-major{color:#fd7e14;font-weight:600}
+.sev-minor{color:#856404}.sev-info{color:#6c757d}
+.dtc-pill{display:inline-block;background:#fff3cd;color:#856404;border:1px solid #ffc107;border-radius:10px;font-size:10px;padding:1px 7px;margin:1px 2px;font-family:monospace}
+.dtc-pill.new{background:#f8d7da;color:#721c24;border-color:#dc3545}
+td.error{font-family:monospace;font-size:11px;color:#c0392b;white-space:pre-wrap;max-width:300px}
+footer{text-align:center;font-size:11px;color:#aaa;padding:24px 0 16px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Infotainment ECU Validation Report</h1>
+  <div class="meta">Run ID: {{ summary.run_id }} &nbsp;|&nbsp; {{ summary.start_time }} → {{ summary.end_time }} &nbsp;|&nbsp; Generated: {{ generated_at }}</div>
+</header>
+{% if summary.mock_mode %}
+<div class="mock-banner">⚠ SIMULATION MODE — All UDS responses are SIMULATED. Results do not reflect real hardware behaviour.</div>
+{% endif %}
+
+<div class="container">
+
+<h2>Run Summary</h2>
+<div class="cards">
+  <div class="card total"><div class="label">Total</div><div class="value">{{ summary.total }}</div></div>
+  <div class="card passed"><div class="label">Passed</div><div class="value">{{ summary.passed }}</div></div>
+  <div class="card failed"><div class="label">Failed</div><div class="value">{{ summary.failed }}</div></div>
+  <div class="card errors"><div class="label">Errors</div><div class="value">{{ summary.errors }}</div></div>
+  <div class="card skipped"><div class="label">Skipped</div><div class="value">{{ summary.skipped }}</div></div>
+  <div class="card rate"><div class="label">Pass Rate</div><div class="value">{{ summary.pass_rate }}%</div></div>
+</div>
+<div class="progress"><div class="progress-bar" style="width:{{ summary.pass_rate }}%"></div></div>
+
+<h2>Test Case Results</h2>
+<table>
+<thead><tr><th>#</th><th>Test Name</th><th>Feature</th><th>UDS Service</th><th>Expected</th><th>Actual / Error</th><th>Outcome</th><th>Time (s)</th><th>DTCs Before</th><th>New DTCs</th></tr></thead>
+<tbody>
+{% for i, tc in summary.test_cases | enumerate %}
+<tr>
+  <td>{{ i+1 }}</td>
+  <td><strong>{{ tc.name }}</strong><br><small style="color:#888">{{ tc.module }}</small></td>
+  <td>{{ tc.feature }}</td>
+  <td>{{ tc.uds_service }}</td>
+  <td>{{ tc.expected }}</td>
+  <td class="error">{{ tc.error_message if tc.outcome != 'passed' else tc.actual }}</td>
+  <td><span class="badge badge-{{ tc.outcome_css }}">{{ tc.outcome }}</span></td>
+  <td>{{ "%.3f" | format(tc.duration_s) }}</td>
+  <td>{% for d in tc.dtcs_before %}<span class="dtc-pill">{{ d }}</span>{% else %}<em style="color:#ccc">—</em>{% endfor %}</td>
+  <td>{% for d in tc.new_dtcs %}<span class="dtc-pill new">{{ d }}</span>{% else %}<em style="color:#ccc">—</em>{% endfor %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+
+{% if summary.dtc_summary %}
+<h2>DTC Summary</h2>
+<p style="margin-bottom:12px;font-size:13px;color:#555">All DTC events observed during the test run — set, cleared, or present at session end.</p>
+<table>
+<thead><tr><th>DTC Code</th><th>Hex</th><th>Description</th><th>Severity</th><th>Event</th><th>Test Case</th></tr></thead>
+<tbody>
+{% for entry in summary.dtc_summary %}
+<tr>
+  <td><strong>{{ entry.code_str }}</strong></td>
+  <td><code>0x{{ "%06X" | format(entry.dtc_code) }}</code></td>
+  <td>{{ entry.description }}</td>
+  <td><span class="sev-{{ entry.severity }}">{{ entry.severity | upper }}</span></td>
+  <td>{{ entry.status }}</td>
+  <td>{{ entry.test_name }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+
+{% if summary.can_trace_path %}
+<h2>CAN Trace</h2>
+<p>Archived at: <code>{{ summary.can_trace_path }}</code></p>
+{% endif %}
+
+</div>
+<footer>Infotainment ECU Test Suite v1.0.0 &nbsp;·&nbsp; {{ generated_at }}</footer>
+</body>
+</html>

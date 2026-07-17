@@ -1,0 +1,130 @@
+name: Image Sensor Platform CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['image_sensor_platform/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  build-host-gcc:
+    name: Host Build (GCC-13 + ASan/UBSan)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-13 g++-13 cmake ninja-build \
+                                  libgtest-dev cppcheck
+      - name: Configure
+        working-directory: image_sensor_platform
+        run: |
+          cmake -S . -B build/gcc -GNinja \
+            -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13 \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DISF_TARGET_HOST=ON -DISF_BUILD_TESTS=ON \
+            -DISF_ENABLE_SANITIZERS=ON -DISF_OS_POSIX=ON
+      - name: Build
+        working-directory: image_sensor_platform
+        run: cmake --build build/gcc --parallel
+      - name: Run C unit tests
+        working-directory: image_sensor_platform
+        run: ctest --test-dir build/gcc --output-on-failure -j4
+
+  # ─────────────────────────────────────────────────────────────────────────
+  build-cross-arm:
+    name: Cross-Compile ARM (bare-metal)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-arm-none-eabi cmake ninja-build
+      - name: Configure for STM32H7
+        working-directory: image_sensor_platform
+        run: |
+          cmake -S . -B build/arm -GNinja \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/arm-none-eabi.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DISF_TARGET_BARE_METAL=ON -DISF_RTOS_FREERTOS=ON \
+            -DISF_BUILD_TESTS=OFF
+      - name: Build
+        working-directory: image_sensor_platform
+        run: cmake --build build/arm --parallel
+
+  # ─────────────────────────────────────────────────────────────────────────
+  python-tests:
+    name: Python SDK Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python dependencies
+        run: pip install -r image_sensor_platform/validation/requirements.txt
+      - name: Run pytest
+        working-directory: image_sensor_platform
+        run: |
+          pytest validation/tests/ -v \
+            --tb=short \
+            --junitxml=reports/python_results.xml \
+            --html=reports/python_results.html \
+            --self-contained-html \
+            -m "not performance and not stress and not integration"
+      - name: Upload test reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: image_sensor_platform/reports/
+
+  # ─────────────────────────────────────────────────────────────────────────
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update -qq && sudo apt-get install -y cppcheck cmake
+      - name: cppcheck
+        working-directory: image_sensor_platform/firmware
+        run: |
+          cppcheck --enable=all --error-exitcode=1 \
+            --suppress=missingIncludeSystem \
+            --std=c11 --quiet \
+            hal/ sensor/ streaming/ diagnostics/
+
+  # ─────────────────────────────────────────────────────────────────────────
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc cmake ninja-build lcov libgtest-dev python3-pip
+          pip install -r image_sensor_platform/validation/requirements.txt
+      - name: Configure with coverage
+        working-directory: image_sensor_platform
+        run: |
+          cmake -S . -B build/cov -GNinja \
+            -DCMAKE_BUILD_TYPE=Debug -DISF_BUILD_TESTS=ON \
+            -DISF_ENABLE_COVERAGE=ON -DISF_OS_POSIX=ON
+      - name: Build and test
+        working-directory: image_sensor_platform
+        run: |
+          cmake --build build/cov --parallel
+          ctest --test-dir build/cov --output-on-failure
+          pytest validation/tests/ -q -m "not performance and not stress"
+      - name: Generate coverage report
+        working-directory: image_sensor_platform
+        run: |
+          lcov --capture --directory build/cov --output-file cov.info
+          lcov --remove cov.info '*/tests/*' '/usr/*' --output-file cov_filtered.info
+          lcov --summary cov_filtered.info

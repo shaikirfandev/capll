@@ -1,0 +1,143 @@
+# CI/CD Pipeline — ADAS Real-Time C++ Platform
+#
+# Targets:
+#   build-and-test-linux  : Ubuntu 22.04, GCC-13, ASan+UBSan
+#   build-and-test-clang  : Ubuntu 22.04, Clang-17, -Werror
+#   static-analysis       : clang-tidy on all changed files
+#   coverage              : gcov/lcov with 80% gate
+#   cross-qnx-check       : QNX SDP toolchain compilation (syntax check only)
+#
+# Add the following secrets to your repository:
+#   QNX_SDP_PATH   — path to the QNX SDP installation
+#   QNX_TARGET     — e.g. aarch64le or x86_64
+
+name: ADAS Core CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  build-and-test-linux:
+    name: Build & Test (GCC + ASan/UBSan)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GCC 13
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-13 g++-13 cmake ninja-build
+
+      - name: Configure
+        run: |
+          cmake -S adas_realtime_cpp -B build/gcc \
+            -GNinja \
+            -DCMAKE_CXX_COMPILER=g++-13 \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DADAS_BUILD_TESTS=ON \
+            -DADAS_ENABLE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build/gcc --parallel
+
+      - name: Test
+        run: ctest --test-dir build/gcc --output-on-failure -j4
+
+  # ────────────────────────────────────────────────────────────────────────────
+  build-and-test-clang:
+    name: Build & Test (Clang 17)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Clang 17
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          sudo add-apt-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-17 main"
+          sudo apt-get update -qq
+          sudo apt-get install -y clang-17 cmake ninja-build
+
+      - name: Configure
+        run: |
+          cmake -S adas_realtime_cpp -B build/clang \
+            -GNinja \
+            -DCMAKE_CXX_COMPILER=clang++-17 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DADAS_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build/clang --parallel
+
+      - name: Test
+        run: ctest --test-dir build/clang --output-on-failure -j4
+
+  # ────────────────────────────────────────────────────────────────────────────
+  static-analysis:
+    name: clang-tidy
+    runs-on: ubuntu-22.04
+    needs: build-and-test-clang
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-tidy 17
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang-17 clang-tidy-17 cmake ninja-build
+
+      - name: Configure (generate compile_commands.json)
+        run: |
+          cmake -S adas_realtime_cpp -B build/tidy \
+            -GNinja \
+            -DCMAKE_CXX_COMPILER=clang++-17 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DADAS_BUILD_TESTS=ON \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run clang-tidy
+        run: |
+          cd adas_realtime_cpp
+          find src include -name '*.cpp' -o -name '*.hpp' | \
+            xargs clang-tidy-17 -p ../build/tidy \
+              --config-file=.clang-tidy \
+              --warnings-as-errors='*'
+
+  # ────────────────────────────────────────────────────────────────────────────
+  coverage:
+    name: Line coverage (>= 80 %)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-13 g++-13 cmake ninja-build lcov
+
+      - name: Configure with coverage
+        run: |
+          cmake -S adas_realtime_cpp -B build/cov \
+            -GNinja \
+            -DCMAKE_CXX_COMPILER=g++-13 \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DADAS_BUILD_TESTS=ON \
+            -DADAS_ENABLE_COVERAGE=ON
+
+      - name: Build
+        run: cmake --build build/cov --parallel
+
+      - name: Test
+        run: ctest --test-dir build/cov --output-on-failure -j4
+
+      - name: Collect coverage
+        run: |
+          lcov --capture --directory build/cov --output-file coverage.info
+          lcov --remove coverage.info '*/tests/*' '/usr/*' --output-file coverage.info
+          lcov --summary coverage.info
+          # Enforce 80 % line coverage
+          COVERAGE=$(lcov --summary coverage.info 2>&1 | grep 'lines' | grep -oP '[0-9]+\.[0-9]+' | head -1)
+          echo "Line coverage: $COVERAGE %"
+          awk "BEGIN { if ($COVERAGE < 80.0) { print \"Coverage too low: $COVERAGE < 80\"; exit 1 } }"

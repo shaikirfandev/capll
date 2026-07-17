@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * sensor-hub-overlay.dts
+ *
+ * Device Tree overlay for the Industrial Sensor Hub platform driver.
+ * Apply on top of your board DTS (e.g. imx8mp-evk.dts).
+ *
+ * Usage:
+ *   dtc -@ -I dts -O dtb -o sensor-hub-overlay.dtbo sensor-hub-overlay.dts
+ *   cp sensor-hub-overlay.dtbo /boot/overlays/
+ *   # then add "dtoverlay=sensor-hub-overlay" to /boot/config.txt (RPi)
+ *   # or load via: echo sensor-hub-overlay > /sys/kernel/config/device-tree/overlays/
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "fsl,imx8mp-evk", "fsl,imx8mp";   /* limit overlay to this board */
+
+    fragment@0 {
+        target-path = "/";
+
+        __overlay__ {
+            sensor_hub_0: sensor-hub@40080000 {
+                compatible      = "example,sensor-hub-v1";
+
+                /*
+                 * MMIO base address and size.
+                 * Matches the register map in sensor_hub.h:
+                 *   base = 0x40080000, size = 0x1000 (4KB)
+                 */
+                reg             = <0x0 0x40080000 0x0 0x1000>;
+
+                /*
+                 * IRQ: SPI 55, active-high level-triggered.
+                 * Wired to GIC on the SoC.
+                 */
+                interrupts      = <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>;
+                interrupt-parent = <&gic>;
+
+                /*
+                 * DMA capability: use the SoC's SDMA3 controller,
+                 * request ID 14 for FIFO → memory transfers.
+                 */
+                dmas            = <&sdma3 14 2 0>;
+                dma-names       = "fifo";
+
+                /*
+                 * Power domain: keep peripheral clock on during S0ix.
+                 * Remove this line if not applicable on your SoC.
+                 */
+                power-domains   = <&pgc_sensor>;
+
+                /* Default sample rate (Hz) read by driver at probe */
+                example,default-rate = <100>;
+
+                /* Optional: per-channel calibration offsets (raw units) */
+                example,cal-offsets  = <0 (-12) 5 0>;
+
+                status = "okay";
+            };
+        };
+    };
+};

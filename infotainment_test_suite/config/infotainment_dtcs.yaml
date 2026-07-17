@@ -1,0 +1,308 @@
+# ============================================================
+# Infotainment ECU — DTC Catalogue
+# ============================================================
+#
+# How to populate from real sources:
+#   - Import from supplier DTC catalogue (Excel/CSV)
+#   - Cross-reference with FMEA / FTA for severity classification
+#   - Verify DTC codes against ODX DiagTroubleCodeProp
+#
+# Field guide:
+#   code               — 3-byte DTC hex string (ISO/SAE format prefix auto-derived)
+#   iso_code           — human-readable ISO code  e.g. "B11001"
+#   description        — short fault description
+#   severity           — critical | major | minor | info
+#   fault_type         — hardware | software | communication | calibration | configuration
+#   system             — ECU subsystem that generates this DTC
+#   status_bits        — which status bits can be set (comma list of bit names)
+#   expected_on_clean  — false = DTC must NOT be confirmed on a healthy ECU bench
+#   freeze_frame_dids  — DIDs captured in the freeze frame record
+# ============================================================
+
+# ── Display / HMI ─────────────────────────────────────────
+display_panel_comm_failure:
+  code: "0xB11001"
+  iso_code: "B11001"
+  description: "Display panel I2C/SPI communication failure"
+  severity: major
+  fault_type: hardware
+  system: display
+  expected_on_clean: false
+
+display_backlight_driver_fault:
+  code: "0xB11002"
+  iso_code: "B11002"
+  description: "Display backlight PWM driver IC fault"
+  severity: major
+  fault_type: hardware
+  system: display
+  expected_on_clean: false
+
+touchscreen_not_responding:
+  code: "0xB11003"
+  iso_code: "B11003"
+  description: "Touch controller not responding to I2C commands"
+  severity: major
+  fault_type: hardware
+  system: display
+  expected_on_clean: false
+
+display_power_supply_fault:
+  code: "0xB11004"
+  iso_code: "B11004"
+  description: "Display panel supply rail over/under-voltage"
+  severity: critical
+  fault_type: hardware
+  system: display
+  expected_on_clean: false
+
+# ── Audio Amplifier / Speakers ────────────────────────────
+audio_amp_over_temperature:
+  code: "0xB12001"
+  iso_code: "B12001"
+  description: "Audio amplifier die temperature exceeded threshold"
+  severity: major
+  fault_type: hardware
+  system: audio
+  expected_on_clean: false
+
+audio_amp_output_fault:
+  code: "0xB12002"
+  iso_code: "B12002"
+  description: "Audio amplifier output stage failure (any channel)"
+  severity: major
+  fault_type: hardware
+  system: audio
+  expected_on_clean: false
+
+speaker_fl_open_circuit:
+  code: "0xB12010"
+  iso_code: "B12010"
+  description: "Front-left speaker wire open circuit"
+  severity: minor
+  fault_type: hardware
+  system: audio
+  expected_on_clean: false
+
+speaker_fr_open_circuit:
+  code: "0xB12011"
+  iso_code: "B12011"
+  description: "Front-right speaker wire open circuit"
+  severity: minor
+  fault_type: hardware
+  system: audio
+  expected_on_clean: false
+
+speaker_rl_short_to_ground:
+  code: "0xB12012"
+  iso_code: "B12012"
+  description: "Rear-left speaker wire shorted to ground"
+  severity: minor
+  fault_type: hardware
+  system: audio
+  expected_on_clean: false
+
+speaker_rr_short_to_battery:
+  code: "0xB12013"
+  iso_code: "B12013"
+  description: "Rear-right speaker wire shorted to battery"
+  severity: minor
+  fault_type: hardware
+  system: audio
+  expected_on_clean: false
+
+# ── Bluetooth ─────────────────────────────────────────────
+bluetooth_module_not_detected:
+  code: "0xB13001"
+  iso_code: "B13001"
+  description: "BT module not detected on UART / PCIe interface"
+  severity: major
+  fault_type: hardware
+  system: bluetooth
+  expected_on_clean: false
+
+bluetooth_fw_checksum_error:
+  code: "0xB13002"
+  iso_code: "B13002"
+  description: "BT module firmware integrity check failed"
+  severity: major
+  fault_type: software
+  system: bluetooth
+  expected_on_clean: false
+
+bluetooth_pairing_memory_corrupt:
+  code: "0xB13003"
+  iso_code: "B13003"
+  description: "BT pairing database NVM corruption detected"
+  severity: minor
+  fault_type: software
+  system: bluetooth
+  expected_on_clean: false
+
+# ── Wi-Fi / Network ───────────────────────────────────────
+wifi_module_not_detected:
+  code: "0xB14001"
+  iso_code: "B14001"
+  description: "Wi-Fi module not detected on SDIO interface"
+  severity: major
+  fault_type: hardware
+  system: wifi
+  expected_on_clean: false
+
+wifi_fw_checksum_error:
+  code: "0xB14002"
+  iso_code: "B14002"
+  description: "Wi-Fi module firmware integrity check failed"
+  severity: major
+  fault_type: software
+  system: wifi
+  expected_on_clean: false
+
+network_connection_loss:
+  code: "0xB14003"
+  iso_code: "B14003"
+  description: "Vehicle network connectivity lost for >30 s"
+  severity: minor
+  fault_type: communication
+  system: wifi
+  expected_on_clean: false
+
+# ── USB / Media ───────────────────────────────────────────
+usb_port1_overcurrent:
+  code: "0xB15001"
+  iso_code: "B15001"
+  description: "USB port 1 overcurrent protection triggered"
+  severity: major
+  fault_type: hardware
+  system: usb
+  expected_on_clean: false
+
+usb_port2_overcurrent:
+  code: "0xB15002"
+  iso_code: "B15002"
+  description: "USB port 2 overcurrent protection triggered"
+  severity: major
+  fault_type: hardware
+  system: usb
+  expected_on_clean: false
+
+usb_hub_not_responding:
+  code: "0xB15003"
+  iso_code: "B15003"
+  description: "Internal USB hub controller not responding"
+  severity: major
+  fault_type: hardware
+  system: usb
+  expected_on_clean: false
+
+media_player_crash:
+  code: "0xB15004"
+  iso_code: "B15004"
+  description: "Media player process watchdog reset (software fault)"
+  severity: minor
+  fault_type: software
+  system: usb
+  expected_on_clean: false
+
+# ── Navigation / GPS ──────────────────────────────────────
+gps_antenna_open_circuit:
+  code: "0xB16001"
+  iso_code: "B16001"
+  description: "GNSS antenna feed line open circuit"
+  severity: major
+  fault_type: hardware
+  system: navigation
+  expected_on_clean: false
+
+gps_antenna_short_to_ground:
+  code: "0xB16002"
+  iso_code: "B16002"
+  description: "GNSS antenna feed line shorted to ground"
+  severity: major
+  fault_type: hardware
+  system: navigation
+  expected_on_clean: false
+
+nav_map_db_corrupt:
+  code: "0xB16003"
+  iso_code: "B16003"
+  description: "Navigation map database integrity check failed"
+  severity: minor
+  fault_type: software
+  system: navigation
+  expected_on_clean: false
+
+# ── Voice Recognition ─────────────────────────────────────
+microphone_open_circuit:
+  code: "0xB17001"
+  iso_code: "B17001"
+  description: "Internal microphone wiring open circuit"
+  severity: minor
+  fault_type: hardware
+  system: voice_recognition
+  expected_on_clean: false
+
+microphone_short_to_ground:
+  code: "0xB17002"
+  iso_code: "B17002"
+  description: "Internal microphone shorted to ground"
+  severity: minor
+  fault_type: hardware
+  system: voice_recognition
+  expected_on_clean: false
+
+voice_engine_crash:
+  code: "0xB17003"
+  iso_code: "B17003"
+  description: "Voice recognition engine software crash detected"
+  severity: minor
+  fault_type: software
+  system: voice_recognition
+  expected_on_clean: false
+
+# ── CarPlay / Android Auto ────────────────────────────────
+carplay_auth_failure:
+  code: "0xB18001"
+  iso_code: "B18001"
+  description: "Apple CarPlay MFi authentication failed"
+  severity: minor
+  fault_type: software
+  system: carplay
+  expected_on_clean: false
+
+android_auto_proxy_fault:
+  code: "0xB18002"
+  iso_code: "B18002"
+  description: "Android Auto protocol proxy process fault"
+  severity: minor
+  fault_type: software
+  system: android_auto
+  expected_on_clean: false
+
+# ── CAN / Network Communication ───────────────────────────
+can_bus_off:
+  code: "0xU19001"
+  iso_code: "U19001"
+  description: "Infotainment CAN bus-off state detected"
+  severity: critical
+  fault_type: communication
+  system: can
+  expected_on_clean: false
+
+lost_comm_with_cluster:
+  code: "0xU19002"
+  iso_code: "U19002"
+  description: "Lost communication with Instrument Cluster ECU"
+  severity: major
+  fault_type: communication
+  system: can
+  expected_on_clean: false
+
+lost_comm_with_bcm:
+  code: "0xU19003"
+  iso_code: "U19003"
+  description: "Lost communication with Body Control Module"
+  severity: major
+  fault_type: communication
+  system: can
+  expected_on_clean: false

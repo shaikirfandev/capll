@@ -1,0 +1,147 @@
+# Infotainment ECU — NRC expected matrix
+
+nrc_scenarios:
+
+  - scenario: "unsupported_service_0xBA"
+    service_id: "0xBA"
+    trigger_action: "send_raw_service_0xBA"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x11"
+    description: "Non-existent service must return serviceNotSupported"
+
+  - scenario: "session_control_invalid_0xAA"
+    service_id: "0x10"
+    trigger_action: "diagnostic_session_control_subfunction_0xAA"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x12"
+    description: "DiagnosticSessionControl with invalid sub-function"
+
+  - scenario: "read_did_too_short"
+    service_id: "0x22"
+    trigger_action: "send_0x22_with_only_1_byte"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x13"
+    description: "ReadDID with missing DID bytes — incorrect length"
+
+  - scenario: "write_did_wrong_length"
+    service_id: "0x2E"
+    trigger_action: "send_0x2E_with_wrong_data_length"
+    setup_session: "extended"
+    setup_security: 1
+    expected_nrc: "0x13"
+    description: "WriteDID data length does not match DID declaration"
+
+  - scenario: "read_did_unknown_0xFFFF"
+    service_id: "0x22"
+    trigger_action: "read_did_0xFFFF"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x31"
+    description: "ReadDID for undefined DID returns requestOutOfRange"
+
+  - scenario: "write_readonly_did_0xF190"
+    service_id: "0x2E"
+    trigger_action: "write_did_0xF190_vin"
+    setup_session: "extended"
+    setup_security: 1
+    expected_nrc: "0x31"
+    description: "Write to read-only VIN DID must be rejected"
+
+  - scenario: "routine_control_unknown_rid"
+    service_id: "0x31"
+    trigger_action: "start_routine_0xDEAD"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x31"
+    description: "RoutineControl for undefined RID returns requestOutOfRange"
+
+  - scenario: "read_secured_did_no_auth"
+    service_id: "0x22"
+    trigger_action: "read_did_0xE001_no_security"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x33"
+    description: "Read security-protected DID without security access"
+
+  - scenario: "write_did_no_security"
+    service_id: "0x2E"
+    trigger_action: "write_did_0xE001_no_security"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x33"
+    description: "WriteDID on secured DID without authentication"
+
+  - scenario: "start_secured_routine_no_auth"
+    service_id: "0x31"
+    trigger_action: "start_routine_0x0301_no_security"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x33"
+    description: "Start security-protected routine without authentication"
+
+  - scenario: "security_invalid_key"
+    service_id: "0x27"
+    trigger_action: "send_wrong_key_after_valid_seed"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x35"
+    description: "Incorrect security key must return invalidKey"
+
+  - scenario: "security_exceeded_attempts"
+    service_id: "0x27"
+    trigger_action: "send_wrong_key_3_times"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x36"
+    description: "Exceed max security attempts → lockout"
+
+  - scenario: "security_time_delay_active"
+    service_id: "0x27"
+    trigger_action: "attempt_seed_during_lockout"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x37"
+    description: "Seed request during active security lockout"
+
+  - scenario: "clear_dtc_default_session"
+    service_id: "0x14"
+    trigger_action: "clear_dtc_in_default_session"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x7F"
+    description: "ClearDTC not available in default session"
+
+  - scenario: "comm_control_default_session"
+    service_id: "0x28"
+    trigger_action: "communication_control_default_session"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x7F"
+    description: "CommunicationControl not available in default session"
+
+  - scenario: "tester_present_bad_subfn"
+    service_id: "0x3E"
+    trigger_action: "tester_present_subfunction_0x01"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x12"
+    description: "TesterPresent with unsupported sub-function 0x01"
+
+  - scenario: "routine_too_short"
+    service_id: "0x31"
+    trigger_action: "send_0x31_with_only_2_bytes"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x13"
+    description: "RoutineControl missing RID bytes"
+
+  - scenario: "ecu_reset_bad_type"
+    service_id: "0x11"
+    trigger_action: "ecu_reset_type_0x05"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x12"
+    description: "ECUReset with unsupported reset type"

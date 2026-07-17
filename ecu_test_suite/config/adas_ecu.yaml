@@ -1,0 +1,128 @@
+# ============================================================
+# ADAS ECU Configuration
+# ============================================================
+# How to populate this file:
+#   1. Open the ECU's ODX/PDX file (or request from Tier-1 supplier) and
+#      locate the DataObjectProp for each DID. Extract the identifier
+#      (2-byte hex) and map it below.
+#   2. From the DBC file, extract the physical CAN IDs for the ECU's
+#      diagnostic request/response frames (usually labelled "DIAG_REQ_*"
+#      and "DIAG_RESP_*").
+#   3. Replace placeholder DTC codes with real P/U/B/C codes from the
+#      FMEA / DTC catalogue.
+
+# ── CAN / transport layer ──────────────────────────────────
+can:
+  channel:  1             # Vector Hardware Config 1-based channel number
+  bitrate:  500000        # Classic CAN bitrate in bps (500 kbps default)
+  can_fd:   false         # Set true + fd_bitrate for CAN-FD ECUs
+  fd_bitrate: 2000000
+  # Physical addressing (11-bit IDs are assumed; change for 29-bit)
+  tx_id:  "0x7D0"        # Tester → ADAS ECU (replace with actual ID from DBC)
+  rx_id:  "0x7D8"        # ADAS ECU → Tester
+  func_id: "0x7DF"       # Functional/broadcast request ID
+
+# ── UDS sessions ──────────────────────────────────────────
+sessions:
+  default:    0x01
+  extended:   0x03
+  programming: 0x02
+
+# ── Security access ────────────────────────────────────────
+security_access:
+  level: 0x01                       # requestSeed level (odd)
+  algorithm: "xor_placeholder"      # REPLACE with your OEM algorithm name
+  #
+  # To plug in your own algorithm:
+  #   1. Implement SecurityAlgorithmBase.compute_key()
+  #   2. Register: register_algorithm("adas_level1", MyAlgorithm())
+  #   3. Change algorithm field to "adas_level1"
+
+# ── Data Identifiers (DIDs) ────────────────────────────────
+# Format:
+#   <name>:
+#     id:       <hex DID>   — from ODX / ECU supplier document
+#     length:   <bytes>     — expected response payload length
+#     writable: <bool>      — whether WDBI (0x2E) is supported
+#     description: <str>
+dids:
+  software_version:
+    id: "0xF189"           # SAE J1979 standard DID (reuse or override)
+    length: 20
+    writable: false
+    description: "ECU software version string"
+
+  hardware_version:
+    id: "0xF191"
+    length: 10
+    writable: false
+    description: "ECU hardware part number"
+
+  camera_calibration_status:
+    id: "0x2001"           # Supplier-specific — replace with actual DID
+    length: 4
+    writable: false
+    description: "Front camera alignment status (0=uncalibrated, 1=calibrated)"
+
+  radar_calibration_status:
+    id: "0x2002"
+    length: 4
+    writable: false
+    description: "Front radar alignment status (0=uncalibrated, 1=calibrated)"
+
+  object_detection_flag:
+    id: "0x2010"
+    length: 2
+    writable: false
+    description: "Object detected in ADAS zone (0=clear, 1=detected)"
+
+  acc_state:
+    id: "0x2011"
+    length: 2
+    writable: false
+    description: "Adaptive Cruise Control state (0=off, 1=active, 2=override)"
+
+  aeb_state:
+    id: "0x2012"
+    length: 2
+    writable: false
+    description: "Autonomous Emergency Braking state"
+
+  vin:
+    id: "0xF190"
+    length: 17
+    writable: false
+    description: "Vehicle Identification Number (VIN)"
+
+# ── Routine Identifiers ────────────────────────────────────
+routines:
+  camera_calibration_trigger:
+    id: "0x0201"           # Replace with supplier routine ID from ODX
+    description: "Trigger front camera static calibration procedure"
+    expected_status: 0x00  # 0x00 = calibration completed successfully
+
+  radar_calibration_trigger:
+    id: "0x0202"
+    description: "Trigger front radar beam calibration"
+    expected_status: 0x00
+
+  eol_self_test:
+    id: "0x0210"
+    description: "End-of-Line self-test — all ADAS sensors"
+    expected_status: 0x00
+
+# ── DTC map ────────────────────────────────────────────────
+# Format: "<3-byte DTC hex>": "human-readable description"
+# Source: FMEA table / DTC catalogue from Tier-1 supplier
+dtc_map:
+  "0xC11001": "Front camera communication loss"
+  "0xC11002": "Front camera signal out of range"
+  "0xC11003": "Front camera lens blockage"
+  "0xC12001": "Front radar communication loss"
+  "0xC12002": "Front radar misalignment detected"
+  "0xC12003": "Front radar signal degraded"
+  "0xC13001": "Side radar (left) communication loss"
+  "0xC13002": "Side radar (right) communication loss"
+  "0xU01001": "CAN bus-off — ADAS internal network"
+  "0xU01002": "Lost communication with ABS/ESC ECU"
+  "0xU01003": "Lost communication with EPS ECU"

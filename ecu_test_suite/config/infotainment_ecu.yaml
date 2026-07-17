@@ -1,0 +1,125 @@
+# ============================================================
+# Infotainment ECU Configuration
+# ============================================================
+# Populate from the HU (Head Unit) ODX file or supplier DTC catalogue.
+# Typical bus: CAN 500 kbps or MOST / Automotive Ethernet — adjust below.
+
+# ── CAN / transport layer ──────────────────────────────────
+can:
+  channel:  1
+  bitrate:  500000
+  can_fd:   false
+  fd_bitrate: 2000000
+  tx_id:  "0x730"        # Tester → Infotainment ECU
+  rx_id:  "0x738"        # Infotainment ECU → Tester
+  func_id: "0x7DF"
+
+# ── UDS sessions ──────────────────────────────────────────
+sessions:
+  default:     0x01
+  extended:    0x03
+  programming: 0x02
+
+# ── Security access ────────────────────────────────────────
+security_access:
+  level: 0x01
+  algorithm: "xor_placeholder"   # Replace with HU OEM algorithm
+
+# ── DIDs ──────────────────────────────────────────────────
+dids:
+  software_version:
+    id: "0xF189"
+    length: 20
+    writable: false
+    description: "HMI software version string"
+
+  hardware_version:
+    id: "0xF191"
+    length: 10
+    writable: false
+    description: "HMI hardware part number"
+
+  vin:
+    id: "0xF190"
+    length: 17
+    writable: false
+    description: "Vehicle Identification Number"
+
+  bluetooth_status:
+    id: "0x3001"            # Supplier-specific — verify against ODX
+    length: 4
+    writable: true
+    description: "Bluetooth module status and pairing state"
+    write_value: "0x0100"   # Example: enable BT module
+
+  wifi_status:
+    id: "0x3002"
+    length: 4
+    writable: true
+    description: "Wi-Fi module status and SSID availability"
+
+  display_brightness:
+    id: "0x3010"
+    length: 2
+    writable: true
+    description: "Display backlight brightness level (0–100)"
+
+  audio_amp_status:
+    id: "0x3020"
+    length: 2
+    writable: false
+    description: "Audio amplifier operational status"
+
+  usb_port_status:
+    id: "0x3030"
+    length: 2
+    writable: false
+    description: "USB port detection and power status"
+
+  hmi_sleep_state:
+    id: "0x3040"
+    length: 1
+    writable: false
+    description: "HMI power state (0=active, 1=sleep, 2=deep-sleep)"
+
+  touch_screen_status:
+    id: "0x3050"
+    length: 2
+    writable: false
+    description: "Touchscreen controller status"
+
+# ── Routines ──────────────────────────────────────────────
+routines:
+  factory_reset:
+    id: "0x0301"           # Replace with supplier routine ID
+    description: "Restore all HMI settings to factory defaults"
+    expected_status: 0x00
+
+  display_self_test:
+    id: "0x0302"
+    description: "Activate display pixel self-test pattern"
+    expected_status: 0x00
+
+  bluetooth_self_test:
+    id: "0x0310"
+    description: "BT module hardware diagnostic"
+    expected_status: 0x00
+
+  audio_self_test:
+    id: "0x0320"
+    description: "Audio signal path continuity test"
+    expected_status: 0x00
+
+# ── DTC map ────────────────────────────────────────────────
+dtc_map:
+  "0xB11001": "Display panel communication failure"
+  "0xB11002": "Display backlight driver fault"
+  "0xB11003": "Touchscreen controller not responding"
+  "0xB12001": "Audio amplifier output fault"
+  "0xB12002": "Audio amplifier over-temperature"
+  "0xB13001": "Bluetooth module not detected"
+  "0xB13002": "Wi-Fi module firmware checksum error"
+  "0xB14001": "USB port overcurrent detected"
+  "0xB14002": "Media reader communication error"
+  "0xU02001": "CAN bus-off — Infotainment network"
+  "0xU02002": "Lost communication with instrument cluster"

@@ -1,0 +1,176 @@
+# ADAS ECU — NRC expected matrix
+# Each entry defines a scenario that must produce a specific NRC.
+# Used by tests/nrc_matrix/test_nrc_responses.py to drive NRC coverage.
+#
+# Fields:
+#   scenario:             Unique test ID string (used as pytest param ID)
+#   service_id:           UDS service being tested (hex string)
+#   trigger_action:       What the test does to provoke the NRC
+#   setup_session:        Session to be in before the trigger (default|extended|programming)
+#   setup_security:       Security level to have before trigger (0=none, 1=level1)
+#   expected_nrc:         Expected NRC hex code
+#   description:          Human-readable explanation
+
+nrc_scenarios:
+
+  # ── Service Not Supported (0x11) ───────────────────────────────────────────
+  - scenario: "unsupported_service_0xBA"
+    service_id: "0xBA"
+    trigger_action: "send_raw_service_0xBA"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x11"
+    description: "Non-existent service 0xBA must return serviceNotSupported"
+
+  # ── SubFunction Not Supported (0x12) ──────────────────────────────────────
+  - scenario: "session_control_invalid_session_0xAA"
+    service_id: "0x10"
+    trigger_action: "diagnostic_session_control_subfunction_0xAA"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x12"
+    description: "DiagnosticSessionControl with invalid sub-function 0xAA"
+
+  - scenario: "ecu_reset_invalid_type_0x05"
+    service_id: "0x11"
+    trigger_action: "ecu_reset_type_0x05"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x12"
+    description: "ECUReset with unsupported reset type 0x05"
+
+  - scenario: "read_dtc_invalid_subfunction_0x99"
+    service_id: "0x19"
+    trigger_action: "read_dtc_subfunction_0x99"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x12"
+    description: "ReadDTCInformation with unsupported sub-function 0x99"
+
+  # ── Incorrect Message Length (0x13) ───────────────────────────────────────
+  - scenario: "read_did_too_short"
+    service_id: "0x22"
+    trigger_action: "send_0x22_with_only_1_byte"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x13"
+    description: "ReadDID request with only SID byte — missing DID bytes"
+
+  - scenario: "write_did_too_short"
+    service_id: "0x2E"
+    trigger_action: "send_0x2E_with_wrong_data_length"
+    setup_session: "extended"
+    setup_security: 1
+    expected_nrc: "0x13"
+    description: "WriteDID with data payload shorter than DID's declared length"
+
+  - scenario: "routine_control_too_short"
+    service_id: "0x31"
+    trigger_action: "send_0x31_with_only_2_bytes"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x13"
+    description: "RoutineControl request missing RID bytes"
+
+  # ── Request Out Of Range (0x31) ────────────────────────────────────────────
+  - scenario: "read_did_unknown_0xFFFF"
+    service_id: "0x22"
+    trigger_action: "read_did_0xFFFF"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x31"
+    description: "ReadDID for 0xFFFF (not in DID matrix) must return requestOutOfRange"
+
+  - scenario: "write_readonly_did_0xF190"
+    service_id: "0x2E"
+    trigger_action: "write_did_0xF190_vin"
+    setup_session: "extended"
+    setup_security: 1
+    expected_nrc: "0x31"
+    description: "WriteDID on read-only VIN DID 0xF190 must return requestOutOfRange"
+
+  - scenario: "routine_control_unknown_rid_0xDEAD"
+    service_id: "0x31"
+    trigger_action: "start_routine_0xDEAD"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x31"
+    description: "RoutineControl for unknown RID 0xDEAD must return requestOutOfRange"
+
+  # ── Security Access Denied (0x33) ─────────────────────────────────────────
+  - scenario: "read_secured_did_without_auth"
+    service_id: "0x22"
+    trigger_action: "read_did_0xD003_no_security"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x33"
+    description: "ReadDID on security-level-1 DID without security access"
+
+  - scenario: "write_did_without_security"
+    service_id: "0x2E"
+    trigger_action: "write_did_0xD003_no_security"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x33"
+    description: "WriteDID on security-level-1 DID without security access"
+
+  - scenario: "start_secured_routine_without_auth"
+    service_id: "0x31"
+    trigger_action: "start_routine_0x0202_no_security"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x33"
+    description: "Start security-protected RID without security access"
+
+  # ── Invalid Key (0x35) ────────────────────────────────────────────────────
+  - scenario: "security_access_invalid_key"
+    service_id: "0x27"
+    trigger_action: "send_wrong_key_after_valid_seed"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x35"
+    description: "Send incorrect security key → NRC 0x35 invalidKey"
+
+  # ── Exceeded Number Of Attempts (0x36) ────────────────────────────────────
+  - scenario: "security_access_exceeded_attempts"
+    service_id: "0x27"
+    trigger_action: "send_wrong_key_3_times"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x36"
+    description: "Exceed max security access attempts → lockout NRC 0x36"
+
+  # ── Required Time Delay Not Expired (0x37) ────────────────────────────────
+  - scenario: "security_access_during_lockout"
+    service_id: "0x27"
+    trigger_action: "attempt_seed_request_during_lockout"
+    setup_session: "extended"
+    setup_security: 0
+    expected_nrc: "0x37"
+    description: "Seed request while security lockout timer is active → NRC 0x37"
+
+  # ── Service Not Supported In Active Session (0x7F) ────────────────────────
+  - scenario: "clear_dtc_in_default_session"
+    service_id: "0x14"
+    trigger_action: "clear_dtc_in_default_session"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x7F"
+    description: "ClearDTC must not be available in default session"
+
+  - scenario: "comm_control_in_default_session"
+    service_id: "0x28"
+    trigger_action: "communication_control_in_default_session"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x7F"
+    description: "CommunicationControl requires extended/programming session"
+
+  # ── SubFunction Not Supported In Active Session (0x7E) ────────────────────
+  - scenario: "tester_present_invalid_subfn_0x01"
+    service_id: "0x3E"
+    trigger_action: "tester_present_subfunction_0x01"
+    setup_session: "default"
+    setup_security: 0
+    expected_nrc: "0x12"
+    description: "TesterPresent with sub-function 0x01 (only 0x00 and 0x80 allowed)"
