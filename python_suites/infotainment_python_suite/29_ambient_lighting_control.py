@@ -45,13 +45,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -115,22 +108,25 @@ def step_disable_auto_follow(bus):
         check("Auto-follow off byte2==0x00", resp.data[2] == AUTO_FOLLOW_OFF)
 
 
-def test_ambient_lighting_control():
-    bus = get_bus()
-    try:
-        step_set_rgb_color(bus, *COLOR_RED, ZONE_1, "Red")
-        step_set_rgb_color(bus, *COLOR_GREEN, ZONE_2, "Green")
-        step_set_rgb_color(bus, *COLOR_BLUE, ZONE_3, "Blue")
-        step_set_rgb_color(bus, *COLOR_WHITE, ZONE_1, "White")
-        step_brightness_dim(bus)
-        step_brightness_bright(bus)
-        step_auto_follow_interior(bus)
-        step_disable_auto_follow(bus)
-    finally:
-        bus.shutdown()
+def test_ambient_lighting_control(bus_session):
+    bus = bus_session
+    step_set_rgb_color(bus, *COLOR_RED, ZONE_1, "Red")
+    step_set_rgb_color(bus, *COLOR_GREEN, ZONE_2, "Green")
+    step_set_rgb_color(bus, *COLOR_BLUE, ZONE_3, "Blue")
+    step_set_rgb_color(bus, *COLOR_WHITE, ZONE_1, "White")
+    step_brightness_dim(bus)
+    step_brightness_bright(bus)
+    step_auto_follow_interior(bus)
+    step_disable_auto_follow(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in ambient lighting test"
 
 
 if __name__ == "__main__":
-    test_ambient_lighting_control()
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_ambient_lighting_control(bus)
+    finally:
+        bus.shutdown()
     print(f"\nResults: {pass_count} passed, {fail_count} failed")

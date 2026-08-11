@@ -37,13 +37,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -115,20 +108,23 @@ def step_voice_session_end(bus):
         check("Voice session ended byte1==0x00", resp.data[1] == 0x00)
 
 
-def test_voice_recognition():
-    bus = get_bus()
-    try:
-        step_voice_button_press(bus)
-        step_wake_word_detected(bus)
-        step_send_nav_command(bus)
-        step_send_call_command(bus)
-        step_send_music_command(bus)
-        step_voice_session_end(bus)
-    finally:
-        bus.shutdown()
+def test_voice_recognition(bus_session):
+    bus = bus_session
+    step_voice_button_press(bus)
+    step_wake_word_detected(bus)
+    step_send_nav_command(bus)
+    step_send_call_command(bus)
+    step_send_music_command(bus)
+    step_voice_session_end(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in voice recognition test"
 
 
 if __name__ == "__main__":
-    test_voice_recognition()
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_voice_recognition(bus)
+    finally:
+        bus.shutdown()
     print(f"\nResults: {pass_count} passed, {fail_count} failed")

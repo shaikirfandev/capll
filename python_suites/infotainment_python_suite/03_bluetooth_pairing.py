@@ -36,13 +36,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -112,19 +105,22 @@ def step_bt_device_count_increment(bus):
         check("BT deviceCount incremented to 2", resp.data[2] == 0x02)
 
 
-def test_bluetooth_pairing():
-    bus = get_bus()
-    try:
-        step_bt_off(bus)
-        step_bt_discoverable(bus)
-        step_bt_pairing(bus)
-        step_bt_connected(bus, expected_device_count=1)
-        step_bt_device_count_increment(bus)
-    finally:
-        bus.shutdown()
+def test_bluetooth_pairing(bus_session):
+    bus = bus_session
+    step_bt_off(bus)
+    step_bt_discoverable(bus)
+    step_bt_pairing(bus)
+    step_bt_connected(bus, expected_device_count=1)
+    step_bt_device_count_increment(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in Bluetooth pairing test"
 
 
 if __name__ == "__main__":
-    test_bluetooth_pairing()
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_bluetooth_pairing(bus)
+    finally:
+        bus.shutdown()
     print(f"\nResults: {pass_count} passed, {fail_count} failed")

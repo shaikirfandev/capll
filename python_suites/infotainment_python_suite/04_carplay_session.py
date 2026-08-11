@@ -38,13 +38,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -116,20 +109,23 @@ def step_verify_fallback_source(bus):
         check("Fallback source FM echoed in ACK", resp.data[0] == SOURCE_FM)
 
 
-def test_carplay_session():
-    bus = get_bus()
-    try:
-        step_set_source_carplay(bus)
-        step_carplay_connect_latency(bus)
-        step_verify_carplay_active(bus)
-        step_carplay_screen_projection(bus)
-        step_carplay_disconnect(bus)
-        step_verify_fallback_source(bus)
-    finally:
-        bus.shutdown()
+def test_carplay_session(bus_session):
+    bus = bus_session
+    step_set_source_carplay(bus)
+    step_carplay_connect_latency(bus)
+    step_verify_carplay_active(bus)
+    step_carplay_screen_projection(bus)
+    step_carplay_disconnect(bus)
+    step_verify_fallback_source(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in CarPlay session test"
 
 
 if __name__ == "__main__":
-    test_carplay_session()
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_carplay_session(bus)
+    finally:
+        bus.shutdown()
     print(f"\nResults: {pass_count} passed, {fail_count} failed")

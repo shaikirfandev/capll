@@ -35,13 +35,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -114,20 +107,23 @@ def step_verify_call_duration_tracked(bus):
         check("Duration byte echoed in response byte2 >= 0", (resp.data[2] if len(resp.data) > 2 else 0) >= 0)
 
 
-def test_phone_call_handling():
-    bus = get_bus()
-    try:
-        step_incoming_ring(bus)
-        step_answer_call(bus)
-        step_hold_call(bus)
-        step_resume_call(bus)
-        step_end_call(bus)
-        step_verify_call_duration_tracked(bus)
-    finally:
-        bus.shutdown()
+def test_phone_call_handling(bus_session):
+    bus = bus_session
+    step_incoming_ring(bus)
+    step_answer_call(bus)
+    step_hold_call(bus)
+    step_resume_call(bus)
+    step_end_call(bus)
+    step_verify_call_duration_tracked(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in phone call handling test"
 
 
 if __name__ == "__main__":
-    test_phone_call_handling()
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_phone_call_handling(bus)
+    finally:
+        bus.shutdown()
     print(f"\nResults: {pass_count} passed, {fail_count} failed")

@@ -35,13 +35,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -107,20 +100,23 @@ def step_verify_ecu_reachable(bus):
         check("TesterPresent positive response 0x7E", resp.data[1] == 0x7E)
 
 
-def test_infotainment_dtc():
-    bus = get_bus()
-    try:
-        initial_dtc_count = step_read_dtc(bus)
-        print(f"  Initial DTC count: {initial_dtc_count}")
-        step_clear_dtc(bus)
-        step_verify_dtc_cleared(bus)
-        step_negative_response_handling(bus)
-        step_verify_ecu_reachable(bus)
-    finally:
-        bus.shutdown()
+def test_infotainment_dtc(bus_session):
+    bus = bus_session
+    initial_dtc_count = step_read_dtc(bus)
+    print(f"  Initial DTC count: {initial_dtc_count}")
+    step_clear_dtc(bus)
+    step_verify_dtc_cleared(bus)
+    step_negative_response_handling(bus)
+    step_verify_ecu_reachable(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in infotainment DTC test"
 
 
 if __name__ == "__main__":
-    test_infotainment_dtc()
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_infotainment_dtc(bus)
+    finally:
+        bus.shutdown()
     print(f"\nResults: {pass_count} passed, {fail_count} failed")

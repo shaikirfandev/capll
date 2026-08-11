@@ -33,13 +33,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -101,20 +94,23 @@ def step_disable_auto_brightness(bus):
         check("Auto mode byte1==0x00 after disable", resp.data[1] == AUTO_OFF)
 
 
-def test_display_brightness():
-    bus = get_bus()
-    try:
-        for level in [0, 64, 128, 192, 255]:
-            step_set_brightness_level(bus, level)
-        step_enable_auto_brightness(bus)
-        step_simulate_sensor_change_bright(bus)
-        step_simulate_sensor_change_dark(bus)
-        step_disable_auto_brightness(bus)
-    finally:
-        bus.shutdown()
+def test_display_brightness(bus_session):
+    bus = bus_session
+    for level in [0, 64, 128, 192, 255]:
+        step_set_brightness_level(bus, level)
+    step_enable_auto_brightness(bus)
+    step_simulate_sensor_change_bright(bus)
+    step_simulate_sensor_change_dark(bus)
+    step_disable_auto_brightness(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in display brightness test"
 
 
 if __name__ == "__main__":
-    test_display_brightness()
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_display_brightness(bus)
+    finally:
+        bus.shutdown()
     print(f"\nResults: {pass_count} passed, {fail_count} failed")

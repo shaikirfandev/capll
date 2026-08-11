@@ -34,13 +34,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -114,20 +107,23 @@ def step_wifi_disconnect(bus):
         check("WiFi signal bars 0 after disconnect", resp.data[1] == 0x00)
 
 
-def test_wifi_hotspot():
-    bus = get_bus()
-    try:
-        step_wifi_off(bus)
-        step_wifi_connecting(bus)
-        step_wifi_signal_bars_3(bus)
-        step_wifi_signal_bars_5(bus)
-        step_verify_hotspot_active(bus)
-        step_wifi_disconnect(bus)
-    finally:
-        bus.shutdown()
+def test_wifi_hotspot(bus_session):
+    bus = bus_session
+    step_wifi_off(bus)
+    step_wifi_connecting(bus)
+    step_wifi_signal_bars_3(bus)
+    step_wifi_signal_bars_5(bus)
+    step_verify_hotspot_active(bus)
+    step_wifi_disconnect(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in WiFi hotspot test"
 
 
 if __name__ == "__main__":
-    test_wifi_hotspot()
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_wifi_hotspot(bus)
+    finally:
+        bus.shutdown()
     print(f"\nResults: {pass_count} passed, {fail_count} failed")
