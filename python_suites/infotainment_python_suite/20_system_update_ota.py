@@ -131,4 +131,4 @@ if __name__ == "__main__":
         test_system_update_ota(bus)
     finally:
         bus.shutdown()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

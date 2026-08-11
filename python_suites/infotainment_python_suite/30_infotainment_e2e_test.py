@@ -196,4 +196,4 @@ if __name__ == "__main__":
         test_infotainment_e2e(bus)
     finally:
         bus.shutdown()
-    print(f"\nFinal Results: {pass_count} passed, {fail_count} failed")
+        print(f"\nFinal Results: {pass_count} passed, {fail_count} failed")

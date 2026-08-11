@@ -112,4 +112,4 @@ if __name__ == "__main__":
         test_equalizer_settings(bus)
     finally:
         bus.shutdown()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

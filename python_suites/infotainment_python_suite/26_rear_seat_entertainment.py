@@ -134,4 +134,4 @@ if __name__ == "__main__":
         test_rear_seat_entertainment(bus)
     finally:
         bus.shutdown()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

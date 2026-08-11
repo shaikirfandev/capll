@@ -122,4 +122,4 @@ if __name__ == "__main__":
         test_infotainment_dtc(bus)
     finally:
         bus.shutdown()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

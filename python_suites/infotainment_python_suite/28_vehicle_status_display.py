@@ -132,4 +132,4 @@ if __name__ == "__main__":
         test_vehicle_status_display(bus)
     finally:
         bus.shutdown()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

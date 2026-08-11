@@ -135,4 +135,4 @@ if __name__ == "__main__":
         test_head_unit_boot(bus)
     finally:
         bus.shutdown()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

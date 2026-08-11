@@ -18,7 +18,7 @@ def create_bus():
         return can.interface.Bus(channel='vcan0', bustype='socketcan')
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="session", autouse=True)
 def bus_session():
     """Session-scoped shared CAN bus fixture for infotainment tests."""
     bus = create_bus()
