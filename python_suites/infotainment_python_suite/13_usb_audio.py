@@ -109,6 +109,9 @@ def step_verify_source_fallback(bus):
 
 def test_usb_audio(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_usb_connect(bus)
     step_verify_media_active(bus)
     step_track_skip_next(bus)

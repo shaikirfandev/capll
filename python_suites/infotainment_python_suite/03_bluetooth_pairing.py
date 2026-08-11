@@ -107,6 +107,9 @@ def step_bt_device_count_increment(bus):
 
 def test_bluetooth_pairing(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_bt_off(bus)
     step_bt_discoverable(bus)
     step_bt_pairing(bus)

@@ -108,6 +108,9 @@ def step_recheck_ivi_state_blocked(bus):
 
 def test_remote_hmi_access(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_enable_remote_access(bus)
     step_verify_ivi_accessible(bus)
     step_remote_command_volume(bus)

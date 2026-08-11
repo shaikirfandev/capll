@@ -112,6 +112,9 @@ def step_auto_brightness_mode(bus):
 
 def test_hmi_touchscreen(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_power_on(bus)
     step_set_brightness(bus, BRIGHTNESS_FULL)
     step_screen_timeout_to_standby(bus)

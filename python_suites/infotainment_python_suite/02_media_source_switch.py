@@ -104,6 +104,9 @@ def step_verify_source_unchanged_after_invalid(bus):
 
 def test_media_source_switch(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     for src_byte, src_name in SOURCES:
         step_switch_source(bus, src_byte, src_name)
     step_invalid_source(bus)

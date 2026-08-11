@@ -110,6 +110,9 @@ def step_disable_auto_follow(bus):
 
 def test_ambient_lighting_control(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_set_rgb_color(bus, *COLOR_RED, ZONE_1, "Red")
     step_set_rgb_color(bus, *COLOR_GREEN, ZONE_2, "Green")
     step_set_rgb_color(bus, *COLOR_BLUE, ZONE_3, "Blue")

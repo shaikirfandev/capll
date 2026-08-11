@@ -86,6 +86,9 @@ def step_unmute_audio(bus):
 
 def test_audio_volume_control(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     for level in [0, 25, 50, 75, 100]:
         step_set_volume(bus, level)
     step_mute_audio(bus)

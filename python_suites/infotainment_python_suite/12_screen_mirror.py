@@ -108,6 +108,9 @@ def step_mirror_reconnect_stability(bus):
 
 def test_screen_mirror(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_enable_mirror_mode(bus)
     step_verify_projection_latency(bus)
     step_verify_projection_active(bus)

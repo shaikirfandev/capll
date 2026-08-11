@@ -111,6 +111,9 @@ def step_dnd_emergency_override(bus):
 
 def test_do_not_disturb(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_dnd_on(bus)
     step_call_ring_suppressed_during_dnd(bus)
     step_notification_suppressed_during_dnd(bus)

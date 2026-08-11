@@ -110,6 +110,9 @@ def step_all_normal_status(bus):
 
 def test_vehicle_status_display(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     for speed in [0, 50, 100, 130]:
         step_send_speed(bus, speed)
     for fuel in [100, 75, 50, 25, 10]:

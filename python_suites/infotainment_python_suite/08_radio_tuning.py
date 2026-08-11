@@ -101,6 +101,9 @@ def step_verify_source_active_after_scan(bus):
 
 def test_radio_tuning(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_set_fm_source(bus)
     step_scan_fm_presets(bus)
     step_switch_to_am(bus)

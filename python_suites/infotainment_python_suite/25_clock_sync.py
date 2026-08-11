@@ -113,6 +113,9 @@ def step_zero_timestamp(bus):
 
 def test_clock_sync(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     sent_ts = step_send_current_timestamp(bus)
     step_verify_timestamp_readback(bus, sent_ts)
     step_send_past_timestamp(bus)

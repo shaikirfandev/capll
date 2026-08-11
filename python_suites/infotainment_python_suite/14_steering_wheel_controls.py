@@ -88,6 +88,9 @@ def step_long_press_mode_button(bus):
 
 def test_steering_wheel_controls(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     for btn_byte, btn_name in SWC_BUTTONS:
         step_test_swc_button(bus, btn_byte, btn_name)
     step_rapid_press_test(bus)

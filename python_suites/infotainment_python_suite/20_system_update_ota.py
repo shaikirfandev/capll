@@ -111,6 +111,9 @@ def step_ota_rollback_to_idle(bus):
 
 def test_system_update_ota(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_ota_idle(bus)
     step_ota_downloading_progress(bus)
     step_ota_installing(bus)

@@ -96,6 +96,9 @@ def step_disable_auto_brightness(bus):
 
 def test_display_brightness(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     for level in [0, 64, 128, 192, 255]:
         step_set_brightness_level(bus, level)
     step_enable_auto_brightness(bus)

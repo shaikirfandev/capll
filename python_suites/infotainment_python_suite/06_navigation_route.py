@@ -103,6 +103,9 @@ def step_nav_post_arrived_idle(bus):
 
 def test_navigation_route(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_nav_idle(bus)
     step_nav_routing(bus, eta_min=45)
     step_nav_active_eta_decrement(bus)

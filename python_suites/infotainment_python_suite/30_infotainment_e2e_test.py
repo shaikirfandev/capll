@@ -173,6 +173,9 @@ def e2e_step_power_off(bus):
 
 def test_infotainment_e2e(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     e2e_step_power_on_and_boot(bus)
     e2e_step_volume_set(bus)
     e2e_step_source_bluetooth(bus)

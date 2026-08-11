@@ -110,6 +110,9 @@ def step_voice_session_end(bus):
 
 def test_voice_recognition(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_voice_button_press(bus)
     step_wake_word_detected(bus)
     step_send_nav_command(bus)

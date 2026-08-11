@@ -114,6 +114,9 @@ def step_disable_rse(bus):
 
 def test_rear_seat_entertainment(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_enable_rse_zone1(bus)
     step_enable_rse_zone2(bus)
     step_route_content_to_rear(bus)

@@ -109,6 +109,9 @@ def step_verify_mic_restored(bus):
 
 def test_privacy_mode(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_enable_privacy(bus)
     step_verify_navigation_disabled(bus)
     step_verify_mic_muted(bus)

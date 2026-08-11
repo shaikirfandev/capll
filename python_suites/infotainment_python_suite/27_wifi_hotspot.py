@@ -109,6 +109,9 @@ def step_wifi_disconnect(bus):
 
 def test_wifi_hotspot(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_wifi_off(bus)
     step_wifi_connecting(bus)
     step_wifi_signal_bars_3(bus)

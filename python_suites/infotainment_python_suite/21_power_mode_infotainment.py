@@ -115,6 +115,9 @@ def step_power_off_verification(bus):
 
 def test_power_mode_infotainment(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_ign_off_to_standby(bus)
     step_ign_on_boot_sequence(bus)
     step_accessory_mode_audio_only(bus)

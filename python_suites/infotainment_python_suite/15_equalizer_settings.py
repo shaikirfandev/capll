@@ -92,6 +92,9 @@ def step_revert_to_flat(bus):
 
 def test_equalizer_settings(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     for preset_byte, preset_name in [(EQ_FLAT, "Flat"), (EQ_BASS, "Bass"),
                                       (EQ_TREBLE, "Treble"), (EQ_CUSTOM, "Custom")]:
         step_set_eq_preset(bus, preset_byte, preset_name)

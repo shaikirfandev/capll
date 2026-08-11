@@ -111,6 +111,9 @@ def step_verify_fallback_source(bus):
 
 def test_carplay_session(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_set_source_carplay(bus)
     step_carplay_connect_latency(bus)
     step_verify_carplay_active(bus)

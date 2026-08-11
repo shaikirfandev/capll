@@ -116,6 +116,9 @@ def step_cold_boot_vs_warm_boot(bus):
 
 def test_head_unit_boot(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_power_off(bus)
     step_trigger_boot(bus)
     step_measure_boot_time(bus)

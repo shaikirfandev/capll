@@ -97,6 +97,9 @@ def step_reset_to_default(bus):
 
 def test_audio_fade_balance(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_set_fade(bus, FADE_FRONT, "Front100%")
     step_set_fade(bus, FADE_REAR,  "Rear100%")
     step_set_fade(bus, FADE_EQUAL, "50-50")

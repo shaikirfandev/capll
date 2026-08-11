@@ -105,6 +105,9 @@ def step_set_date_format(bus, fmt_byte, fmt_name):
 
 def test_language_settings(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     for lang_byte, lang_name in LANGUAGES:
         step_set_language(bus, lang_byte, lang_name)
     step_set_units_metric(bus)

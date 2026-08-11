@@ -119,6 +119,9 @@ def step_verify_source_fallback(bus):
 
 def test_android_auto_session(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_set_source_android_auto(bus)
     step_android_auto_connect(bus)
     step_verify_android_auto_active(bus)

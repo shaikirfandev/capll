@@ -109,6 +109,9 @@ def step_verify_call_duration_tracked(bus):
 
 def test_phone_call_handling(bus_session):
     bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
     step_incoming_ring(bus)
     step_answer_call(bus)
     step_hold_call(bus)
