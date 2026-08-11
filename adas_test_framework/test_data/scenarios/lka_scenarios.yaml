@@ -1,0 +1,19 @@
+scenarios:
+  - id: LKA_S001
+    name: centered_drive
+    lane_offset_m: 0.05
+    lateral_speed_mps: 0.0
+    vehicle_speed_kph: 80
+    expected_level: NONE
+  - id: LKA_S002
+    name: lane_edge_warning
+    lane_offset_m: 0.25
+    lateral_speed_mps: 0.05
+    vehicle_speed_kph: 80
+    expected_level: WARNING
+  - id: LKA_S003
+    name: active_departure
+    lane_offset_m: 0.35
+    lateral_speed_mps: 0.2
+    vehicle_speed_kph: 90
+    expected_level: ACTIVE

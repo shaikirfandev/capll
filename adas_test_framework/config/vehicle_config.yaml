@@ -1,0 +1,9 @@
+vehicle:
+  mass_kg: 1850
+  wheelbase_m: 2.85
+  max_brake_decel_mps2: 8.0
+  max_accel_mps2: 2.5
+  steering_ratio: 14.2
+  speed_limits_kph:
+    min_acc: 30
+    max_acc: 180

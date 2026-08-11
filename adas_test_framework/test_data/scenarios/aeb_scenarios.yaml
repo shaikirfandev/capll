@@ -1,0 +1,22 @@
+scenarios:
+  - id: AEB_S001
+    name: early_warning_vehicle
+    ego_speed_kph: 72
+    target_distance_m: 18
+    target_speed_kph: 46.8
+    target_type: VEHICLE
+    expected_level: WARNING
+  - id: AEB_S002
+    name: partial_brake_pedestrian
+    ego_speed_kph: 54
+    target_distance_m: 24
+    target_speed_kph: 0
+    target_type: PEDESTRIAN
+    expected_level: PARTIAL_BRAKE
+  - id: AEB_S003
+    name: far_target_ignore
+    ego_speed_kph: 90
+    target_distance_m: 180
+    target_speed_kph: 0
+    target_type: VEHICLE
+    expected_level: NONE

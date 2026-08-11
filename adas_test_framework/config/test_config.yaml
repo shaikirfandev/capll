@@ -1,0 +1,13 @@
+framework:
+  sample_time_s: 0.1
+  default_timeout_s: 1.0
+  report_format: html
+execution:
+  default_markers:
+    - regression
+  parallel_workers: auto
+  random_seed: 42
+thresholds:
+  acc_speed_tolerance_kph: 2.0
+  lka_departure_threshold_m: 0.3
+  aeb_full_brake_ttc_s: 1.2

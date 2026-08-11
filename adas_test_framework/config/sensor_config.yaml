@@ -1,0 +1,14 @@
+sensors:
+  camera:
+    timeout_s: 0.3
+    lane_quality_warning: 0.4
+  radar:
+    timeout_s: 0.2
+    range_m: 180
+  lidar:
+    timeout_s: 0.25
+    range_m: 120
+  fusion:
+    track_timeout_s: 0.5
+    process_noise: 0.1
+    measurement_noise: 0.5

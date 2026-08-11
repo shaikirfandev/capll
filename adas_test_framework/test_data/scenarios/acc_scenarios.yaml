@@ -1,0 +1,26 @@
+scenarios:
+  - id: ACC_S001
+    name: highway_cruise
+    ego_speed_kph: 120
+    set_speed_kph: 120
+    lead_vehicle: null
+    expected_state: ACTIVE
+    expected_accel: 0.0
+  - id: ACC_S002
+    name: follow_lead_vehicle
+    ego_speed_kph: 100
+    set_speed_kph: 120
+    lead_vehicle:
+      distance_m: 50
+      speed_kph: 80
+    time_gap_s: 1.5
+    expected_state: BRAKING
+  - id: ACC_S003
+    name: gentle_following
+    ego_speed_kph: 90
+    set_speed_kph: 100
+    lead_vehicle:
+      distance_m: 55
+      speed_kph: 92
+    time_gap_s: 1.6
+    expected_state: ACTIVE
