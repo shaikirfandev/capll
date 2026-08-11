@@ -78,5 +78,9 @@ bus = can.interface.Bus(channel='PCAN_USBBUS1', bustype='pcan', bitrate=500000)
 
 ## Running
 ```bash
-pytest infotainment_python_suite/ -v --html=ivi_report.html
+pytest python_suites/infotainment_python_suite/ -v --html=ivi_report.html
 ```
+
+`python_suites/infotainment_python_suite/pytest.ini` is configured with
+`python_files = *.py` so all numbered files (`01_...py` to `30_...py`) are
+collected by pytest.
