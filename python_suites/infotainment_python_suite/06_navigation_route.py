@@ -35,13 +35,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -108,19 +101,25 @@ def step_nav_post_arrived_idle(bus):
         check("Nav returned to Idle after arrival", resp.data[0] == NAV_IDLE)
 
 
-def test_navigation_route():
-    bus = get_bus()
-    try:
-        step_nav_idle(bus)
-        step_nav_routing(bus, eta_min=45)
-        step_nav_active_eta_decrement(bus)
-        step_nav_arrived(bus)
-        step_nav_post_arrived_idle(bus)
-    finally:
-        bus.shutdown()
+def test_navigation_route(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    step_nav_idle(bus)
+    step_nav_routing(bus, eta_min=45)
+    step_nav_active_eta_decrement(bus)
+    step_nav_arrived(bus)
+    step_nav_post_arrived_idle(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in navigation route test"
 
 
 if __name__ == "__main__":
-    test_navigation_route()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_navigation_route(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

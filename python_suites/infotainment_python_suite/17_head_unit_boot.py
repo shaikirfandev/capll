@@ -36,13 +36,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -121,19 +114,25 @@ def step_cold_boot_vs_warm_boot(bus):
     check(f"Warm boot time {warm_boot_time:.2f}s < {BOOT_TIME_LIMIT}s", warm_boot_time < BOOT_TIME_LIMIT)
 
 
-def test_head_unit_boot():
-    bus = get_bus()
-    try:
-        step_power_off(bus)
-        step_trigger_boot(bus)
-        step_measure_boot_time(bus)
-        step_verify_on_state(bus)
-        step_cold_boot_vs_warm_boot(bus)
-    finally:
-        bus.shutdown()
+def test_head_unit_boot(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    step_power_off(bus)
+    step_trigger_boot(bus)
+    step_measure_boot_time(bus)
+    step_verify_on_state(bus)
+    step_cold_boot_vs_warm_boot(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in head unit boot test"
 
 
 if __name__ == "__main__":
-    test_head_unit_boot()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_head_unit_boot(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

@@ -37,13 +37,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -116,20 +109,26 @@ def step_ota_rollback_to_idle(bus):
         check("OTA rolled back to Idle byte0==0x00", resp.data[0] == OTA_IDLE)
 
 
-def test_system_update_ota():
-    bus = get_bus()
-    try:
-        step_ota_idle(bus)
-        step_ota_downloading_progress(bus)
-        step_ota_installing(bus)
-        step_ota_complete(bus)
-        step_ota_inject_failure(bus)
-        step_ota_rollback_to_idle(bus)
-    finally:
-        bus.shutdown()
+def test_system_update_ota(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    step_ota_idle(bus)
+    step_ota_downloading_progress(bus)
+    step_ota_installing(bus)
+    step_ota_complete(bus)
+    step_ota_inject_failure(bus)
+    step_ota_rollback_to_idle(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in OTA system update test"
 
 
 if __name__ == "__main__":
-    test_system_update_ota()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_system_update_ota(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

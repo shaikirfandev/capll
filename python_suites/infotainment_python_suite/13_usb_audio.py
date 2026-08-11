@@ -37,13 +37,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -114,20 +107,26 @@ def step_verify_source_fallback(bus):
         check("FM fallback source byte0==0x00", resp.data[0] == SOURCE_FM)
 
 
-def test_usb_audio():
-    bus = get_bus()
-    try:
-        step_usb_connect(bus)
-        step_verify_media_active(bus)
-        step_track_skip_next(bus)
-        step_track_skip_prev(bus)
-        step_usb_disconnect(bus)
-        step_verify_source_fallback(bus)
-    finally:
-        bus.shutdown()
+def test_usb_audio(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    step_usb_connect(bus)
+    step_verify_media_active(bus)
+    step_track_skip_next(bus)
+    step_track_skip_prev(bus)
+    step_usb_disconnect(bus)
+    step_verify_source_fallback(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in USB audio test"
 
 
 if __name__ == "__main__":
-    test_usb_audio()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_usb_audio(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

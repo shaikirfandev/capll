@@ -60,13 +60,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -178,23 +171,29 @@ def e2e_step_power_off(bus):
         check("E2E: IVI shut down byte0==0x00", resp.data[0] == POWER_OFF)
 
 
-def test_infotainment_e2e():
-    bus = get_bus()
-    try:
-        e2e_step_power_on_and_boot(bus)
-        e2e_step_volume_set(bus)
-        e2e_step_source_bluetooth(bus)
-        e2e_step_nav_route(bus)
-        e2e_step_call_handle(bus)
-        e2e_step_ota_download(bus)
-        e2e_step_privacy_mode(bus)
-        e2e_step_power_off(bus)
-    finally:
-        bus.shutdown()
+def test_infotainment_e2e(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    e2e_step_power_on_and_boot(bus)
+    e2e_step_volume_set(bus)
+    e2e_step_source_bluetooth(bus)
+    e2e_step_nav_route(bus)
+    e2e_step_call_handle(bus)
+    e2e_step_ota_download(bus)
+    e2e_step_privacy_mode(bus)
+    e2e_step_power_off(bus)
     print(f"\n[E2E Summary] {pass_count} passed, {fail_count} failed")
     assert fail_count == 0, f"{fail_count} check(s) failed in E2E infotainment test"
 
 
 if __name__ == "__main__":
-    test_infotainment_e2e()
-    print(f"\nFinal Results: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_infotainment_e2e(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nFinal Results: {pass_count} passed, {fail_count} failed")

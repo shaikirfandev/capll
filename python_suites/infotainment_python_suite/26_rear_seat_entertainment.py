@@ -40,13 +40,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -119,20 +112,26 @@ def step_disable_rse(bus):
         check("RSE disabled byte1==0x00", resp.data[1] == RSE_ZONE_DISABLE)
 
 
-def test_rear_seat_entertainment():
-    bus = get_bus()
-    try:
-        step_enable_rse_zone1(bus)
-        step_enable_rse_zone2(bus)
-        step_route_content_to_rear(bus)
-        step_independent_volume_zone1(bus)
-        step_independent_volume_zone2(bus)
-        step_disable_rse(bus)
-    finally:
-        bus.shutdown()
+def test_rear_seat_entertainment(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    step_enable_rse_zone1(bus)
+    step_enable_rse_zone2(bus)
+    step_route_content_to_rear(bus)
+    step_independent_volume_zone1(bus)
+    step_independent_volume_zone2(bus)
+    step_disable_rse(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in rear seat entertainment test"
 
 
 if __name__ == "__main__":
-    test_rear_seat_entertainment()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_rear_seat_entertainment(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

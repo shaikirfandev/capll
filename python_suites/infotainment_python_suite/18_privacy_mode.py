@@ -37,13 +37,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -114,20 +107,26 @@ def step_verify_mic_restored(bus):
         check("Mic active byte2==0x01 after privacy off", resp.data[2] == 0x01)
 
 
-def test_privacy_mode():
-    bus = get_bus()
-    try:
-        step_enable_privacy(bus)
-        step_verify_navigation_disabled(bus)
-        step_verify_mic_muted(bus)
-        step_disable_privacy(bus)
-        step_verify_navigation_restored(bus)
-        step_verify_mic_restored(bus)
-    finally:
-        bus.shutdown()
+def test_privacy_mode(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    step_enable_privacy(bus)
+    step_verify_navigation_disabled(bus)
+    step_verify_mic_muted(bus)
+    step_disable_privacy(bus)
+    step_verify_navigation_restored(bus)
+    step_verify_mic_restored(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in privacy mode test"
 
 
 if __name__ == "__main__":
-    test_privacy_mode()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_privacy_mode(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

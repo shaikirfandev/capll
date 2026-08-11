@@ -36,13 +36,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -113,20 +106,26 @@ def step_recheck_ivi_state_blocked(bus):
         check("IVI state byte result defined", len(resp.data) >= 2)
 
 
-def test_remote_hmi_access():
-    bus = get_bus()
-    try:
-        step_enable_remote_access(bus)
-        step_verify_ivi_accessible(bus)
-        step_remote_command_volume(bus)
-        step_disable_remote_access(bus)
-        step_verify_access_blocked(bus)
-        step_recheck_ivi_state_blocked(bus)
-    finally:
-        bus.shutdown()
+def test_remote_hmi_access(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    step_enable_remote_access(bus)
+    step_verify_ivi_accessible(bus)
+    step_remote_command_volume(bus)
+    step_disable_remote_access(bus)
+    step_verify_access_blocked(bus)
+    step_recheck_ivi_state_blocked(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in remote HMI access test"
 
 
 if __name__ == "__main__":
-    test_remote_hmi_access()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_remote_hmi_access(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

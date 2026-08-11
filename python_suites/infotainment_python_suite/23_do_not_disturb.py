@@ -37,13 +37,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -116,20 +109,26 @@ def step_dnd_emergency_override(bus):
         check("Emergency bypasses DND result OK byte1==0x00", resp.data[1] == 0x00)
 
 
-def test_do_not_disturb():
-    bus = get_bus()
-    try:
-        step_dnd_on(bus)
-        step_call_ring_suppressed_during_dnd(bus)
-        step_notification_suppressed_during_dnd(bus)
-        step_dnd_off(bus)
-        step_call_rings_normally_after_dnd(bus)
-        step_dnd_emergency_override(bus)
-    finally:
-        bus.shutdown()
+def test_do_not_disturb(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    step_dnd_on(bus)
+    step_call_ring_suppressed_during_dnd(bus)
+    step_notification_suppressed_during_dnd(bus)
+    step_dnd_off(bus)
+    step_call_rings_normally_after_dnd(bus)
+    step_dnd_emergency_override(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in DND test"
 
 
 if __name__ == "__main__":
-    test_do_not_disturb()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_do_not_disturb(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

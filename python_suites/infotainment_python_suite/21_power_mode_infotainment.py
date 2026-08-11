@@ -40,13 +40,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -120,19 +113,25 @@ def step_power_off_verification(bus):
         check("Shutdown state byte0==0x00", resp.data[0] == POWER_OFF)
 
 
-def test_power_mode_infotainment():
-    bus = get_bus()
-    try:
-        step_ign_off_to_standby(bus)
-        step_ign_on_boot_sequence(bus)
-        step_accessory_mode_audio_only(bus)
-        step_full_on_with_navigation(bus)
-        step_power_off_verification(bus)
-    finally:
-        bus.shutdown()
+def test_power_mode_infotainment(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    step_ign_off_to_standby(bus)
+    step_ign_on_boot_sequence(bus)
+    step_accessory_mode_audio_only(bus)
+    step_full_on_with_navigation(bus)
+    step_power_off_verification(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in power mode test"
 
 
 if __name__ == "__main__":
-    test_power_mode_infotainment()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_power_mode_infotainment(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

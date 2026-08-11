@@ -30,13 +30,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -91,18 +84,24 @@ def step_unmute_audio(bus):
         check("Unmute state byte2=0 in response", resp.data[2] == 0x00)
 
 
-def test_audio_volume_control():
-    bus = get_bus()
-    try:
-        for level in [0, 25, 50, 75, 100]:
-            step_set_volume(bus, level)
-        step_mute_audio(bus)
-        step_unmute_audio(bus)
-    finally:
-        bus.shutdown()
+def test_audio_volume_control(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    for level in [0, 25, 50, 75, 100]:
+        step_set_volume(bus, level)
+    step_mute_audio(bus)
+    step_unmute_audio(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in audio volume control test"
 
 
 if __name__ == "__main__":
-    test_audio_volume_control()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_audio_volume_control(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

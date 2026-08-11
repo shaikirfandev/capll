@@ -42,13 +42,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -102,22 +95,28 @@ def step_reset_to_default(bus):
         check("Default balance centre byte3==0x64", resp.data[3] == BAL_CENTRE)
 
 
-def test_audio_fade_balance():
-    bus = get_bus()
-    try:
-        step_set_fade(bus, FADE_FRONT, "Front100%")
-        step_set_fade(bus, FADE_REAR,  "Rear100%")
-        step_set_fade(bus, FADE_EQUAL, "50-50")
-        step_set_balance(bus, BAL_LEFT,   "Left100%")
-        step_set_balance(bus, BAL_RIGHT,  "Right100%")
-        step_set_balance(bus, BAL_CENTRE, "Centre")
-        step_combined_fade_balance(bus)
-        step_reset_to_default(bus)
-    finally:
-        bus.shutdown()
+def test_audio_fade_balance(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    step_set_fade(bus, FADE_FRONT, "Front100%")
+    step_set_fade(bus, FADE_REAR,  "Rear100%")
+    step_set_fade(bus, FADE_EQUAL, "50-50")
+    step_set_balance(bus, BAL_LEFT,   "Left100%")
+    step_set_balance(bus, BAL_RIGHT,  "Right100%")
+    step_set_balance(bus, BAL_CENTRE, "Centre")
+    step_combined_fade_balance(bus)
+    step_reset_to_default(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in audio fade/balance test"
 
 
 if __name__ == "__main__":
-    test_audio_fade_balance()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_audio_fade_balance(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

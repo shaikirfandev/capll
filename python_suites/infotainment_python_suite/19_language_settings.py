@@ -50,13 +50,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -110,20 +103,26 @@ def step_set_date_format(bus, fmt_byte, fmt_name):
         check(f"Date format {fmt_name} byte2=={fmt_byte:#04x} echoed", resp.data[2] == fmt_byte)
 
 
-def test_language_settings():
-    bus = get_bus()
-    try:
-        for lang_byte, lang_name in LANGUAGES:
-            step_set_language(bus, lang_byte, lang_name)
-        step_set_units_metric(bus)
-        step_set_units_imperial(bus)
-        step_set_date_format(bus, DATE_FORMAT_DMY, "DD/MM/YYYY")
-        step_set_date_format(bus, DATE_FORMAT_MDY, "MM/DD/YYYY")
-    finally:
-        bus.shutdown()
+def test_language_settings(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    for lang_byte, lang_name in LANGUAGES:
+        step_set_language(bus, lang_byte, lang_name)
+    step_set_units_metric(bus)
+    step_set_units_imperial(bus)
+    step_set_date_format(bus, DATE_FORMAT_DMY, "DD/MM/YYYY")
+    step_set_date_format(bus, DATE_FORMAT_MDY, "MM/DD/YYYY")
     assert fail_count == 0, f"{fail_count} check(s) failed in language settings test"
 
 
 if __name__ == "__main__":
-    test_language_settings()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_language_settings(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

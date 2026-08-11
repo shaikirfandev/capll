@@ -10,12 +10,17 @@ BUSTYPE = 'pcan'
 BITRATE = 500_000
 
 
+def create_bus():
+    """Create CAN bus with PCAN primary and vcan0 fallback."""
+    try:
+        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
+    except Exception:
+        return can.interface.Bus(channel='vcan0', bustype='socketcan')
+
+
 @pytest.fixture(scope="session", autouse=True)
 def bus_session():
-    """Session-scoped CAN bus fixture. Falls back to vcan0 if PCAN unavailable."""
-    try:
-        bus = can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        bus = can.interface.Bus(channel='vcan0', bustype='socketcan')
+    """Session-scoped shared CAN bus fixture for infotainment tests."""
+    bus = create_bus()
     yield bus
     bus.shutdown()

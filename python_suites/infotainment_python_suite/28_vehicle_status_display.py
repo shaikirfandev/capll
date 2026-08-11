@@ -33,13 +33,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -115,22 +108,28 @@ def step_all_normal_status(bus):
         check("All-normal result OK byte1==0x00", resp.data[1] == 0x00)
 
 
-def test_vehicle_status_display():
-    bus = get_bus()
-    try:
-        for speed in [0, 50, 100, 130]:
-            step_send_speed(bus, speed)
-        for fuel in [100, 75, 50, 25, 10]:
-            step_send_fuel_level(bus, fuel)
-        step_send_engine_temp(bus, 90)
-        step_low_fuel_warning(bus)
-        step_overheat_warning(bus)
-        step_all_normal_status(bus)
-    finally:
-        bus.shutdown()
+def test_vehicle_status_display(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    for speed in [0, 50, 100, 130]:
+        step_send_speed(bus, speed)
+    for fuel in [100, 75, 50, 25, 10]:
+        step_send_fuel_level(bus, fuel)
+    step_send_engine_temp(bus, 90)
+    step_low_fuel_warning(bus)
+    step_overheat_warning(bus)
+    step_all_normal_status(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in vehicle status display test"
 
 
 if __name__ == "__main__":
-    test_vehicle_status_display()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_vehicle_status_display(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

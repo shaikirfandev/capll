@@ -36,13 +36,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -113,20 +106,26 @@ def step_mirror_reconnect_stability(bus):
         check("Mirror reconnect result OK", resp.data[1] == 0x00 or resp.data[1] == MIRROR_ON)
 
 
-def test_screen_mirror():
-    bus = get_bus()
-    try:
-        step_enable_mirror_mode(bus)
-        step_verify_projection_latency(bus)
-        step_verify_projection_active(bus)
-        step_disable_mirror_mode(bus)
-        step_verify_idle_state(bus)
-        step_mirror_reconnect_stability(bus)
-    finally:
-        bus.shutdown()
+def test_screen_mirror(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    step_enable_mirror_mode(bus)
+    step_verify_projection_latency(bus)
+    step_verify_projection_active(bus)
+    step_disable_mirror_mode(bus)
+    step_verify_idle_state(bus)
+    step_mirror_reconnect_stability(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in screen mirror test"
 
 
 if __name__ == "__main__":
-    test_screen_mirror()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_screen_mirror(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

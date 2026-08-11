@@ -40,13 +40,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -117,20 +110,26 @@ def step_auto_brightness_mode(bus):
         check("Auto mode flag byte2==0x01 in response", resp.data[2] == 0x01 or resp.data[1] == 0x01)
 
 
-def test_hmi_touchscreen():
-    bus = get_bus()
-    try:
-        step_power_on(bus)
-        step_set_brightness(bus, BRIGHTNESS_FULL)
-        step_screen_timeout_to_standby(bus)
-        step_wake_on_touch(bus)
-        step_brightness_restore(bus)
-        step_auto_brightness_mode(bus)
-    finally:
-        bus.shutdown()
+def test_hmi_touchscreen(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    step_power_on(bus)
+    step_set_brightness(bus, BRIGHTNESS_FULL)
+    step_screen_timeout_to_standby(bus)
+    step_wake_on_touch(bus)
+    step_brightness_restore(bus)
+    step_auto_brightness_mode(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in HMI touchscreen test"
 
 
 if __name__ == "__main__":
-    test_hmi_touchscreen()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_hmi_touchscreen(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

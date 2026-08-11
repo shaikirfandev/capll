@@ -49,13 +49,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -109,18 +102,24 @@ def step_verify_source_unchanged_after_invalid(bus):
         check("Restored source echoed correctly", resp.data[0] == SOURCE_ANDROID_AUTO)
 
 
-def test_media_source_switch():
-    bus = get_bus()
-    try:
-        for src_byte, src_name in SOURCES:
-            step_switch_source(bus, src_byte, src_name)
-        step_invalid_source(bus)
-        step_verify_source_unchanged_after_invalid(bus)
-    finally:
-        bus.shutdown()
+def test_media_source_switch(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    for src_byte, src_name in SOURCES:
+        step_switch_source(bus, src_byte, src_name)
+    step_invalid_source(bus)
+    step_verify_source_unchanged_after_invalid(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in media source switch test"
 
 
 if __name__ == "__main__":
-    test_media_source_switch()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_media_source_switch(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")

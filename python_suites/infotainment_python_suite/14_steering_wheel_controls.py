@@ -41,13 +41,6 @@ def check(name, condition):
         fail_count += 1
 
 
-def get_bus():
-    try:
-        return can.interface.Bus(channel=CHANNEL, bustype=BUSTYPE, bitrate=BITRATE)
-    except Exception:
-        return can.interface.Bus(channel='vcan0', bustype='socketcan')
-
-
 def send_msg(bus, arb_id, data):
     msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
     bus.send(msg)
@@ -93,18 +86,24 @@ def step_long_press_mode_button(bus):
         check("Mode long-press byte0==0x04", resp.data[0] == 0x04)
 
 
-def test_steering_wheel_controls():
-    bus = get_bus()
-    try:
-        for btn_byte, btn_name in SWC_BUTTONS:
-            step_test_swc_button(bus, btn_byte, btn_name)
-        step_rapid_press_test(bus)
-        step_long_press_mode_button(bus)
-    finally:
-        bus.shutdown()
+def test_steering_wheel_controls(bus_session):
+    bus = bus_session
+    global pass_count, fail_count
+    pass_count = 0
+    fail_count = 0
+    for btn_byte, btn_name in SWC_BUTTONS:
+        step_test_swc_button(bus, btn_byte, btn_name)
+    step_rapid_press_test(bus)
+    step_long_press_mode_button(bus)
     assert fail_count == 0, f"{fail_count} check(s) failed in steering wheel controls test"
 
 
 if __name__ == "__main__":
-    test_steering_wheel_controls()
-    print(f"\nResults: {pass_count} passed, {fail_count} failed")
+    from conftest import create_bus
+
+    bus = create_bus()
+    try:
+        test_steering_wheel_controls(bus)
+    finally:
+        bus.shutdown()
+        print(f"\nResults: {pass_count} passed, {fail_count} failed")
