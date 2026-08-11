@@ -82,5 +82,6 @@ pytest python_suites/infotainment_python_suite/ -v --html=ivi_report.html
 ```
 
 `python_suites/infotainment_python_suite/pytest.ini` is configured with
-`python_files = *.py` so all numbered files (`01_...py` to `30_...py`) are
-collected by pytest.
+`python_files = [0-9][0-9]_*.py` so two-digit numbered files
+(`01_...py`, `02_...py`, etc.) are collected by pytest without collecting
+non-test helpers.
