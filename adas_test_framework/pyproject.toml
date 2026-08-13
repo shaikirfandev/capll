@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "adas-test-framework"
+version = "1.0.0"
+description = "Production-grade ADAS pytest validation framework"
+requires-python = ">=3.10"
+dependencies = [
+    "pytest>=7.4",
+    "pytest-html>=4.1",
+    "pytest-cov>=4.1",
+    "pytest-xdist>=3.5",
+    "pyyaml>=6.0",
+    "numpy>=1.26",
+    "python-can>=4.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest-mock>=3.12",
+    "mypy>=1.8",
+    "ruff>=0.3",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,11 @@
+can:
+  channel: virtual
+  bitrate: 500000
+  dbc_signals:
+    acc_status: 0x120
+    aeb_status: 0x121
+    lka_status: 0x122
+    diagnostics: 0x700
+  uds:
+    request_id: 0x7E0
+    response_id: 0x7E8
