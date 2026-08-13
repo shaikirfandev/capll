@@ -93,11 +93,11 @@ Stakeholder Requirements
 | ID | System requirement | Engineering purpose |
 |---|---|---|
 | SYS-ACC-001 | The system shall process front radar, front camera, ego motion signals using synchronized timestamps and input-quality evaluation. | Data coherence |
-| SYS-ACC-002 | The system shall deliver maintain driver-selected speed and time gap to a lead vehicle while respecting safety, timing, and comfort constraints. | Core feature behavior |
+| SYS-ACC-002 | The system shall maintain driver-selected speed and time gap to a lead vehicle while respecting safety, timing, and comfort constraints. | Core feature behavior |
 | SYS-ACC-003 | The system shall monitor input freshness, range, plausibility, and communication health on all safety-relevant interfaces. | Fault detection |
 | SYS-ACC-004 | The system shall monitor output-path acknowledgement or feedback from powertrain torque and brake coordinator. | Closed-loop supervision |
 | SYS-ACC-005 | The system shall inform cluster, chime, steering-wheel switches about state changes, limitations, and fault conditions within allocated latency. | HMI timeliness |
-| SYS-ACC-006 | The system shall inhibit activation or transition to degraded mode when fails to decelerate for a slower or cut-in lead vehicle cannot be mitigated safely. | Activation gating |
+| SYS-ACC-006 | The system shall inhibit activation or transition to degraded mode when the condition "failure to decelerate for a slower or cut-in lead vehicle" cannot be mitigated safely. | Activation gating |
 | SYS-ACC-007 | The system shall provide platform diagnostics, event logging, and freeze-frame support for alignment, blockage, timeout, actuator-denied diagnosis. | Serviceability |
 | SYS-ACC-008 | The system shall support secure configuration, software identity, and protected calibration where relevant. | Configuration trust |
 | SYS-ACC-009 | The system shall maintain deterministic execution and data-flow behavior under worst-case normal load. | Real-time behavior |
@@ -307,11 +307,11 @@ Stakeholder Requirements
 | ID | System requirement | Engineering purpose |
 |---|---|---|
 | SYS-AEB-001 | The system shall process front radar, front camera, ego motion and friction estimate using synchronized timestamps and input-quality evaluation. | Data coherence |
-| SYS-AEB-002 | The system shall deliver warn and autonomously brake for imminent frontal collisions while respecting safety, timing, and comfort constraints. | Core feature behavior |
+| SYS-AEB-002 | The system shall warn and autonomously brake for imminent frontal collisions while respecting safety, timing, and comfort constraints. | Core feature behavior |
 | SYS-AEB-003 | The system shall monitor input freshness, range, plausibility, and communication health on all safety-relevant interfaces. | Fault detection |
 | SYS-AEB-004 | The system shall monitor output-path acknowledgement or feedback from brake system with ESC/ABS coordination. | Closed-loop supervision |
 | SYS-AEB-005 | The system shall inform cluster, chime, warning indicators about state changes, limitations, and fault conditions within allocated latency. | HMI timeliness |
-| SYS-AEB-006 | The system shall inhibit activation or transition to degraded mode when fails to trigger braking for an imminent frontal collision cannot be mitigated safely. | Activation gating |
+| SYS-AEB-006 | The system shall inhibit activation or transition to degraded mode when the condition "failure to trigger braking for an imminent frontal collision" cannot be mitigated safely. | Activation gating |
 | SYS-AEB-007 | The system shall provide platform diagnostics, event logging, and freeze-frame support for object confidence, brake-path acknowledgement, sensor blockage, false-trigger investigation. | Serviceability |
 | SYS-AEB-008 | The system shall support secure configuration, software identity, and protected calibration where relevant. | Configuration trust |
 | SYS-AEB-009 | The system shall maintain deterministic execution and data-flow behavior under worst-case normal load. | Real-time behavior |
@@ -521,11 +521,11 @@ Stakeholder Requirements
 | ID | System requirement | Engineering purpose |
 |---|---|---|
 | SYS-LKA-001 | The system shall process front camera lane model, steering angle, yaw rate, wheel speeds using synchronized timestamps and input-quality evaluation. | Data coherence |
-| SYS-LKA-002 | The system shall deliver apply corrective steering support to keep the vehicle in lane while respecting safety, timing, and comfort constraints. | Core feature behavior |
+| SYS-LKA-002 | The system shall apply corrective steering support to keep the vehicle in lane while respecting safety, timing, and comfort constraints. | Core feature behavior |
 | SYS-LKA-003 | The system shall monitor input freshness, range, plausibility, and communication health on all safety-relevant interfaces. | Fault detection |
 | SYS-LKA-004 | The system shall monitor output-path acknowledgement or feedback from electric power steering. | Closed-loop supervision |
 | SYS-LKA-005 | The system shall inform cluster status icon, limitation message, warning tone about state changes, limitations, and fault conditions within allocated latency. | HMI timeliness |
-| SYS-LKA-006 | The system shall inhibit activation or transition to degraded mode when fails to provide corrective support during unintended lane departure cannot be mitigated safely. | Activation gating |
+| SYS-LKA-006 | The system shall inhibit activation or transition to degraded mode when the condition "failure to provide corrective support during unintended lane departure" cannot be mitigated safely. | Activation gating |
 | SYS-LKA-007 | The system shall provide platform diagnostics, event logging, and freeze-frame support for camera alignment, lane confidence, steering feedback, torque monitoring. | Serviceability |
 | SYS-LKA-008 | The system shall support secure configuration, software identity, and protected calibration where relevant. | Configuration trust |
 | SYS-LKA-009 | The system shall maintain deterministic execution and data-flow behavior under worst-case normal load. | Real-time behavior |
@@ -735,7 +735,7 @@ Stakeholder Requirements
 | ID | System requirement | Engineering purpose |
 |---|---|---|
 | SYS-ADC-001 | The system shall process multiple cameras, radars, chassis signals, optional lidar using synchronized timestamps and input-quality evaluation. | Data coherence |
-| SYS-ADC-002 | The system shall deliver host multiple ADAS applications with shared services and isolation while respecting safety, timing, and comfort constraints. | Core feature behavior |
+| SYS-ADC-002 | The system shall host multiple ADAS applications with shared services and isolation while respecting safety, timing, and comfort constraints. | Core feature behavior |
 | SYS-ADC-003 | The system shall monitor input freshness, range, plausibility, and communication health on all safety-relevant interfaces. | Fault detection |
 | SYS-ADC-004 | The system shall monitor output-path acknowledgement or feedback from hosted feature outputs toward braking, steering, and HMI paths. | Closed-loop supervision |
 | SYS-ADC-005 | The system shall inform domain-level status propagated to cluster and service tools about state changes, limitations, and fault conditions within allocated latency. | HMI timeliness |
@@ -949,7 +949,7 @@ Stakeholder Requirements
 | ID | System requirement | Engineering purpose |
 |---|---|---|
 | SYS-TCU-001 | The system shall process modem state, GNSS, vehicle power state, gateway data using synchronized timestamps and input-quality evaluation. | Data coherence |
-| SYS-TCU-002 | The system shall deliver connect the vehicle securely to backend, diagnostics, and update services while respecting safety, timing, and comfort constraints. | Core feature behavior |
+| SYS-TCU-002 | The system shall connect the vehicle securely to backend, diagnostics, and update services while respecting safety, timing, and comfort constraints. | Core feature behavior |
 | SYS-TCU-003 | The system shall monitor input freshness, range, plausibility, and communication health on all safety-relevant interfaces. | Fault detection |
 | SYS-TCU-004 | The system shall monitor output-path acknowledgement or feedback from remote session permissions, wake control, data transfer channels. | Closed-loop supervision |
 | SYS-TCU-005 | The system shall inform connected-service status and limited alerts about state changes, limitations, and fault conditions within allocated latency. | HMI timeliness |
@@ -1163,11 +1163,11 @@ Stakeholder Requirements
 | ID | System requirement | Engineering purpose |
 |---|---|---|
 | SYS-ECALL-001 | The system shall process crash trigger, GNSS, modem status, backup battery, SOS switch using synchronized timestamps and input-quality evaluation. | Data coherence |
-| SYS-ECALL-002 | The system shall deliver place an emergency call and transmit minimum data after a qualifying crash or SOS trigger while respecting safety, timing, and comfort constraints. | Core feature behavior |
+| SYS-ECALL-002 | The system shall place an emergency call and transmit minimum data after a qualifying crash or SOS trigger while respecting safety, timing, and comfort constraints. | Core feature behavior |
 | SYS-ECALL-003 | The system shall monitor input freshness, range, plausibility, and communication health on all safety-relevant interfaces. | Fault detection |
 | SYS-ECALL-004 | The system shall monitor output-path acknowledgement or feedback from cellular emergency session and cabin audio routing. | Closed-loop supervision |
 | SYS-ECALL-005 | The system shall inform SOS lamp, call status, fault status about state changes, limitations, and fault conditions within allocated latency. | HMI timeliness |
-| SYS-ECALL-006 | The system shall inhibit activation or transition to degraded mode when fails to place emergency call after a qualifying crash cannot be mitigated safely. | Activation gating |
+| SYS-ECALL-006 | The system shall inhibit activation or transition to degraded mode when the condition "failure to place emergency call after a qualifying crash" cannot be mitigated safely. | Activation gating |
 | SYS-ECALL-007 | The system shall provide platform diagnostics, event logging, and freeze-frame support for backup battery, audio path, GNSS, modem, switch diagnosis. | Serviceability |
 | SYS-ECALL-008 | The system shall support secure configuration, software identity, and protected calibration where relevant. | Configuration trust |
 | SYS-ECALL-009 | The system shall maintain deterministic execution and data-flow behavior under worst-case normal load. | Real-time behavior |
@@ -1377,7 +1377,7 @@ Stakeholder Requirements
 | ID | System requirement | Engineering purpose |
 |---|---|---|
 | SYS-OTA-001 | The system shall process vehicle preconditions, storage health, package signatures, ECU health status using synchronized timestamps and input-quality evaluation. | Data coherence |
-| SYS-OTA-002 | The system shall deliver securely download, stage, validate, activate, and roll back software packages while respecting safety, timing, and comfort constraints. | Core feature behavior |
+| SYS-OTA-002 | The system shall securely download, stage, validate, activate, and roll back software packages while respecting safety, timing, and comfort constraints. | Core feature behavior |
 | SYS-OTA-003 | The system shall monitor input freshness, range, plausibility, and communication health on all safety-relevant interfaces. | Fault detection |
 | SYS-OTA-004 | The system shall monitor output-path acknowledgement or feedback from package staging, ECU flashing, rollback, user notifications. | Closed-loop supervision |
 | SYS-OTA-005 | The system shall inform campaign status, consent, progress, result messaging about state changes, limitations, and fault conditions within allocated latency. | HMI timeliness |
@@ -1591,11 +1591,11 @@ Stakeholder Requirements
 | ID | System requirement | Engineering purpose |
 |---|---|---|
 | SYS-CLUSTER-001 | The system shall process vehicle status messages, warnings, ADAS states, ambient light using synchronized timestamps and input-quality evaluation. | Data coherence |
-| SYS-CLUSTER-002 | The system shall deliver display accurate, prioritized vehicle status, telltales, and ADAS information while respecting safety, timing, and comfort constraints. | Core feature behavior |
+| SYS-CLUSTER-002 | The system shall display accurate, prioritized vehicle status, telltales, and ADAS information while respecting safety, timing, and comfort constraints. | Core feature behavior |
 | SYS-CLUSTER-003 | The system shall monitor input freshness, range, plausibility, and communication health on all safety-relevant interfaces. | Fault detection |
 | SYS-CLUSTER-004 | The system shall monitor output-path acknowledgement or feedback from display panel, telltale rendering, backlight, chime coordination. | Closed-loop supervision |
 | SYS-CLUSTER-005 | The system shall inform speedometer, telltales, warnings, menus, ADAS graphics about state changes, limitations, and fault conditions within allocated latency. | HMI timeliness |
-| SYS-CLUSTER-006 | The system shall inhibit activation or transition to degraded mode when fails to display critical warning or accurate speed cannot be mitigated safely. | Activation gating |
+| SYS-CLUSTER-006 | The system shall inhibit activation or transition to degraded mode when the condition "failure to display critical warning or accurate speed" cannot be mitigated safely. | Activation gating |
 | SYS-CLUSTER-007 | The system shall provide platform diagnostics, event logging, and freeze-frame support for display pipeline, pixel test, reset, configuration diagnosis. | Serviceability |
 | SYS-CLUSTER-008 | The system shall support secure configuration, software identity, and protected calibration where relevant. | Configuration trust |
 | SYS-CLUSTER-009 | The system shall maintain deterministic execution and data-flow behavior under worst-case normal load. | Real-time behavior |
@@ -1805,7 +1805,7 @@ Stakeholder Requirements
 | ID | System requirement | Engineering purpose |
 |---|---|---|
 | SYS-GATEWAY-001 | The system shall process network load, frame health, policy state, vehicle state using synchronized timestamps and input-quality evaluation. | Data coherence |
-| SYS-GATEWAY-002 | The system shall deliver route, filter, secure, and diagnose traffic between vehicle domains and external services while respecting safety, timing, and comfort constraints. | Core feature behavior |
+| SYS-GATEWAY-002 | The system shall route, filter, secure, and diagnose traffic between vehicle domains and external services while respecting safety, timing, and comfort constraints. | Core feature behavior |
 | SYS-GATEWAY-003 | The system shall monitor input freshness, range, plausibility, and communication health on all safety-relevant interfaces. | Fault detection |
 | SYS-GATEWAY-004 | The system shall monitor output-path acknowledgement or feedback from message routing, rate limiting, domain isolation, secure diagnostics. | Closed-loop supervision |
 | SYS-GATEWAY-005 | The system shall inform mostly service-facing; limited driver-facing if required about state changes, limitations, and fault conditions within allocated latency. | HMI timeliness |
@@ -2019,7 +2019,7 @@ Stakeholder Requirements
 | ID | System requirement | Engineering purpose |
 |---|---|---|
 | SYS-ZONAL-001 | The system shall process distributed zone I/O, backbone health, power-state coordination, service maps using synchronized timestamps and input-quality evaluation. | Data coherence |
-| SYS-ZONAL-002 | The system shall deliver organize vehicle electronics by physical zones with backbone networking and central compute while respecting safety, timing, and comfort constraints. | Core feature behavior |
+| SYS-ZONAL-002 | The system shall organize vehicle electronics by physical zones with backbone networking and central compute while respecting safety, timing, and comfort constraints. | Core feature behavior |
 | SYS-ZONAL-003 | The system shall monitor input freshness, range, plausibility, and communication health on all safety-relevant interfaces. | Fault detection |
 | SYS-ZONAL-004 | The system shall monitor output-path acknowledgement or feedback from local zone outputs, power switching, service abstractions, backbone communication. | Closed-loop supervision |
 | SYS-ZONAL-005 | The system shall inform indirect through hosted vehicle functions about state changes, limitations, and fault conditions within allocated latency. | HMI timeliness |
@@ -2888,7 +2888,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 9. Update/recovery behavior validated
 10. Warranty/field feedback path prepared
 
-## Appendix D — Adaptive Cruise Control micro-lessons
+## Appendix D.1 — Adaptive Cruise Control micro-lessons
 
 - ACC-ML-01: Start from stakeholder scenarios before debating implementation.
 - ACC-ML-02: Write operating-domain assumptions explicitly.
@@ -2911,7 +2911,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - ACC-ML-19: A good HARA depends on realistic situations, not generic fear statements.
 - ACC-ML-20: Change control is part of engineering quality, not only project administration.
 
-## Appendix D — Automatic Emergency Braking micro-lessons
+## Appendix D.2 — Automatic Emergency Braking micro-lessons
 
 - AEB-ML-01: Start from stakeholder scenarios before debating implementation.
 - AEB-ML-02: Write operating-domain assumptions explicitly.
@@ -2934,7 +2934,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - AEB-ML-19: A good HARA depends on realistic situations, not generic fear statements.
 - AEB-ML-20: Change control is part of engineering quality, not only project administration.
 
-## Appendix D — Lane Keeping Assist micro-lessons
+## Appendix D.3 — Lane Keeping Assist micro-lessons
 
 - LKA-ML-01: Start from stakeholder scenarios before debating implementation.
 - LKA-ML-02: Write operating-domain assumptions explicitly.
@@ -2957,7 +2957,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - LKA-ML-19: A good HARA depends on realistic situations, not generic fear statements.
 - LKA-ML-20: Change control is part of engineering quality, not only project administration.
 
-## Appendix D — ADAS Domain Controller micro-lessons
+## Appendix D.4 — ADAS Domain Controller micro-lessons
 
 - ADC-ML-01: Start from stakeholder scenarios before debating implementation.
 - ADC-ML-02: Write operating-domain assumptions explicitly.
@@ -2980,7 +2980,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - ADC-ML-19: A good HARA depends on realistic situations, not generic fear statements.
 - ADC-ML-20: Change control is part of engineering quality, not only project administration.
 
-## Appendix D — Telematics Control Unit micro-lessons
+## Appendix D.5 — Telematics Control Unit micro-lessons
 
 - TCU-ML-01: Start from stakeholder scenarios before debating implementation.
 - TCU-ML-02: Write operating-domain assumptions explicitly.
@@ -3003,7 +3003,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - TCU-ML-19: A good HARA depends on realistic situations, not generic fear statements.
 - TCU-ML-20: Change control is part of engineering quality, not only project administration.
 
-## Appendix D — eCall System micro-lessons
+## Appendix D.6 — eCall System micro-lessons
 
 - ECALL-ML-01: Start from stakeholder scenarios before debating implementation.
 - ECALL-ML-02: Write operating-domain assumptions explicitly.
@@ -3026,7 +3026,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - ECALL-ML-19: A good HARA depends on realistic situations, not generic fear statements.
 - ECALL-ML-20: Change control is part of engineering quality, not only project administration.
 
-## Appendix D — Over-the-Air Update System micro-lessons
+## Appendix D.7 — Over-the-Air Update System micro-lessons
 
 - OTA-ML-01: Start from stakeholder scenarios before debating implementation.
 - OTA-ML-02: Write operating-domain assumptions explicitly.
@@ -3049,7 +3049,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - OTA-ML-19: A good HARA depends on realistic situations, not generic fear statements.
 - OTA-ML-20: Change control is part of engineering quality, not only project administration.
 
-## Appendix D — Digital Instrument Cluster micro-lessons
+## Appendix D.8 — Digital Instrument Cluster micro-lessons
 
 - CLUSTER-ML-01: Start from stakeholder scenarios before debating implementation.
 - CLUSTER-ML-02: Write operating-domain assumptions explicitly.
@@ -3072,7 +3072,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - CLUSTER-ML-19: A good HARA depends on realistic situations, not generic fear statements.
 - CLUSTER-ML-20: Change control is part of engineering quality, not only project administration.
 
-## Appendix D — Vehicle Gateway micro-lessons
+## Appendix D.9 — Vehicle Gateway micro-lessons
 
 - GATEWAY-ML-01: Start from stakeholder scenarios before debating implementation.
 - GATEWAY-ML-02: Write operating-domain assumptions explicitly.
@@ -3095,7 +3095,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - GATEWAY-ML-19: A good HARA depends on realistic situations, not generic fear statements.
 - GATEWAY-ML-20: Change control is part of engineering quality, not only project administration.
 
-## Appendix D — Zonal Architecture micro-lessons
+## Appendix D.10 — Zonal Architecture micro-lessons
 
 - ZONAL-ML-01: Start from stakeholder scenarios before debating implementation.
 - ZONAL-ML-02: Write operating-domain assumptions explicitly.
@@ -3118,7 +3118,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - ZONAL-ML-19: A good HARA depends on realistic situations, not generic fear statements.
 - ZONAL-ML-20: Change control is part of engineering quality, not only project administration.
 
-## Appendix E — Adaptive Cruise Control self-study prompts
+## Appendix E.1 — Adaptive Cruise Control self-study prompts
 
 1. How would you refine the ODD for Adaptive Cruise Control?
 2. Which interface for Adaptive Cruise Control is most likely to cause integration defects and why?
@@ -3131,7 +3131,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 9. Which validation scenario would best expose customer dissatisfaction with Adaptive Cruise Control?
 10. What would a strong traceability dashboard for Adaptive Cruise Control show?
 
-## Appendix E — Automatic Emergency Braking self-study prompts
+## Appendix E.2 — Automatic Emergency Braking self-study prompts
 
 1. How would you refine the ODD for Automatic Emergency Braking?
 2. Which interface for Automatic Emergency Braking is most likely to cause integration defects and why?
@@ -3144,7 +3144,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 9. Which validation scenario would best expose customer dissatisfaction with Automatic Emergency Braking?
 10. What would a strong traceability dashboard for Automatic Emergency Braking show?
 
-## Appendix E — Lane Keeping Assist self-study prompts
+## Appendix E.3 — Lane Keeping Assist self-study prompts
 
 1. How would you refine the ODD for Lane Keeping Assist?
 2. Which interface for Lane Keeping Assist is most likely to cause integration defects and why?
@@ -3157,7 +3157,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 9. Which validation scenario would best expose customer dissatisfaction with Lane Keeping Assist?
 10. What would a strong traceability dashboard for Lane Keeping Assist show?
 
-## Appendix E — ADAS Domain Controller self-study prompts
+## Appendix E.4 — ADAS Domain Controller self-study prompts
 
 1. How would you refine the ODD for ADAS Domain Controller?
 2. Which interface for ADAS Domain Controller is most likely to cause integration defects and why?
@@ -3170,7 +3170,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 9. Which validation scenario would best expose customer dissatisfaction with ADAS Domain Controller?
 10. What would a strong traceability dashboard for ADAS Domain Controller show?
 
-## Appendix E — Telematics Control Unit self-study prompts
+## Appendix E.5 — Telematics Control Unit self-study prompts
 
 1. How would you refine the ODD for Telematics Control Unit?
 2. Which interface for Telematics Control Unit is most likely to cause integration defects and why?
@@ -3183,7 +3183,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 9. Which validation scenario would best expose customer dissatisfaction with Telematics Control Unit?
 10. What would a strong traceability dashboard for Telematics Control Unit show?
 
-## Appendix E — eCall System self-study prompts
+## Appendix E.6 — eCall System self-study prompts
 
 1. How would you refine the ODD for eCall System?
 2. Which interface for eCall System is most likely to cause integration defects and why?
@@ -3196,7 +3196,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 9. Which validation scenario would best expose customer dissatisfaction with eCall System?
 10. What would a strong traceability dashboard for eCall System show?
 
-## Appendix E — Over-the-Air Update System self-study prompts
+## Appendix E.7 — Over-the-Air Update System self-study prompts
 
 1. How would you refine the ODD for Over-the-Air Update System?
 2. Which interface for Over-the-Air Update System is most likely to cause integration defects and why?
@@ -3209,7 +3209,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 9. Which validation scenario would best expose customer dissatisfaction with Over-the-Air Update System?
 10. What would a strong traceability dashboard for Over-the-Air Update System show?
 
-## Appendix E — Digital Instrument Cluster self-study prompts
+## Appendix E.8 — Digital Instrument Cluster self-study prompts
 
 1. How would you refine the ODD for Digital Instrument Cluster?
 2. Which interface for Digital Instrument Cluster is most likely to cause integration defects and why?
@@ -3222,7 +3222,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 9. Which validation scenario would best expose customer dissatisfaction with Digital Instrument Cluster?
 10. What would a strong traceability dashboard for Digital Instrument Cluster show?
 
-## Appendix E — Vehicle Gateway self-study prompts
+## Appendix E.9 — Vehicle Gateway self-study prompts
 
 1. How would you refine the ODD for Vehicle Gateway?
 2. Which interface for Vehicle Gateway is most likely to cause integration defects and why?
@@ -3235,7 +3235,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 9. Which validation scenario would best expose customer dissatisfaction with Vehicle Gateway?
 10. What would a strong traceability dashboard for Vehicle Gateway show?
 
-## Appendix E — Zonal Architecture self-study prompts
+## Appendix E.10 — Zonal Architecture self-study prompts
 
 1. How would you refine the ODD for Zonal Architecture?
 2. Which interface for Zonal Architecture is most likely to cause integration defects and why?
@@ -3248,7 +3248,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 9. Which validation scenario would best expose customer dissatisfaction with Zonal Architecture?
 10. What would a strong traceability dashboard for Zonal Architecture show?
 
-## Appendix F — Adaptive Cruise Control review questions
+## Appendix F.1 — Adaptive Cruise Control review questions
 
 1. (ACC) What is the clearest stakeholder value statement for this item?
 2. (ACC) Which requirement should define the operating domain?
@@ -3276,7 +3276,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 24. (ACC) Which release artifact is most likely to be incomplete in a rushed program?
 25. (ACC) What would you ask the OEM before freezing the baseline?
 
-## Appendix F — Automatic Emergency Braking review questions
+## Appendix F.2 — Automatic Emergency Braking review questions
 
 1. (AEB) What is the clearest stakeholder value statement for this item?
 2. (AEB) Which requirement should define the operating domain?
@@ -3304,7 +3304,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 24. (AEB) Which release artifact is most likely to be incomplete in a rushed program?
 25. (AEB) What would you ask the OEM before freezing the baseline?
 
-## Appendix F — Lane Keeping Assist review questions
+## Appendix F.3 — Lane Keeping Assist review questions
 
 1. (LKA) What is the clearest stakeholder value statement for this item?
 2. (LKA) Which requirement should define the operating domain?
@@ -3332,7 +3332,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 24. (LKA) Which release artifact is most likely to be incomplete in a rushed program?
 25. (LKA) What would you ask the OEM before freezing the baseline?
 
-## Appendix F — ADAS Domain Controller review questions
+## Appendix F.4 — ADAS Domain Controller review questions
 
 1. (ADC) What is the clearest stakeholder value statement for this item?
 2. (ADC) Which requirement should define the operating domain?
@@ -3360,7 +3360,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 24. (ADC) Which release artifact is most likely to be incomplete in a rushed program?
 25. (ADC) What would you ask the OEM before freezing the baseline?
 
-## Appendix F — Telematics Control Unit review questions
+## Appendix F.5 — Telematics Control Unit review questions
 
 1. (TCU) What is the clearest stakeholder value statement for this item?
 2. (TCU) Which requirement should define the operating domain?
@@ -3388,7 +3388,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 24. (TCU) Which release artifact is most likely to be incomplete in a rushed program?
 25. (TCU) What would you ask the OEM before freezing the baseline?
 
-## Appendix F — eCall System review questions
+## Appendix F.6 — eCall System review questions
 
 1. (ECALL) What is the clearest stakeholder value statement for this item?
 2. (ECALL) Which requirement should define the operating domain?
@@ -3416,7 +3416,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 24. (ECALL) Which release artifact is most likely to be incomplete in a rushed program?
 25. (ECALL) What would you ask the OEM before freezing the baseline?
 
-## Appendix F — Over-the-Air Update System review questions
+## Appendix F.7 — Over-the-Air Update System review questions
 
 1. (OTA) What is the clearest stakeholder value statement for this item?
 2. (OTA) Which requirement should define the operating domain?
@@ -3444,7 +3444,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 24. (OTA) Which release artifact is most likely to be incomplete in a rushed program?
 25. (OTA) What would you ask the OEM before freezing the baseline?
 
-## Appendix F — Digital Instrument Cluster review questions
+## Appendix F.8 — Digital Instrument Cluster review questions
 
 1. (CLUSTER) What is the clearest stakeholder value statement for this item?
 2. (CLUSTER) Which requirement should define the operating domain?
@@ -3472,7 +3472,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 24. (CLUSTER) Which release artifact is most likely to be incomplete in a rushed program?
 25. (CLUSTER) What would you ask the OEM before freezing the baseline?
 
-## Appendix F — Vehicle Gateway review questions
+## Appendix F.9 — Vehicle Gateway review questions
 
 1. (GATEWAY) What is the clearest stakeholder value statement for this item?
 2. (GATEWAY) Which requirement should define the operating domain?
@@ -3500,7 +3500,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 24. (GATEWAY) Which release artifact is most likely to be incomplete in a rushed program?
 25. (GATEWAY) What would you ask the OEM before freezing the baseline?
 
-## Appendix F — Zonal Architecture review questions
+## Appendix F.10 — Zonal Architecture review questions
 
 1. (ZONAL) What is the clearest stakeholder value statement for this item?
 2. (ZONAL) Which requirement should define the operating domain?
@@ -3528,7 +3528,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 24. (ZONAL) Which release artifact is most likely to be incomplete in a rushed program?
 25. (ZONAL) What would you ask the OEM before freezing the baseline?
 
-## Appendix G — Adaptive Cruise Control evidence checklist
+## Appendix G.1 — Adaptive Cruise Control evidence checklist
 
 - (ACC-EV-01) Stakeholder requirements reviewed and approved
 - (ACC-EV-02) Vehicle requirements baselined
@@ -3551,7 +3551,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (ACC-EV-19) Open issues dispositioned
 - (ACC-EV-20) Release notes and baseline identifiers prepared
 
-## Appendix G — Automatic Emergency Braking evidence checklist
+## Appendix G.2 — Automatic Emergency Braking evidence checklist
 
 - (AEB-EV-01) Stakeholder requirements reviewed and approved
 - (AEB-EV-02) Vehicle requirements baselined
@@ -3574,7 +3574,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (AEB-EV-19) Open issues dispositioned
 - (AEB-EV-20) Release notes and baseline identifiers prepared
 
-## Appendix G — Lane Keeping Assist evidence checklist
+## Appendix G.3 — Lane Keeping Assist evidence checklist
 
 - (LKA-EV-01) Stakeholder requirements reviewed and approved
 - (LKA-EV-02) Vehicle requirements baselined
@@ -3597,7 +3597,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (LKA-EV-19) Open issues dispositioned
 - (LKA-EV-20) Release notes and baseline identifiers prepared
 
-## Appendix G — ADAS Domain Controller evidence checklist
+## Appendix G.4 — ADAS Domain Controller evidence checklist
 
 - (ADC-EV-01) Stakeholder requirements reviewed and approved
 - (ADC-EV-02) Vehicle requirements baselined
@@ -3620,7 +3620,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (ADC-EV-19) Open issues dispositioned
 - (ADC-EV-20) Release notes and baseline identifiers prepared
 
-## Appendix G — Telematics Control Unit evidence checklist
+## Appendix G.5 — Telematics Control Unit evidence checklist
 
 - (TCU-EV-01) Stakeholder requirements reviewed and approved
 - (TCU-EV-02) Vehicle requirements baselined
@@ -3643,7 +3643,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (TCU-EV-19) Open issues dispositioned
 - (TCU-EV-20) Release notes and baseline identifiers prepared
 
-## Appendix G — eCall System evidence checklist
+## Appendix G.6 — eCall System evidence checklist
 
 - (ECALL-EV-01) Stakeholder requirements reviewed and approved
 - (ECALL-EV-02) Vehicle requirements baselined
@@ -3666,7 +3666,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (ECALL-EV-19) Open issues dispositioned
 - (ECALL-EV-20) Release notes and baseline identifiers prepared
 
-## Appendix G — Over-the-Air Update System evidence checklist
+## Appendix G.7 — Over-the-Air Update System evidence checklist
 
 - (OTA-EV-01) Stakeholder requirements reviewed and approved
 - (OTA-EV-02) Vehicle requirements baselined
@@ -3689,7 +3689,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (OTA-EV-19) Open issues dispositioned
 - (OTA-EV-20) Release notes and baseline identifiers prepared
 
-## Appendix G — Digital Instrument Cluster evidence checklist
+## Appendix G.8 — Digital Instrument Cluster evidence checklist
 
 - (CLUSTER-EV-01) Stakeholder requirements reviewed and approved
 - (CLUSTER-EV-02) Vehicle requirements baselined
@@ -3712,7 +3712,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (CLUSTER-EV-19) Open issues dispositioned
 - (CLUSTER-EV-20) Release notes and baseline identifiers prepared
 
-## Appendix G — Vehicle Gateway evidence checklist
+## Appendix G.9 — Vehicle Gateway evidence checklist
 
 - (GATEWAY-EV-01) Stakeholder requirements reviewed and approved
 - (GATEWAY-EV-02) Vehicle requirements baselined
@@ -3735,7 +3735,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (GATEWAY-EV-19) Open issues dispositioned
 - (GATEWAY-EV-20) Release notes and baseline identifiers prepared
 
-## Appendix G — Zonal Architecture evidence checklist
+## Appendix G.10 — Zonal Architecture evidence checklist
 
 - (ZONAL-EV-01) Stakeholder requirements reviewed and approved
 - (ZONAL-EV-02) Vehicle requirements baselined
@@ -3872,7 +3872,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 19. Describes safety intent but omits detection and safe-state expectations.
 20. Lists test methods inside the requirement instead of the required behavior itself.
 
-## Appendix K — Adaptive Cruise Control typical pitfalls
+## Appendix K.1 — Adaptive Cruise Control typical pitfalls
 
 - (ACC-PIT-01) Treating the feature description as if it were already a requirement baseline.
 - (ACC-PIT-02) Underestimating interface timing and freshness constraints.
@@ -3887,7 +3887,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (ACC-PIT-11) Ignoring manufacturing and commissioning constraints until SOP pressure is high.
 - (ACC-PIT-12) Recording logs that are rich for developers but unusable for workshops or field operations.
 
-## Appendix K — Automatic Emergency Braking typical pitfalls
+## Appendix K.2 — Automatic Emergency Braking typical pitfalls
 
 - (AEB-PIT-01) Treating the feature description as if it were already a requirement baseline.
 - (AEB-PIT-02) Underestimating interface timing and freshness constraints.
@@ -3902,7 +3902,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (AEB-PIT-11) Ignoring manufacturing and commissioning constraints until SOP pressure is high.
 - (AEB-PIT-12) Recording logs that are rich for developers but unusable for workshops or field operations.
 
-## Appendix K — Lane Keeping Assist typical pitfalls
+## Appendix K.3 — Lane Keeping Assist typical pitfalls
 
 - (LKA-PIT-01) Treating the feature description as if it were already a requirement baseline.
 - (LKA-PIT-02) Underestimating interface timing and freshness constraints.
@@ -3917,7 +3917,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (LKA-PIT-11) Ignoring manufacturing and commissioning constraints until SOP pressure is high.
 - (LKA-PIT-12) Recording logs that are rich for developers but unusable for workshops or field operations.
 
-## Appendix K — ADAS Domain Controller typical pitfalls
+## Appendix K.4 — ADAS Domain Controller typical pitfalls
 
 - (ADC-PIT-01) Treating the feature description as if it were already a requirement baseline.
 - (ADC-PIT-02) Underestimating interface timing and freshness constraints.
@@ -3932,7 +3932,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (ADC-PIT-11) Ignoring manufacturing and commissioning constraints until SOP pressure is high.
 - (ADC-PIT-12) Recording logs that are rich for developers but unusable for workshops or field operations.
 
-## Appendix K — Telematics Control Unit typical pitfalls
+## Appendix K.5 — Telematics Control Unit typical pitfalls
 
 - (TCU-PIT-01) Treating the feature description as if it were already a requirement baseline.
 - (TCU-PIT-02) Underestimating interface timing and freshness constraints.
@@ -3947,7 +3947,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (TCU-PIT-11) Ignoring manufacturing and commissioning constraints until SOP pressure is high.
 - (TCU-PIT-12) Recording logs that are rich for developers but unusable for workshops or field operations.
 
-## Appendix K — eCall System typical pitfalls
+## Appendix K.6 — eCall System typical pitfalls
 
 - (ECALL-PIT-01) Treating the feature description as if it were already a requirement baseline.
 - (ECALL-PIT-02) Underestimating interface timing and freshness constraints.
@@ -3962,7 +3962,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (ECALL-PIT-11) Ignoring manufacturing and commissioning constraints until SOP pressure is high.
 - (ECALL-PIT-12) Recording logs that are rich for developers but unusable for workshops or field operations.
 
-## Appendix K — Over-the-Air Update System typical pitfalls
+## Appendix K.7 — Over-the-Air Update System typical pitfalls
 
 - (OTA-PIT-01) Treating the feature description as if it were already a requirement baseline.
 - (OTA-PIT-02) Underestimating interface timing and freshness constraints.
@@ -3977,7 +3977,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (OTA-PIT-11) Ignoring manufacturing and commissioning constraints until SOP pressure is high.
 - (OTA-PIT-12) Recording logs that are rich for developers but unusable for workshops or field operations.
 
-## Appendix K — Digital Instrument Cluster typical pitfalls
+## Appendix K.8 — Digital Instrument Cluster typical pitfalls
 
 - (CLUSTER-PIT-01) Treating the feature description as if it were already a requirement baseline.
 - (CLUSTER-PIT-02) Underestimating interface timing and freshness constraints.
@@ -3992,7 +3992,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (CLUSTER-PIT-11) Ignoring manufacturing and commissioning constraints until SOP pressure is high.
 - (CLUSTER-PIT-12) Recording logs that are rich for developers but unusable for workshops or field operations.
 
-## Appendix K — Vehicle Gateway typical pitfalls
+## Appendix K.9 — Vehicle Gateway typical pitfalls
 
 - (GATEWAY-PIT-01) Treating the feature description as if it were already a requirement baseline.
 - (GATEWAY-PIT-02) Underestimating interface timing and freshness constraints.
@@ -4007,7 +4007,7 @@ A mature automotive requirements engineer does more than write sentences. The ma
 - (GATEWAY-PIT-11) Ignoring manufacturing and commissioning constraints until SOP pressure is high.
 - (GATEWAY-PIT-12) Recording logs that are rich for developers but unusable for workshops or field operations.
 
-## Appendix K — Zonal Architecture typical pitfalls
+## Appendix K.10 — Zonal Architecture typical pitfalls
 
 - (ZONAL-PIT-01) Treating the feature description as if it were already a requirement baseline.
 - (ZONAL-PIT-02) Underestimating interface timing and freshness constraints.
