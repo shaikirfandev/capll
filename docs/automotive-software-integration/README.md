@@ -46,8 +46,8 @@ A complete, industry-grade learning and reference document covering **ADAS, Info
 | 21 | [part-21-senior-lead-architect.md](part-21-senior-lead-architect.md) | Senior/Lead/Architect Level |
 | 22 | [part-22-production-artifacts.md](part-22-production-artifacts.md) | Production-Ready Artifacts |
 | 23 | [part-23-code-scripting.md](part-23-code-scripting.md) | Code & Scripting Examples |
-| 24 | [part-24-interview-preparation.md](part-24-interview-preparation.md) | Interview Preparation (400 Q&A) |
-| 25 | [part-25-star-scenarios.md](part-25-star-scenarios.md) | STAR Scenarios (50+) |
+| 24 | [part-24-interview-preparation.md](part-24-interview-preparation.md) | Interview Preparation (Q&A: beginner to architect) |
+| 25 | [part-25-star-scenarios.md](part-25-star-scenarios.md) | STAR Scenarios (12 detailed scenarios) |
 | 26 | [part-26-capstone-project.md](part-26-capstone-project.md) | Capstone: Multi-Domain Integration |
 
 ---

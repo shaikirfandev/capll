@@ -20,6 +20,9 @@
 #define SPEED_EVENTGROUP_ID  0x0001
 
 std::shared_ptr<vsomeip::application> app;
+std::mutex init_mutex;
+std::condition_variable init_cv;
+bool app_ready = false;
 
 void run() {
     // Initialize vsomeip application
@@ -37,7 +40,14 @@ void run() {
                      vsomeip::event_type_e::ET_EVENT, 
                      std::chrono::milliseconds(100));  // 100ms periodic
 
-    app->start();
+    // Signal that the application is initialized
+    {
+        std::lock_guard<std::mutex> lk(init_mutex);
+        app_ready = true;
+    }
+    init_cv.notify_one();
+
+    app->start();  // blocks until app->stop() is called
 }
 
 void publish_speed(float speed_kmh) {
@@ -53,17 +63,24 @@ void publish_speed(float speed_kmh) {
 }
 
 int main() {
-    std::thread t(run);         // start vsomeip in background
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));  // wait for init
+    std::thread t(run);
 
-    // Simulate speed changes
+    // Wait until vsomeip is fully initialized before publishing
+    {
+        std::unique_lock<std::mutex> lk(init_mutex);
+        init_cv.wait(lk, [] { return app_ready; });
+    }
+
+    // Simulate speed changes for 60 seconds then stop
     float speed = 0.0f;
-    while (true) {
+    for (int i = 0; i < 600; ++i) {
         publish_speed(speed);
         speed += 1.0f;
         if (speed > 120.0f) speed = 0.0f;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+
+    app->stop();
     t.join();
     return 0;
 }
