@@ -132,7 +132,7 @@ Verification: 5-point speed sweep test pass required before release
 This class of bug (wrong gauge value due to DBC factor/offset) can recur whenever:
   - A new DBC version is integrated
   - A new CAN signal database tool is used
-  - Platform sharing introduces a different DBC for a different variant
+  - Platform sharing introdu  ces a different DBC for a different variant
 
 Detection checklist on EVERY DBC version change:
   □ Run DBC diff: compare factor, offset, startBit, length for every signal

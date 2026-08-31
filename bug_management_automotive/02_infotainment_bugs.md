@@ -25,6 +25,7 @@
 
 ## 2. Bug Scenario 1 — Navigation ANR After 45 Minutes of Continuous Use
 
+
 ### Bug Description
 **Title:** Navigation app becomes unresponsive (ANR) after 40–50 min of active route guidance  
 **Severity:** P1 — Customer-visible feature failure  

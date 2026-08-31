@@ -19,7 +19,7 @@
 **T — Task**
 > My task was to verify that ACC correctly deactivates and raises a fault when the forward
 > radar signal is lost — a safety-critical requirement under ISO 26262 ASIL-B. The
-> requirement stated: "ACC shall deactivate within 100ms of radar message timeout and
+> requirement stated: "ACC shall deactivate within 100ms of radar message timeout andtrad
 > log a U0401 DTC."
 
 **A — Action**

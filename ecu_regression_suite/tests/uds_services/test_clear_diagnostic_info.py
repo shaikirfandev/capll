@@ -27,7 +27,7 @@ def test_clear_dtc_extended_session(
     record = TestRecord(
         test_id="service/0x14-clear_dtc",
         category="service",
-        service_id="0x14",
+        service_id="0x14",85
         session="extended",
     )
     try:
